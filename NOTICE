@@ -1,0 +1,11 @@
+Third-party notices
+=====================
+
+This project links against wry (https://github.com/tauri-apps/wry).
+
+wry is dual-licensed under Apache-2.0 OR MIT. tkwry uses wry under the MIT
+license terms. Relevant copyright:
+
+    Copyright (c) 2020-2023 Ngo Iok Ui & Tauri Programme within The Commons Conservancy
+
+See wry's LICENSE-MIT in its repository for the full text.

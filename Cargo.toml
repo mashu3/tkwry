@@ -1,0 +1,44 @@
+[package]
+name = "tkwry"
+version = "0.0.1"
+edition = "2021"
+description = "Tkinter WebView widget backed by wry"
+license = "MIT"
+
+[lib]
+name = "tkwry"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.28", features = ["abi3-py310"] }
+wry = { version = "0.55", features = ["devtools"] }
+raw-window-handle = "0.6"
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+gtk = "0.18"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+libc = "0.2"
+objc2 = { version = "0.6", features = ["exception"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "block2",
+    "objc2-core-foundation",
+    "NSEvent",
+    "NSView",
+    "NSWindow",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "block2",
+    "objc2-core-foundation",
+    "NSGeometry",
+    "NSRunLoop",
+    "NSNotification",
+    "NSOperation",
+] }
+
+[profile.release]
+lto = true
+codegen-units = 1

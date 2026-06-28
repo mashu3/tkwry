@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libglib2.0-dev
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install "ruff>=0.9"
+
+      - name: Ruff
+        run: ruff check tkwry tests examples
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - run: cargo fmt --check
+
+      - name: Clippy
+        env:
+          # setup-python points PKG_CONFIG_PATH at Python only; use system GTK.
+          PKG_CONFIG_PATH: ""
+        run: cargo clippy -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libglib2.0-dev \
+            xvfb
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin pytest
+
+      - name: Build and install
+        shell: bash
+        env:
+          PKG_CONFIG_PATH: ""
+        run: |
+          maturin build --release --out dist
+          pip install dist/*.whl
+
+      - name: Configure Tcl/Tk (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "TCL_LIBRARY=${pythonLocation}/tcl/tcl8.6" >> "$GITHUB_ENV"
+          echo "TK_LIBRARY=${pythonLocation}/tcl/tk8.6" >> "$GITHUB_ENV"
+
+      - name: Run tests (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          DISPLAY: :99
+          TK_SILENCE_DEPRECATION: "1"
+        run: xvfb-run -a pytest tests/ -v
+
+      - name: Run tests (Windows / macOS)
+        if: runner.os != 'Linux'
+        shell: bash
+        env:
+          TK_SILENCE_DEPRECATION: "1"
+        run: pytest tests/ -v

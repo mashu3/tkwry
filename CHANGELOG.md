@@ -1,0 +1,31 @@
+# Changelog
+
+All notable changes to this project are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [0.0.1] - 2026-06-23
+
+### Added
+
+- `WebView` widget — embed wry as a true child of a Tkinter `Frame` (HWND / NSView / X11)
+- Layout sync for `pack`, `grid`, `place`, tabs, and `PanedWindow`
+- IPC bridge (`window.ipc.postMessage`) with Tk-thread queueing
+- Navigation hooks: `on_navigation`, `on_page_load`, `on_title_changed`, `on_new_window`
+- Native OS drag-and-drop into the WebView (`drag_drop_handler`, `DragDropEvent`)
+- `load_url`, `load_html`, `reload`, `eval_js`, `eval_js_with_callback`
+- DevTools, `focus`, `background_color`, `user_agent`, `initialization_script`
+- URL normalization and `http`/`https` validation
+- Pre-built **abi3** wheels for Windows (x86_64) and macOS (arm64 + Intel)
+- Examples: `url_demo`, `ipc_demo`, `multi_demo`, `plotly_demo`, `dnd_demo`
+- CI on Linux (Xvfb + WebKitGTK), Windows, and macOS
+
+### Known limitations
+
+- **Alpha** — APIs may change without notice
+- **macOS** — child `Frame`s share the toplevel content view; tkwry syncs bounds and visibility automatically (including `ttk.Notebook` tabs)
+- **Linux** — no PyPI wheels; build from source with WebKitGTK 4.1
+- **DevTools** — uses private APIs on macOS; avoid in App Store release builds
+- Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
+
+[0.0.1]: https://github.com/mashu3/tkwry/releases/tag/v0.0.1

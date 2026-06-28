@@ -1,0 +1,70 @@
+[project]
+name = "tkwry"
+dynamic = ["version"]
+description = "Keep Tkinter — embed a real system WebView in your Frame (wry, child-window embedding)"
+authors = [
+    { name = "mashu3" },
+]
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+keywords = ["tkinter", "webview", "wry", "gui"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: User Interfaces",
+]
+
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/mashu3/tkwry"
+Repository = "https://github.com/mashu3/tkwry"
+Documentation = "https://github.com/mashu3/tkwry#readme"
+"Bug Tracker" = "https://github.com/mashu3/tkwry/issues"
+Changelog = "https://github.com/mashu3/tkwry/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = [
+    "maturin>=1.0",
+    "pytest>=8.0",
+    "ruff>=0.9",
+]
+
+[build-system]
+requires = ["maturin>=1.0,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+python-source = "."
+module-name = "tkwry._core"
+features = ["pyo3/abi3-py310"]
+exclude = ["**/__pycache__/**", "**/*.py[cod]"]
+editable-profile = "release"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["UP045"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-v"]
+markers = [
+    "integration: requires display and native WebView",
+]

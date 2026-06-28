@@ -1,0 +1,33 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+dist/
+dist-test/
+build/
+target/
+*.egg-info/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+
+# Local / private
+NOTES.md
+.env
+.env.*
+*.local
+*競合*
+*conflicted copy*
+
+# Built extension modules
+*.so
+*.pyd
+*.dylib
+*.whl
+tkwry/_core*.so
+tkwry/_core*.pyd
