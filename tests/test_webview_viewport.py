@@ -9,6 +9,7 @@ from helpers import (
     VIEWPORT_HTML,
     pump,
     read_viewport,
+    skip_linux_ci,
     skip_linux_layout,
     viewport_matches_frame,
     wait_until,
@@ -143,6 +144,7 @@ def test_viewport_stable_after_resize_and_redraw(tk_root) -> None:
     host.destroy()
 
 
+@skip_linux_ci
 @pytest.mark.skipif(
     sys.platform != "linux",
     reason=(

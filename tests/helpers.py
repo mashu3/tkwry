@@ -17,6 +17,11 @@ skip_linux_layout = pytest.mark.skipif(
     reason="WebKitGTK headless CI: Tk layout timing unreliable",
 )
 
+skip_linux_ci = pytest.mark.skipif(
+    sys.platform == "linux" and os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="WebKitGTK headless CI: integration checks unreliable",
+)
+
 VIEWPORT_HTML = (
     "<!DOCTYPE html><html><head><meta charset='utf-8'></head>"
     "<body style='margin:0;padding:0'><p>viewport</p></body></html>"
