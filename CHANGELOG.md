@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.0.2] - 2026-07-01
+
+### Fixed
+
+- WebView bounds sync after `pack`/`grid`/`place` and on initial embed (Windows WebView2 layout glitches)
+- Page-load event drain only when an `on_page_load` handler is set
+
+### Added
+
+- Integration tests for layout bounds sync and JS viewport size on Windows
+
 ## [0.0.1] - 2026-06-23
 
 ### Added
@@ -28,4 +39,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.0.2]: https://github.com/mashu3/tkwry/releases/tag/v0.0.2
 [0.0.1]: https://github.com/mashu3/tkwry/releases/tag/v0.0.1
