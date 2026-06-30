@@ -28,6 +28,10 @@ NOTES.md
 *.so
 *.pyd
 *.dylib
+*.pdb
+*.dll
+*.exp
+*.lib
 *.whl
 tkwry/_core*.so
 tkwry/_core*.pyd

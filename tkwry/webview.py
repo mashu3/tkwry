@@ -335,12 +335,15 @@ class WebView:
 
     def pack(self, **kwargs) -> None:
         self._frame.pack(**kwargs)
+        self._schedule_bounds_sync()
 
     def grid(self, **kwargs) -> None:
         self._frame.grid(**kwargs)
+        self._schedule_bounds_sync()
 
     def place(self, **kwargs) -> None:
         self._frame.place(**kwargs)
+        self._schedule_bounds_sync()
 
     @property
     def url(self) -> Optional[str]:
@@ -530,13 +533,11 @@ class WebView:
         self._eval_queue.put(result)
 
     def _deliver_page_load_events(self) -> None:
+        page_load = self._on_page_load
         native = self._webview
-        if native is None:
+        if native is None or page_load is None:
             return
         pending = native.drain_page_load_events()
-        page_load = self._on_page_load
-        if page_load is None:
-            return
         for event, page_url in pending:
             page_load(event, page_url)
 
@@ -624,6 +625,7 @@ class WebView:
         if self._destroyed or self._webview is not None:
             return
 
+        self._frame.update_idletasks()
         width = max(self._frame.winfo_width(), 1)
         height = max(self._frame.winfo_height(), 1)
         if width <= 1 or height <= 1:
@@ -674,6 +676,7 @@ class WebView:
         self._pending_url = None
         self._pending_html = None
         self._sync_bounds()
+        self._schedule_bounds_sync()
         if sys.platform == "darwin" and self._webview is not None:
             toplevel = self._frame.winfo_toplevel()
             _ensure_mac_wakeup_pipe(toplevel, self._webview)
@@ -706,6 +709,12 @@ class WebView:
             return True
         except tk.TclError:
             return False
+
+    def _schedule_bounds_sync(self) -> None:
+        if self._destroyed:
+            return
+        self._frame.update_idletasks()
+        self._frame.after_idle(self._sync_bounds)
 
     def _sync_bounds(self) -> None:
         if self._webview is None:
