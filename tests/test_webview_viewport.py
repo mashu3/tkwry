@@ -145,7 +145,10 @@ def test_viewport_stable_after_resize_and_redraw(tk_root) -> None:
 
 @pytest.mark.skipif(
     sys.platform != "linux",
-    reason="eval_js_with_callback viewport check is WebKitGTK-only; IPC covers macOS and Windows",
+    reason=(
+        "eval_js_with_callback viewport check is WebKitGTK-only; "
+        "IPC covers macOS and Windows"
+    ),
 )
 def test_viewport_via_eval_callback_matches_frame(tk_root) -> None:
     """``eval_js_with_callback`` path must agree with Tk frame size after page load."""
