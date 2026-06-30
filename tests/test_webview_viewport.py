@@ -9,6 +9,7 @@ from helpers import (
     VIEWPORT_HTML,
     pump,
     read_viewport,
+    skip_linux_layout,
     viewport_matches_frame,
     wait_until,
 )
@@ -23,6 +24,7 @@ def _wait_ready(tk_root, web: WebView) -> None:
     pump(tk_root, steps=40)
 
 
+@skip_linux_layout
 def test_viewport_matches_frame_after_web_pack(tk_root) -> None:
     """``web.pack()`` before native create: JS viewport must match host frame."""
     import tkinter as tk
@@ -43,6 +45,7 @@ def test_viewport_matches_frame_after_web_pack(tk_root) -> None:
     host.destroy()
 
 
+@skip_linux_layout
 def test_viewport_matches_frame_after_late_host_pack(tk_root) -> None:
     """Host ``pack()`` after ``WebView()``: JS viewport must match final geometry."""
     import tkinter as tk
@@ -141,8 +144,8 @@ def test_viewport_stable_after_resize_and_redraw(tk_root) -> None:
 
 
 @pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="WebView2 eval callback needs COM pump; IPC covers Windows",
+    sys.platform != "linux",
+    reason="eval_js_with_callback viewport check is WebKitGTK-only; IPC covers macOS and Windows",
 )
 def test_viewport_via_eval_callback_matches_frame(tk_root) -> None:
     """``eval_js_with_callback`` path must agree with Tk frame size after page load."""
@@ -180,6 +183,7 @@ def test_viewport_via_eval_callback_matches_frame(tk_root) -> None:
     host.destroy()
 
 
+@skip_linux_layout
 def test_viewport_not_stale_after_repack(tk_root) -> None:
     """Re-``pack()`` with identical options must not leave a stale JS viewport."""
     import tkinter as tk

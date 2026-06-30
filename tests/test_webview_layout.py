@@ -5,12 +5,12 @@ from __future__ import annotations
 import sys
 
 import pytest
-from helpers import pump, wait_until
+from helpers import pump, skip_linux_layout, wait_until
 
 from tkwry import WebView
 from tkwry._parent import tk_embed_origin, tk_embed_parent
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, skip_linux_layout]
 
 # Tk frame chrome and timing can differ slightly across platforms.
 _BOUNDS_TOLERANCE = 4

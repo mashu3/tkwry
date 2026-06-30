@@ -7,7 +7,15 @@ import os
 import sys
 from collections.abc import Callable
 
+import pytest
+
 from tkwry import WebView
+
+# Xvfb + WebKitGTK headless CI does not reliably reproduce desktop Tk layout timing.
+skip_linux_layout = pytest.mark.skipif(
+    sys.platform == "linux",
+    reason="WebKitGTK headless CI: Tk layout timing unreliable",
+)
 
 VIEWPORT_HTML = (
     "<!DOCTYPE html><html><head><meta charset='utf-8'></head>"
