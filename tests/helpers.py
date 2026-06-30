@@ -47,7 +47,10 @@ def wait_until(root, predicate: Callable[[], bool], *, steps: int = 100) -> bool
 def read_viewport_via_callback(
     web: WebView, root, *, steps: int = 200
 ) -> tuple[int, int] | None:
-    """Return viewport size using ``eval_js_with_callback`` (requires fresh native build)."""
+    """Return viewport size via ``eval_js_with_callback``.
+
+    Requires a native build that supports script callbacks.
+    """
     import json
 
     results: list[tuple[int, int]] = []

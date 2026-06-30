@@ -64,7 +64,10 @@ def test_viewport_matches_frame_after_late_host_pack(tk_root) -> None:
     host.destroy()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows WebView2 layout regression")
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows WebView2 layout",
+)
 def test_viewport_shrinks_after_sibling_pack(tk_root) -> None:
     """Packing a header after WebView exists must shrink JS viewport height."""
     import tkinter as tk
@@ -103,9 +106,12 @@ def test_viewport_shrinks_after_sibling_pack(tk_root) -> None:
     body.destroy()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows WebView2 layout regression")
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows WebView2 layout",
+)
 def test_viewport_stable_after_resize_and_redraw(tk_root) -> None:
-    """Resize + redraw must leave JS viewport matching frame and unchanged on re-read."""
+    """Resize/redraw keeps JS viewport matching the frame on re-read."""
     import tkinter as tk
 
     tk_root.geometry("520x380")
@@ -136,7 +142,7 @@ def test_viewport_stable_after_resize_and_redraw(tk_root) -> None:
 
 @pytest.mark.skipif(
     sys.platform == "win32",
-    reason="WebView2 eval_js_with_callback needs a COM message pump; IPC covers viewport on Windows",
+    reason="WebView2 eval callback needs COM pump; IPC covers Windows",
 )
 def test_viewport_via_eval_callback_matches_frame(tk_root) -> None:
     """``eval_js_with_callback`` path must agree with Tk frame size after page load."""
@@ -166,7 +172,8 @@ def test_viewport_via_eval_callback_matches_frame(tk_root) -> None:
 
     viewport = read_viewport_via_callback(web, tk_root, steps=300)
     assert viewport_matches_frame(viewport, host), (
-        f"callback viewport={viewport}, frame={host.winfo_width()}x{host.winfo_height()}"
+        f"callback viewport={viewport}, "
+        f"frame={host.winfo_width()}x{host.winfo_height()}"
     )
 
     web.destroy()

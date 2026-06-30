@@ -63,7 +63,8 @@ def test_bounds_synced_when_web_packed_before_create(tk_root) -> None:
     expected = _expected_bounds(host)
     assert host.winfo_width() > 100 and host.winfo_height() > 100
     assert _close(records, expected), (
-        f"expected bounds {expected}, last set_bounds={records[-1] if records else None}, "
+        f"expected bounds {expected}, "
+        f"last set_bounds={records[-1] if records else None}, "
         f"host=({host.winfo_width()}x{host.winfo_height()})"
     )
 
@@ -157,7 +158,8 @@ def test_bounds_shrink_when_sibling_packed_after_create(tk_root) -> None:
     host.update_idletasks()
     after_h = host.winfo_height()
     assert after_h < before_h - 30, (
-        f"host height should shrink after header pack: before={before_h} after={after_h}"
+        f"host height should shrink after header pack: "
+        f"before={before_h} after={after_h}"
     )
 
     records = _attach_sync_recorder(web)
@@ -174,7 +176,10 @@ def test_bounds_shrink_when_sibling_packed_after_create(tk_root) -> None:
     body.destroy()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows WebView2 layout regression")
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows WebView2 layout",
+)
 def test_bounds_without_manual_sync_after_sibling_pack(tk_root) -> None:
     """Sibling pack must trigger bounds sync without calling _sync_bounds manually."""
     import tkinter as tk
@@ -219,7 +224,10 @@ def test_bounds_after_fixed_size_frame_without_propagate(tk_root) -> None:
     host.pack_propagate(False)
     host.pack(padx=20, pady=20)
 
-    web = WebView(host, html="<body style='margin:0;display:grid;place-items:center'>x</body>")
+    web = WebView(
+        host,
+        html="<body style='margin:0;display:grid;place-items:center'>x</body>",
+    )
     assert wait_until(tk_root, lambda: web.native is not None)
     pump(tk_root, steps=40)
 

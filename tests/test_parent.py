@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import tkinter as tk
-
 from tkwry._parent import EmbedParent, tk_embed_origin, tk_embed_parent
 
 
