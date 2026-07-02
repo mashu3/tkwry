@@ -194,27 +194,28 @@ impl WebView {
         };
 
         let newwin_cb_clone = newwin_cb.clone();
-        let newwin_handler =
-            move |url: String, _features: wry::NewWindowFeatures| -> wry::NewWindowResponse {
-                Python::attach(|py| {
-                    if let Ok(guard) = newwin_cb_clone.lock() {
-                        if let Some(ref func) = *guard {
-                            match func.call1(py, (url.as_str(),)) {
-                                Ok(result) => {
-                                    if let Ok(resp) = result.extract::<NewWindowResponse>(py) {
-                                        return match resp {
-                                            NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
-                                            NewWindowResponse::Allow => wry::NewWindowResponse::Allow,
-                                        };
-                                    }
+        let newwin_handler = move |url: String,
+                                   _features: wry::NewWindowFeatures|
+              -> wry::NewWindowResponse {
+            Python::attach(|py| {
+                if let Ok(guard) = newwin_cb_clone.lock() {
+                    if let Some(ref func) = *guard {
+                        match func.call1(py, (url.as_str(),)) {
+                            Ok(result) => {
+                                if let Ok(resp) = result.extract::<NewWindowResponse>(py) {
+                                    return match resp {
+                                        NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
+                                        NewWindowResponse::Allow => wry::NewWindowResponse::Allow,
+                                    };
                                 }
-                                Err(err) => report_py_error(py, err),
                             }
+                            Err(err) => report_py_error(py, err),
                         }
                     }
-                    wry::NewWindowResponse::Allow
-                })
-            };
+                }
+                wry::NewWindowResponse::Allow
+            })
+        };
 
         let drag_drop_cb_clone = drag_drop_cb.clone();
         let drag_drop_handler = move |event: wry::DragDropEvent| -> bool {

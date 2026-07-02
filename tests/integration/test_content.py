@@ -52,10 +52,14 @@ def test_initial_url_loads_after_bounds_sync(tk_root) -> None:
     web = WebView(frame, url="https://example.com")
 
     assert wait_until(tk_root, lambda: web.ready, steps=200)
-    pump(tk_root, steps=30)
 
-    assert web.url is not None
-    assert web.url.startswith("https://example.com")
+    def url_loaded() -> bool:
+        if not web.ready:
+            return False
+        current = web.url
+        return current is not None and current.startswith("https://example.com")
+
+    assert wait_until(tk_root, url_loaded, steps=400), f"url={web.url!r}"
 
     web.destroy()
     frame.destroy()

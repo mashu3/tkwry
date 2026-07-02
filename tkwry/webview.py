@@ -859,6 +859,12 @@ class WebView:
         self._flush_load_scheduled = True
         self._frame.after_idle(self._flush_load)
 
+    def _initial_load_attempts(self) -> int:
+        """Headless Linux and macOS may need a second navigation after compositing."""
+        if sys.platform in ("darwin", "linux"):
+            return 2
+        return 1
+
     def _schedule_initial_load(self) -> None:
         if self._initial_load is None:
             return
@@ -867,6 +873,9 @@ class WebView:
         if sys.platform == "darwin":
             # WKWebView may paint blank when navigation runs before compositing.
             toplevel.after(200, self._run_initial_load)
+        elif sys.platform == "linux":
+            # WebKitGTK needs extra GTK time in headless CI before URL settles.
+            toplevel.after(150, self._run_initial_load)
 
     def _run_initial_load(self) -> None:
         load = self._initial_load
@@ -885,11 +894,12 @@ class WebView:
             traceback.print_exc()
             return
         self._sync_bounds()
-        self._service_linux_events()
+        gtk_rounds = 128 if sys.platform == "linux" else 32
+        self._service_linux_events(gtk_rounds=gtk_rounds)
         if self._on_page_load is not None:
             self._ensure_event_poll()
         self._initial_load_attempt += 1
-        if sys.platform != "darwin" or self._initial_load_attempt >= 2:
+        if self._initial_load_attempt >= self._initial_load_attempts():
             self._initial_load = None
 
     def _flush_load(self) -> None:
