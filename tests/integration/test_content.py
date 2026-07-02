@@ -47,19 +47,17 @@ def test_load_html_supersedes_pending_url_before_create(tk_root) -> None:
     frame.destroy()
 
 
-def test_initial_url_loads_after_bounds_sync(tk_root) -> None:
+def test_initial_load_runs_after_bounds_sync(tk_root) -> None:
+    """Deferred initial content load completes after bounds sync (no network)."""
     frame = host_frame(tk_root)
-    web = WebView(frame, url="https://example.com")
+    web = WebView(frame, html="<title>deferred</title><p>sync</p>")
 
     assert wait_until(tk_root, lambda: web.ready, steps=200)
-
-    def url_loaded() -> bool:
-        if not web.ready:
-            return False
-        current = web.url
-        return current is not None and current.startswith("https://example.com")
-
-    assert wait_until(tk_root, url_loaded, steps=400), f"url={web.url!r}"
+    assert wait_until(
+        tk_root,
+        lambda: web.ready and web._initial_load is None,
+        steps=400,
+    ), f"initial_load still pending: {web._initial_load!r}"
 
     web.destroy()
     frame.destroy()
