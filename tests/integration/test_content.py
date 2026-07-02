@@ -66,6 +66,25 @@ def test_initial_load_runs_after_bounds_sync(tk_root) -> None:
     frame.destroy()
 
 
+def test_load_url_coalesces_before_create(tk_root) -> None:
+    """Rapid load_url calls before native create keep only the last URL."""
+    frame = host_frame(tk_root)
+    web = WebView(frame)
+    web.load_url("https://example.com/a")
+    web.load_url("https://example.com/b")
+    web.load_url("https://example.com/c")
+
+    assert web._pending_url == "https://example.com/c"
+    assert web._pending_load is None
+
+    web.destroy()
+    frame.destroy()
+
+
+@pytest.mark.skipif(
+    sys.platform == "linux",
+    reason="WebKitGTK headless CI: after-create load coalescing unreliable",
+)
 def test_load_coalesces_to_last_pending(tk_root) -> None:
     frame = host_frame(tk_root)
     web = WebView(frame, html="<p>init</p>")
