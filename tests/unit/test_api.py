@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from tkwry._core import WebView as NativeWebView
+
 import tkwry
 from tkwry import (
     DragDropEvent,
@@ -12,7 +14,6 @@ from tkwry import (
     PageLoadEvent,
     WebView,
 )
-from tkwry._core import WebView as NativeWebView
 
 WEBVIEW_METHODS = (
     "bind",

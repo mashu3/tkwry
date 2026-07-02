@@ -10,8 +10,6 @@ import tkinter as tk
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Optional
 
-from tkwry.exceptions import WebViewDestroyedError, WebViewNotReadyError
-
 from tkwry._core import (
     DragDropEvent,
     NewWindowResponse,
@@ -23,6 +21,7 @@ from tkwry._core import (
 from tkwry._parent import tk_embed_origin, tk_embed_parent
 from tkwry._runtime import GtkPump
 from tkwry._url import _normalize_url, _validate_url
+from tkwry.exceptions import WebViewDestroyedError, WebViewNotReadyError
 
 if TYPE_CHECKING:
     from tkwry._core import WebView as NativeWebViewType

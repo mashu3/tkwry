@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 
 import pytest
-
 from support.tk import pump, skip_linux_ci, skip_linux_layout, wait_ready, wait_until
 from support.viewport import (
     VIEWPORT_HTML,
@@ -13,6 +12,7 @@ from support.viewport import (
     read_viewport_via_callback,
     viewport_matches_frame,
 )
+
 from tkwry import PageLoadEvent, WebView
 
 

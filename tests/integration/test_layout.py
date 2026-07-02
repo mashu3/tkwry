@@ -5,9 +5,9 @@ from __future__ import annotations
 import sys
 
 import pytest
-
 from support.layout import attach_bounds_recorder, bounds_close, expected_bounds
 from support.tk import pump, skip_linux_layout, wait_until
+
 from tkwry import WebView
 
 pytestmark = skip_linux_layout

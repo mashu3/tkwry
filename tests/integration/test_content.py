@@ -5,8 +5,8 @@ from __future__ import annotations
 import sys
 
 import pytest
-
 from support.tk import host_frame, pump, wait_until
+
 from tkwry import DragDropEvent, PageLoadEvent, WebView
 
 

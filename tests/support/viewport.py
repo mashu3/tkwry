@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import json
 
+from support.tk import wait_until
 from tkwry import WebView
-
-from support.tk import pump, wait_until
 
 VIEWPORT_HTML = (
     "<!DOCTYPE html><html><head><meta charset='utf-8'></head>"

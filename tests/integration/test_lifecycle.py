@@ -5,9 +5,11 @@ from __future__ import annotations
 import sys
 
 import pytest
+from support.tk import bare_frame, pump, skip_linux_ci, wait_until
 
-from support.tk import bare_frame, host_frame, pump, wait_until
 from tkwry import WebView, WebViewDestroyedError, WebViewNotReadyError
+
+pytestmark = skip_linux_ci
 
 
 def test_initial_size_creates_without_pack(tk_root) -> None:

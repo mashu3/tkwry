@@ -8,8 +8,8 @@ from tkinter import ttk
 from types import SimpleNamespace
 
 import pytest
-
 from support.tk import is_github_actions
+
 from tkwry import WebView
 
 if sys.platform == "darwin":
