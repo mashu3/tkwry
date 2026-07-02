@@ -859,16 +859,21 @@ class WebView:
     def _frame_ready_for_initial_load(self) -> bool:
         """Whether the host frame is laid out enough to load content."""
         try:
-            if not self._frame.winfo_exists():
+            if not self._frame.winfo_exists() or self._webview is None:
                 return False
-            if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
-                return False
-            # Xvfb + WebKitGTK often report not viewable while the frame is usable.
+            # Creation already required a real size; Xvfb can still report 1×1 later.
             if sys.platform == "linux":
                 return True
+            if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
+                return False
             return bool(self._frame.winfo_viewable())
         except tk.TclError:
             return False
+
+    def _bump_initial_load_attempt(self) -> None:
+        self._initial_load_attempt += 1
+        if self._initial_load_attempt >= self._initial_load_attempts():
+            self._initial_load = None
 
     def _schedule_flush_load(self) -> None:
         if self._flush_load_scheduled:
@@ -899,6 +904,7 @@ class WebView:
         if load is None or self._destroyed or self._webview is None:
             return
         if not self._frame_ready_for_initial_load():
+            self._bump_initial_load_attempt()
             return
         self._sync_bounds()
         kind, payload = load
@@ -909,15 +915,14 @@ class WebView:
                 self._webview.load_html(payload)
         except Exception:
             traceback.print_exc()
-        else:
-            self._sync_bounds()
-            gtk_rounds = 128 if sys.platform == "linux" else 32
-            self._service_linux_events(gtk_rounds=gtk_rounds)
-            if self._on_page_load is not None:
-                self._ensure_event_poll()
-        self._initial_load_attempt += 1
-        if self._initial_load_attempt >= self._initial_load_attempts():
-            self._initial_load = None
+            self._bump_initial_load_attempt()
+            return
+        self._sync_bounds()
+        gtk_rounds = 64 if sys.platform == "linux" else 32
+        self._service_linux_events(gtk_rounds=gtk_rounds)
+        if self._on_page_load is not None:
+            self._ensure_event_poll()
+        self._initial_load = None
 
     def _flush_load(self) -> None:
         self._flush_load_scheduled = False

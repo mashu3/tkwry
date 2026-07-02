@@ -53,11 +53,10 @@ def test_initial_load_runs_after_bounds_sync(tk_root) -> None:
     web = WebView(frame, html="<title>deferred</title><p>sync</p>")
 
     assert wait_until(tk_root, lambda: web.ready, steps=200)
-    assert wait_until(
-        tk_root,
-        lambda: web.ready and web._initial_load is None,
-        steps=400,
-    ), f"initial_load still pending: {web._initial_load!r}"
+    pump(tk_root, steps=80)
+    assert web._initial_load is None, (
+        f"initial_load still pending: {web._initial_load!r}"
+    )
 
     web.destroy()
     frame.destroy()
