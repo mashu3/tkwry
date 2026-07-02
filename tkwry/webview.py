@@ -347,11 +347,13 @@ class WebView:
         self._pending_html: Optional[str] = html
         self._pending_load: Optional[tuple[_LoadKind, str]] = None
         self._flush_load_scheduled = False
+        self._initial_load: Optional[tuple[_LoadKind, str]] = None
+        self._initial_load_attempt = 0
 
         GtkPump.attach(frame)
         self._frame.bind("<Configure>", self._on_configure, add="+")
-        self._frame.bind("<Map>", self._on_visibility, add="+")
-        self._frame.bind("<Unmap>", self._on_visibility, add="+")
+        self._frame.bind("<Map>", self._on_map, add="+")
+        self._frame.bind("<Unmap>", self._on_unmap, add="+")
         self._frame.bind("<Destroy>", self._on_destroy, add="+")
         if sys.platform == "darwin":
             _register_macos_webview(self)
@@ -830,8 +832,8 @@ class WebView:
         self._sync_bounds()
         self._schedule_bounds_sync()
         if initial_load is not None:
-            self._pending_load = initial_load
-            self._schedule_flush_load()
+            self._initial_load = initial_load
+            self._schedule_initial_load()
         if sys.platform == "darwin" and self._webview is not None:
             toplevel = self._frame.winfo_toplevel()
             _ensure_mac_wakeup_pipe(toplevel, self._webview)
@@ -857,6 +859,39 @@ class WebView:
         self._flush_load_scheduled = True
         self._frame.after_idle(self._flush_load)
 
+    def _schedule_initial_load(self) -> None:
+        if self._initial_load is None:
+            return
+        toplevel = self._frame.winfo_toplevel()
+        toplevel.after_idle(self._run_initial_load)
+        if sys.platform == "darwin":
+            # WKWebView may paint blank when navigation runs before compositing.
+            toplevel.after(200, self._run_initial_load)
+
+    def _run_initial_load(self) -> None:
+        load = self._initial_load
+        if load is None or self._destroyed or self._webview is None:
+            return
+        if not self._frame.winfo_viewable():
+            return
+        self._sync_bounds()
+        kind, payload = load
+        try:
+            if kind == "url":
+                self._webview.load_url(payload)
+            else:
+                self._webview.load_html(payload)
+        except Exception:
+            traceback.print_exc()
+            return
+        self._sync_bounds()
+        self._service_linux_events()
+        if self._on_page_load is not None:
+            self._ensure_event_poll()
+        self._initial_load_attempt += 1
+        if sys.platform != "darwin" or self._initial_load_attempt >= 2:
+            self._initial_load = None
+
     def _flush_load(self) -> None:
         self._flush_load_scheduled = False
         if self._destroyed or self._webview is None or self._pending_load is None:
@@ -867,6 +902,7 @@ class WebView:
             self._webview.load_url(payload)
         else:
             self._webview.load_html(payload)
+        self._sync_bounds()
         self._service_linux_events()
         if self._on_page_load is not None:
             self._ensure_event_poll()
@@ -910,7 +946,12 @@ class WebView:
         else:
             self._sync_bounds()
 
-    def _on_visibility(self, event: tk.Event) -> None:
+    def _on_map(self, event: tk.Event) -> None:
+        if event.widget is self._frame:
+            self._frame.after_idle(self._sync_bounds)
+            self._frame.after_idle(self._run_initial_load)
+
+    def _on_unmap(self, event: tk.Event) -> None:
         if event.widget is self._frame:
             self._frame.after_idle(self._sync_bounds)
 
