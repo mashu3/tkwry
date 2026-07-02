@@ -560,6 +560,44 @@ impl WebView {
             None => None,
         })
     }
+
+    /// Release the native webview and tear down platform resources.
+    fn destroy(&self) -> PyResult<()> {
+        #[cfg(target_os = "macos")]
+        {
+            self.web_wants_keyboard.store(false, Ordering::SeqCst);
+            self.mac_tk_unfocus.store(false, Ordering::SeqCst);
+            self.wakeup_write_fd.store(-1, Ordering::SeqCst);
+            if let Ok(mut guard) = self._focus_sync.lock() {
+                *guard = None;
+            }
+        }
+
+        if let Ok(mut ipc) = self.ipc_cb.lock() {
+            *ipc = None;
+        }
+        if let Ok(mut nav) = self.nav_cb.lock() {
+            *nav = None;
+        }
+        if let Ok(mut title) = self.title_cb.lock() {
+            *title = None;
+        }
+        if let Ok(mut newwin) = self.newwin_cb.lock() {
+            *newwin = None;
+        }
+        if let Ok(mut drag) = self.drag_drop_cb.lock() {
+            *drag = None;
+        }
+
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned"))?;
+        if let Some(wv) = guard.take() {
+            let _ = wv.set_visible(false);
+        }
+        Ok(())
+    }
 }
 
 fn with_webview<F, T>(this: &WebView, f: F) -> PyResult<T>

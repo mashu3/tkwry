@@ -5,9 +5,12 @@ from __future__ import annotations
 import os
 import queue
 import sys
+import time
 import tkinter as tk
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Optional
+
+from tkwry.exceptions import WebViewDestroyedError, WebViewNotReadyError
 
 from tkwry._core import (
     DragDropEvent,
@@ -278,6 +281,8 @@ class WebView:
         self,
         frame: tk.Frame,
         *,
+        width: int = 800,
+        height: int = 600,
         url: Optional[str] = None,
         html: Optional[str] = None,
         ipc_handler: Optional[Callable[[str], None]] = None,
@@ -293,7 +298,12 @@ class WebView:
         drag_drop_handler: Optional[DragDropHandler] = None,
     ) -> None:
         self._frame = frame
+        self._init_width = max(width, 1)
+        self._init_height = max(height, 1)
+        self._early_create = width != 800 or height != 600
         self._destroyed = False
+        self._ready_callbacks: list[Callable[[], None]] = []
+        self._create_pending = False
         self._embed = tk_embed_parent(frame)
         self._webview: Optional[NativeWebViewType] = None
         self._ipc_handler = ipc_handler
@@ -331,23 +341,34 @@ class WebView:
             _register_macos_webview(self)
         if self._needs_event_poll():
             self._ensure_event_poll()
-        self._frame.after(0, self._try_create)
+        if self._creation_size() is not None or self._early_create:
+            self._schedule_try_create()
 
     def pack(self, **kwargs) -> None:
         self._frame.pack(**kwargs)
         self._schedule_bounds_sync()
+        self._schedule_try_create()
 
     def grid(self, **kwargs) -> None:
         self._frame.grid(**kwargs)
         self._schedule_bounds_sync()
+        self._schedule_try_create()
 
     def place(self, **kwargs) -> None:
         self._frame.place(**kwargs)
         self._schedule_bounds_sync()
+        self._schedule_try_create()
+
+    @property
+    def ready(self) -> bool:
+        """``True`` once the native webview has been created and not destroyed."""
+        return self._webview is not None and not self._destroyed
 
     @property
     def url(self) -> Optional[str]:
         """Current document URL, or the pending URL before creation."""
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
         if self._webview is None:
             return self._pending_url
         return self._webview.url()
@@ -362,20 +383,61 @@ class WebView:
         """``True`` after :meth:`destroy` or host-frame destruction."""
         return self._destroyed
 
+    def bind(self, sequence: str, func: Callable, add: str | None = None) -> str:
+        """Bind a Tk event on the host frame (e.g. ``\"<<WebViewReady>>\"``)."""
+        if sequence == "<<WebViewReady>>" and self.ready:
+            self._frame.after_idle(func)
+        return self._frame.bind(sequence, func, add=add)
+
+    def when_ready(self, callback: Callable[[], None]) -> None:
+        """Schedule *callback* on the Tk main thread once the native view exists."""
+        if self._destroyed:
+            return
+        if self.ready:
+            self._frame.after_idle(callback)
+        else:
+            self._ready_callbacks.append(callback)
+
+    def wait_until_ready(self, timeout: float | None = 30.0) -> bool:
+        """Pump the Tk loop until the native webview is created or *timeout* elapses."""
+        if self.ready:
+            return True
+        if self._destroyed:
+            return False
+        root = self._frame.winfo_toplevel()
+        deadline = time.monotonic() + timeout if timeout is not None else None
+        gtk_pump = None
+        if sys.platform == "linux":
+            from tkwry._core import pump_events as gtk_pump
+
+        while not self.ready and not self._destroyed:
+            if deadline is not None and time.monotonic() >= deadline:
+                return False
+            root.update_idletasks()
+            root.update()
+            if gtk_pump is not None:
+                gtk_pump()
+            root.after(10)
+            root.update()
+        return self.ready
+
     def destroy(self) -> None:
         """Hide and release the native webview without destroying the host frame."""
         if self._destroyed:
             return
         self._destroyed = True
         self._event_poll_active = False
+        self._ready_callbacks.clear()
         if sys.platform == "darwin":
             _unregister_macos_webview(self)
         if self._webview is not None:
-            self._webview.set_visible(False)
+            self._webview.destroy()
             self._webview = None
 
     def load_url(self, url: str) -> None:
         """Navigate to *url* (``http``/``https`` only; scheme optional)."""
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
         normalized = _normalize_url(url)
         _validate_url(normalized)
         if self._webview is None:
@@ -386,6 +448,8 @@ class WebView:
 
     def load_html(self, html: str) -> None:
         """Load inline HTML."""
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
         if self._webview is None:
             self._pending_html = html
             self._pending_url = None
@@ -396,64 +460,61 @@ class WebView:
             self._service_linux_events()
 
     def reload(self) -> None:
-        if self._webview is not None:
-            self._webview.reload()
-            if self._on_page_load is not None:
-                self._ensure_event_poll()
-                self._service_linux_events()
+        self._require_ready("reload")
+        self._webview.reload()
+        if self._on_page_load is not None:
+            self._ensure_event_poll()
+            self._service_linux_events()
 
     def eval_js(self, script: str) -> None:
-        if self._webview is None:
-            return
+        self._require_ready("eval_js")
         self._frame.after_idle(lambda: self._run_eval_js(script))
 
     def eval_js_with_callback(
         self, script: str, callback: EvalCallback
     ) -> None:
-        if self._webview is None:
-            return
+        self._require_ready("eval_js_with_callback")
         self._eval_callback_queue.put(callback)
         self._ensure_event_poll()
 
         def _run() -> None:
-            if self._webview is not None:
+            if self._webview is not None and not self._destroyed:
                 self._webview.eval_js_with_callback(script, self._enqueue_eval)
 
         self._frame.after_idle(_run)
 
     def focus(self) -> None:
         """Move keyboard focus to the WebView (``makeFirstResponder`` on macOS)."""
-        if self._webview is not None:
-            self._webview.focus()
-            if sys.platform == "darwin":
-                toplevel = self._frame.winfo_toplevel()
-                _set_mac_webviews_input_active(toplevel, self)
-                _release_tk_keyboard_focus(toplevel)
+        self._require_ready("focus")
+        self._webview.focus()
+        if sys.platform == "darwin":
+            toplevel = self._frame.winfo_toplevel()
+            _set_mac_webviews_input_active(toplevel, self)
+            _release_tk_keyboard_focus(toplevel)
 
     def focus_parent(self) -> None:
         """Return keyboard focus to the native parent view (macOS Tk coexistence)."""
-        if self._webview is not None:
-            self._webview.focus_parent()
-            if sys.platform == "darwin":
-                _set_mac_webviews_input_active(self._frame.winfo_toplevel(), None)
+        self._require_ready("focus_parent")
+        self._webview.focus_parent()
+        if sys.platform == "darwin":
+            _set_mac_webviews_input_active(self._frame.winfo_toplevel(), None)
 
     def set_background_color(
         self, r: int, g: int, b: int, a: int = 255
     ) -> None:
-        if self._webview is not None:
-            self._webview.set_background_color(r, g, b, a)
+        self._require_ready("set_background_color")
+        self._webview.set_background_color(r, g, b, a)
 
     def open_devtools(self) -> None:
-        if self._webview is not None:
-            self._webview.open_devtools()
+        self._require_ready("open_devtools")
+        self._webview.open_devtools()
 
     def close_devtools(self) -> None:
-        if self._webview is not None:
-            self._webview.close_devtools()
+        self._require_ready("close_devtools")
+        self._webview.close_devtools()
 
     def is_devtools_open(self) -> bool:
-        if self._webview is None:
-            return False
+        self._require_ready("is_devtools_open")
         return self._webview.is_devtools_open()
 
     def set_ipc_handler(self, handler: Optional[Callable[[str], None]]) -> None:
@@ -496,6 +557,44 @@ class WebView:
             self._webview.set_drag_drop_handler(self._native_drag_drop)
         if handler is not None:
             self._ensure_event_poll()
+
+    def _schedule_try_create(self) -> None:
+        if self._destroyed or self._webview is not None or self._create_pending:
+            return
+        self._create_pending = True
+        self._frame.after_idle(self._run_try_create)
+
+    def _run_try_create(self) -> None:
+        self._create_pending = False
+        self._try_create()
+
+    def _require_ready(self, method: str) -> None:
+        if self._destroyed:
+            raise WebViewDestroyedError(
+                f"WebView.destroy() was called; cannot call {method}()"
+            )
+        if self._webview is None:
+            raise WebViewNotReadyError(
+                f"WebView is not ready; call wait_until_ready() or bind to "
+                f"<<WebViewReady>> before calling {method}()"
+            )
+
+    def _creation_size(self) -> tuple[int, int] | None:
+        self._frame.update_idletasks()
+        frame_w = self._frame.winfo_width()
+        frame_h = self._frame.winfo_height()
+        if frame_w > 1 and frame_h > 1:
+            return frame_w, frame_h
+        if self._early_create:
+            return self._init_width, self._init_height
+        return None
+
+    def _fire_ready(self) -> None:
+        callbacks = self._ready_callbacks
+        self._ready_callbacks = []
+        self._frame.event_generate("<<WebViewReady>>", when="tail")
+        for callback in callbacks:
+            self._frame.after_idle(callback)
 
     def _needs_event_poll(self) -> bool:
         return any(
@@ -625,12 +724,10 @@ class WebView:
         if self._destroyed or self._webview is not None:
             return
 
-        self._frame.update_idletasks()
-        width = max(self._frame.winfo_width(), 1)
-        height = max(self._frame.winfo_height(), 1)
-        if width <= 1 or height <= 1:
-            self._frame.after(50, self._try_create)
+        size = self._creation_size()
+        if size is None:
             return
+        width, height = size
 
         url = self._pending_url
         if url:
@@ -686,10 +783,12 @@ class WebView:
             if sys.platform == "linux":
                 for _ in range(10):
                     self._service_linux_events()
+        self._fire_ready()
 
     def _run_eval_js(self, script: str) -> None:
-        if self._webview is not None:
-            self._webview.eval_js(script)
+        if self._destroyed or self._webview is None:
+            return
+        self._webview.eval_js(script)
 
     def _flush_load(self) -> None:
         if self._destroyed or self._webview is None or self._pending_nav is None:
@@ -730,7 +829,11 @@ class WebView:
         self._webview.set_visible(True)
 
     def _on_configure(self, event: tk.Event) -> None:
-        if event.widget is self._frame:
+        if event.widget is not self._frame or self._destroyed:
+            return
+        if self._webview is None:
+            self._schedule_try_create()
+        else:
             self._sync_bounds()
 
     def _on_visibility(self, event: tk.Event) -> None:
