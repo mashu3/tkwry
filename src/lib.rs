@@ -15,6 +15,11 @@ fn make_rect(x: f64, y: f64, width: f64, height: f64) -> wry::Rect {
     }
 }
 
+/// Print a Python exception (with traceback) to stderr from a Rust callback.
+fn report_py_error(py: Python<'_>, err: PyErr) {
+    let _ = err.print(py);
+}
+
 #[pyclass(eq, eq_int, frozen, skip_from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PageLoadEvent {
@@ -141,7 +146,9 @@ impl WebView {
             Python::attach(|py| {
                 if let Ok(guard) = ipc_cb_clone.lock() {
                     if let Some(ref func) = *guard {
-                        let _ = func.call1(py, (body,));
+                        if let Err(err) = func.call1(py, (body,)) {
+                            report_py_error(py, err);
+                        }
                     }
                 }
             });
@@ -152,8 +159,9 @@ impl WebView {
             Python::attach(|py| {
                 if let Ok(guard) = nav_cb_clone.lock() {
                     if let Some(ref func) = *guard {
-                        if let Ok(result) = func.call1(py, (url.as_str(),)) {
-                            return result.extract::<bool>(py).unwrap_or(true);
+                        match func.call1(py, (url.as_str(),)) {
+                            Ok(result) => return result.extract::<bool>(py).unwrap_or(true),
+                            Err(err) => report_py_error(py, err),
                         }
                     }
                 }
@@ -177,7 +185,9 @@ impl WebView {
             Python::attach(|py| {
                 if let Ok(guard) = title_cb_clone.lock() {
                     if let Some(ref func) = *guard {
-                        let _ = func.call1(py, (title.as_str(),));
+                        if let Err(err) = func.call1(py, (title.as_str(),)) {
+                            report_py_error(py, err);
+                        }
                     }
                 }
             });
@@ -189,13 +199,16 @@ impl WebView {
                 Python::attach(|py| {
                     if let Ok(guard) = newwin_cb_clone.lock() {
                         if let Some(ref func) = *guard {
-                            if let Ok(result) = func.call1(py, (url.as_str(),)) {
-                                if let Ok(resp) = result.extract::<NewWindowResponse>(py) {
-                                    return match resp {
-                                        NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
-                                        NewWindowResponse::Allow => wry::NewWindowResponse::Allow,
-                                    };
+                            match func.call1(py, (url.as_str(),)) {
+                                Ok(result) => {
+                                    if let Ok(resp) = result.extract::<NewWindowResponse>(py) {
+                                        return match resp {
+                                            NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
+                                            NewWindowResponse::Allow => wry::NewWindowResponse::Allow,
+                                        };
+                                    }
                                 }
+                                Err(err) => report_py_error(py, err),
                             }
                         }
                     }
@@ -226,8 +239,12 @@ impl WebView {
                             .map(|p| p.to_string_lossy().to_string())
                             .collect();
                         let pos = (position.0, position.1);
-                        if let Ok(result) = func.call1(py, (evt_type, paths_str, pos)) {
-                            return result.extract::<bool>(py).unwrap_or(false);
+                        match func.call1(py, (evt_type, paths_str, pos)) {
+                            Ok(result) => return result.extract::<bool>(py).unwrap_or(false),
+                            Err(err) => {
+                                report_py_error(py, err);
+                                return false;
+                            }
                         }
                     }
                 }
@@ -366,7 +383,9 @@ impl WebView {
         with_webview(self, |wv| {
             wv.evaluate_script_with_callback(script, move |result: String| {
                 Python::attach(|py| {
-                    let _ = callback.call1(py, (result,));
+                    if let Err(err) = callback.call1(py, (result,)) {
+                        report_py_error(py, err);
+                    }
                 });
             })
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))

@@ -164,6 +164,7 @@ def main() -> None:
             status.set("JS decremented counter")
             push_to_js()
         elif action == "notify":
+
             def show_notify() -> None:
                 messagebox.showinfo(
                     "Message from JavaScript",
@@ -200,6 +201,7 @@ def main() -> None:
     ttk.Button(btn_row, text="+", width=3, command=lambda: tk_increment(1)).pack(
         side="left", padx=(0, 4)
     )
+
     def reset_counter() -> None:
         counter.set(0)
         push_to_js()

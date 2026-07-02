@@ -7,6 +7,7 @@ import queue
 import sys
 import time
 import tkinter as tk
+import traceback
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Optional
 
@@ -32,6 +33,7 @@ TitleChangedHandler = Callable[[str], None]
 NewWindowHandler = Callable[[str], NewWindowResponse]
 DragDropHandler = Callable[[DragDropEvent, list[str], tuple[int, int]], bool]
 EvalCallback = Callable[[str], None]
+_LoadKind = str  # "url" | "html"
 
 _MAC_TEXT_CLASSES = ("Entry", "TEntry", "Text", "Spinbox", "TSpinbox")
 _MAC_KEY_GUARD_TAG = "TkwryMacWebKeyGuard"
@@ -273,6 +275,19 @@ class WebView:
     eval callbacks, and drag-and-drop handlers run on the **Tk main thread**
     via an internal queue.
 
+    **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
+    (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
+    Before the native view exists, the last pending load is applied at creation
+    (``load_html`` overrides a pending URL).
+
+    **Page load** (``on_page_load``): fires ``Started`` and ``Finished`` for
+    every navigation. Events that occurred while no handler was registered are
+    **discarded** when a handler is attached.
+
+    **JavaScript** (``eval_js`` / ``eval_js_with_callback``): ``eval_js`` is
+    fire-and-forget (Tk idle, no return value). ``eval_js_with_callback`` is
+    asynchronous; the callback receives the result string on the Tk main thread.
+
     Call :meth:`destroy` or destroy the host frame to release the native view.
     """
 
@@ -321,15 +336,17 @@ class WebView:
         self._focused = focused
         self._ipc_queue: queue.SimpleQueue[str] = queue.SimpleQueue()
         self._title_queue: queue.SimpleQueue[str] = queue.SimpleQueue()
-        self._eval_queue: queue.SimpleQueue[str] = queue.SimpleQueue()
-        self._eval_callback_queue: queue.SimpleQueue[EvalCallback] = queue.SimpleQueue()
+        self._eval_result_queue: queue.SimpleQueue[tuple[EvalCallback, str]] = (
+            queue.SimpleQueue()
+        )
         self._drag_drop_queue: queue.SimpleQueue[
             tuple[DragDropEvent, list[str], tuple[int, int]]
         ] = queue.SimpleQueue()
         self._event_poll_active = False
         self._pending_url: Optional[str] = url
         self._pending_html: Optional[str] = html
-        self._pending_nav: Optional[str] = None
+        self._pending_load: Optional[tuple[_LoadKind, str]] = None
+        self._flush_load_scheduled = False
 
         GtkPump.attach(frame)
         self._frame.bind("<Configure>", self._on_configure, add="+")
@@ -434,29 +451,37 @@ class WebView:
             self._webview = None
 
     def load_url(self, url: str) -> None:
-        """Navigate to *url* (``http``/``https`` only; scheme optional)."""
+        """Navigate to *url* (``http``/``https`` only; scheme optional).
+
+        Multiple rapid calls are coalesced (**last-wins**): only the final URL
+        is loaded. Before the native view exists, the URL is stored and applied
+        at creation (unless superseded by :meth:`load_html`).
+        """
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
         normalized = _normalize_url(url)
         _validate_url(normalized)
         if self._webview is None:
             self._pending_url = normalized
+            self._pending_html = None
             return
-        self._pending_nav = normalized
-        self._frame.after_idle(self._flush_load)
+        self._pending_load = ("url", normalized)
+        self._schedule_flush_load()
 
     def load_html(self, html: str) -> None:
-        """Load inline HTML."""
+        """Load inline HTML.
+
+        Like :meth:`load_url`, rapid calls are coalesced (**last-wins**).
+        ``load_html`` supersedes any pending :meth:`load_url` call.
+        """
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
         if self._webview is None:
             self._pending_html = html
             self._pending_url = None
             return
-        self._webview.load_html(html)
-        if self._on_page_load is not None:
-            self._ensure_event_poll()
-            self._service_linux_events()
+        self._pending_load = ("html", html)
+        self._schedule_flush_load()
 
     def reload(self) -> None:
         self._require_ready("reload")
@@ -466,19 +491,33 @@ class WebView:
             self._service_linux_events()
 
     def eval_js(self, script: str) -> None:
+        """Evaluate JavaScript without waiting for a result.
+
+        The script is scheduled on the Tk idle loop (not synchronous). There is
+        no return value; use :meth:`eval_js_with_callback` when you need the
+        result. JavaScript errors are printed to stderr and do not propagate to
+        the caller.
+        """
         self._require_ready("eval_js")
         self._frame.after_idle(lambda: self._run_eval_js(script))
 
-    def eval_js_with_callback(
-        self, script: str, callback: EvalCallback
-    ) -> None:
+    def eval_js_with_callback(self, script: str, callback: EvalCallback) -> None:
+        """Evaluate JavaScript and invoke *callback* with the result string.
+
+        Asynchronous: *callback* runs on the **Tk main thread** after the script
+        completes. The result is always a ``str`` (including JSON literals).
+        """
         self._require_ready("eval_js_with_callback")
-        self._eval_callback_queue.put(callback)
         self._ensure_event_poll()
 
         def _run() -> None:
-            if self._webview is not None and not self._destroyed:
-                self._webview.eval_js_with_callback(script, self._enqueue_eval)
+            if self._destroyed or self._webview is None:
+                return
+
+            def deliver(result: str) -> None:
+                self._eval_result_queue.put((callback, result))
+
+            self._webview.eval_js_with_callback(script, deliver)
 
         self._frame.after_idle(_run)
 
@@ -498,9 +537,7 @@ class WebView:
         if sys.platform == "darwin":
             _set_mac_webviews_input_active(self._frame.winfo_toplevel(), None)
 
-    def set_background_color(
-        self, r: int, g: int, b: int, a: int = 255
-    ) -> None:
+    def set_background_color(self, r: int, g: int, b: int, a: int = 255) -> None:
         self._require_ready("set_background_color")
         self._webview.set_background_color(r, g, b, a)
 
@@ -534,7 +571,20 @@ class WebView:
     def set_on_page_load(self, handler: Optional[PageLoadHandler]) -> None:
         self._on_page_load = handler
         if handler is not None:
+            self._discard_page_load_backlog()
             self._ensure_event_poll()
+
+    def sync_bounds(self) -> None:
+        """Push the host frame's size and position to the native WebView.
+
+        Called automatically on ``<Configure>``, ``<Map>``, and ``<Unmap>``.
+        Call this manually after layout changes that do not emit Configure
+        (e.g. custom geometry) so the WebView reflows — useful for centered
+        images and responsive content.
+        """
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._sync_bounds()
 
     def set_on_title_changed(self, handler: Optional[TitleChangedHandler]) -> None:
         self._on_title_changed = handler
@@ -548,9 +598,7 @@ class WebView:
         if self._webview is not None and handler is not None:
             self._webview.set_on_new_window(self._on_new_window)
 
-    def set_drag_drop_handler(
-        self, handler: Optional[DragDropHandler]
-    ) -> None:
+    def set_drag_drop_handler(self, handler: Optional[DragDropHandler]) -> None:
         self._drag_drop_handler = handler
         if self._webview is not None and handler is not None:
             self._webview.set_drag_drop_handler(self._native_drag_drop)
@@ -627,8 +675,16 @@ class WebView:
     def _enqueue_ipc(self, message: str) -> None:
         self._ipc_queue.put(message)
 
-    def _enqueue_eval(self, result: str) -> None:
-        self._eval_queue.put(result)
+    def _discard_page_load_backlog(self) -> None:
+        native = self._webview
+        if native is not None:
+            native.drain_page_load_events()
+
+    def _invoke_callback(self, callback: Callable[..., None], *args: object) -> None:
+        try:
+            callback(*args)
+        except Exception:
+            traceback.print_exc()
 
     def _deliver_page_load_events(self) -> None:
         page_load = self._on_page_load
@@ -637,7 +693,7 @@ class WebView:
             return
         pending = native.drain_page_load_events()
         for event, page_url in pending:
-            page_load(event, page_url)
+            self._invoke_callback(page_load, event, page_url)
 
     def _service_linux_events(self, *, gtk_rounds: int = 32) -> None:
         if sys.platform != "linux" or self._destroyed:
@@ -672,7 +728,7 @@ class WebView:
                     message = self._ipc_queue.get_nowait()
                 except queue.Empty:
                     break
-                handler(message)
+                self._invoke_callback(handler, message)
 
         self._deliver_page_load_events()
 
@@ -683,7 +739,7 @@ class WebView:
                     title = self._title_queue.get_nowait()
                 except queue.Empty:
                     break
-                title_handler(title)
+                self._invoke_callback(title_handler, title)
 
         drag_handler = self._drag_drop_handler
         if drag_handler is not None:
@@ -692,15 +748,14 @@ class WebView:
                     event, paths, position = self._drag_drop_queue.get_nowait()
                 except queue.Empty:
                     break
-                drag_handler(event, paths, position)
+                self._invoke_callback(drag_handler, event, paths, position)
 
         while True:
             try:
-                result = self._eval_queue.get_nowait()
-                callback = self._eval_callback_queue.get_nowait()
+                callback, result = self._eval_result_queue.get_nowait()
             except queue.Empty:
                 break
-            callback(result)
+            self._invoke_callback(callback, result)
 
         if self._should_keep_polling():
             delay = 1 if sys.platform == "linux" else 10
@@ -712,8 +767,7 @@ class WebView:
         if self._needs_event_poll():
             return True
         return not (
-            self._eval_queue.empty()
-            and self._eval_callback_queue.empty()
+            self._eval_result_queue.empty()
             and self._title_queue.empty()
             and self._ipc_queue.empty()
             and self._drag_drop_queue.empty()
@@ -787,14 +841,30 @@ class WebView:
     def _run_eval_js(self, script: str) -> None:
         if self._destroyed or self._webview is None:
             return
-        self._webview.eval_js(script)
+        try:
+            self._webview.eval_js(script)
+        except Exception:
+            traceback.print_exc()
+
+    def _schedule_flush_load(self) -> None:
+        if self._flush_load_scheduled:
+            return
+        self._flush_load_scheduled = True
+        self._frame.after_idle(self._flush_load)
 
     def _flush_load(self) -> None:
-        if self._destroyed or self._webview is None or self._pending_nav is None:
+        self._flush_load_scheduled = False
+        if self._destroyed or self._webview is None or self._pending_load is None:
             return
-        url = self._pending_nav
-        self._pending_nav = None
-        self._webview.load_url(url)
+        kind, payload = self._pending_load
+        self._pending_load = None
+        if kind == "url":
+            self._webview.load_url(payload)
+        else:
+            self._webview.load_html(payload)
+        if self._on_page_load is not None:
+            self._ensure_event_poll()
+            self._service_linux_events()
 
     def _frame_should_show(self) -> bool:
         try:

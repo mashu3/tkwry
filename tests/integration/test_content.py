@@ -33,6 +33,35 @@ def test_load_url_before_create_normalizes_pending(tk_root) -> None:
     frame.destroy()
 
 
+def test_load_html_supersedes_pending_url_before_create(tk_root) -> None:
+    frame = host_frame(tk_root)
+    web = WebView(frame)
+    web.load_url("example.com")
+    web.load_html("<p>html wins</p>")
+
+    assert web.url is None
+    assert web._pending_html == "<p>html wins</p>"
+    assert web._pending_url is None
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_load_coalesces_to_last_pending(tk_root) -> None:
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<p>init</p>")
+
+    assert wait_until(tk_root, lambda: web.native is not None)
+    web.load_url("https://example.com/a")
+    web.load_url("https://example.com/b")
+    web.load_url("https://example.com/c")
+
+    assert web._pending_load == ("url", "https://example.com/c")
+
+    web.destroy()
+    frame.destroy()
+
+
 @pytest.mark.skipif(
     sys.platform == "linux",
     reason="WebKitGTK headless CI does not reliably deliver page-load callbacks",
@@ -58,6 +87,60 @@ def test_page_load_callback_receives_finished(tk_root) -> None:
         assert wait_until(tk_root, finished, steps=200), (
             f"expected PageLoadEvent.Finished, got {events!r}"
         )
+
+    web.destroy()
+    frame.destroy()
+
+
+@pytest.mark.skipif(
+    sys.platform == "linux",
+    reason="WebKitGTK headless CI does not reliably deliver page-load callbacks",
+)
+def test_page_load_discards_backlog_before_handler_attach(tk_root) -> None:
+    events: list[tuple[PageLoadEvent, str]] = []
+
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<p>first</p>")
+
+    assert wait_until(tk_root, lambda: web.native is not None)
+    web.load_html("<p>before handler</p>")
+    pump(tk_root, steps=80)
+
+    web.set_on_page_load(lambda evt, url: events.append((evt, url)))
+    events.clear()
+    web.load_html("<p>after handler</p>")
+
+    def finished() -> bool:
+        return any(evt == PageLoadEvent.Finished for evt, _ in events)
+
+    assert wait_until(tk_root, finished, steps=400), (
+        f"expected Finished after handler attach, got {events!r}"
+    )
+    assert not any("before handler" in url for _, url in events)
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_ipc_handler_exception_does_not_stop_poll(tk_root) -> None:
+    received: list[str] = []
+
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<p>ipc</p>")
+
+    assert wait_until(tk_root, lambda: web.native is not None)
+
+    def handler(msg: str) -> None:
+        if msg == "bad":
+            raise ValueError("boom")
+        received.append(msg)
+
+    web.set_ipc_handler(handler)
+    web._enqueue_ipc("bad")
+    web._enqueue_ipc("ok")
+    pump(tk_root, steps=50)
+
+    assert wait_until(tk_root, lambda: received == ["ok"], steps=100)
 
     web.destroy()
     frame.destroy()

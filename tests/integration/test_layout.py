@@ -203,3 +203,30 @@ def test_bounds_after_fixed_size_frame_without_propagate(tk_root) -> None:
 
     web.destroy()
     host.destroy()
+
+
+def test_sync_bounds_public_api(tk_root) -> None:
+    import tkinter as tk
+
+    tk_root.geometry("480x320")
+    host = tk.Frame(tk_root, width=360, height=220, bg="#222")
+    host.pack_propagate(False)
+    host.pack(padx=20, pady=20)
+
+    web = WebView(
+        host,
+        html="<body style='margin:0;display:grid;place-items:center'>x</body>",
+    )
+    assert wait_until(tk_root, lambda: web.native is not None)
+    pump(tk_root, steps=40)
+
+    records = attach_bounds_recorder(web)
+    web.sync_bounds()
+
+    expected = expected_bounds(host)
+    assert bounds_close(records, expected), (
+        f"expected {expected}, got {records[-1] if records else None}"
+    )
+
+    web.destroy()
+    host.destroy()

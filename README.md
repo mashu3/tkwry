@@ -125,13 +125,25 @@ web = WebView(
 
 ```python
 web.load_html("<h1>Hello</h1>")
-web.eval_js("document.title = 'Hi'")
-web.eval_js_with_callback("document.title", print)
+web.eval_js("document.title = 'Hi'")  # fire-and-forget (Tk idle, no return value)
+web.eval_js_with_callback("document.title", print)  # async; callback on Tk main thread
 web.load_url("https://example.com")
 web.reload()
 print(web.url)
 web.focus()
 web.open_devtools()
+```
+
+Rapid `load_url` / `load_html` calls are **coalesced (last-wins)** — `load(A); load(B); load(C)` loads `C` only.
+
+`eval_js` does not return a result (not synchronous). Use `eval_js_with_callback` when you need the JavaScript return value as a `str`.
+
+### Layout / resize
+
+Bounds sync runs automatically on `<Configure>`, `<Map>`, and `<Unmap>`. Call `sync_bounds()` manually after custom layout changes so the WebView reflows (e.g. centered images):
+
+```python
+web.sync_bounds()
 ```
 
 ### Navigation / lifecycle callbacks
@@ -148,6 +160,10 @@ web = WebView(
     on_new_window=lambda url: NewWindowResponse.Deny,
 )
 ```
+
+`on_page_load` fires `PageLoadEvent.Started` and `PageLoadEvent.Finished` **for every navigation**. Events that occurred before a handler was registered are **discarded** when you call `set_on_page_load` (or pass `on_page_load` in the constructor from the start).
+
+Callback exceptions are printed to stderr and do not stop event delivery.
 
 ### Drag & drop (native OS path)
 
@@ -183,7 +199,7 @@ web.destroy()   # release native webview; host Frame is kept
 | IPC | `set_ipc_handler` |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler` |
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
-| Layout | `pack`, `grid`, `place` (delegate to host `Frame`) |
+| Layout | `pack`, `grid`, `place`, `sync_bounds` (delegate to host `Frame` except `sync_bounds`) |
 | Lifecycle | `destroy`, `destroyed`, `native` |
 
 Constructor options: `url`, `html`, `ipc_handler`, `devtools`, `background_color`,

@@ -197,6 +197,7 @@ def main() -> None:
     ttk.Button(btn_row, text="Update chart", command=push_figure).pack(
         side="left", fill="x", expand=True
     )
+
     def randomize_points() -> None:
         points_var.set(random.randint(8, 80))
         push_figure()
