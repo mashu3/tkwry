@@ -27,8 +27,8 @@ Tkinter is still a solid GUI shell — it just had no first-class way to host mo
 - **IPC bridge** — JavaScript → Python callbacks without freezing the UI
 - **Layout-aware** — tracks `pack` / `grid` / `place`, tabs, and `PanedWindow`
 
-Pre-built **abi3** wheels ship for **Windows (x86_64)** and **macOS (Apple Silicon + Intel)**.
-**Linux** is supported via source install (sdist / git) — PyPI wheels for Linux are intentionally not published.
+Pre-built **abi3** wheels ship for **Windows (x86_64)** and **macOS (Apple Silicon + Intel)** — these are the primary release targets.
+**Linux** is **best-effort**: build from source (sdist / git); timing and headless behavior are not guaranteed in v0.0.x.
 
 ---
 
@@ -65,9 +65,9 @@ Or install from GitHub for the latest changes:
 pip install git+https://github.com/mashu3/tkwry.git
 ```
 
-### Linux (source install)
+### Linux (source install, best-effort)
 
-Linux is **fully supported**, but only as a **source build** — not via a PyPI wheel. Install system dependencies, then:
+Linux builds from source and runs for many apps, but **v0.0.x does not treat Linux stability as a release requirement** — focus is on Windows and macOS wheels. Install system dependencies, then:
 
 ```bash
 # Debian / Ubuntu
@@ -213,7 +213,7 @@ Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`.
 
 - **Alpha** — APIs may change; not recommended for production yet
 - **Windows** — WebView2 Runtime required; systems without it are unsupported
-- **Linux** — no pre-built PyPI wheel (source install only; this is intentional)
+- **Linux** — source install only (no PyPI wheel); **best-effort** in v0.0.x — headless CI and event timing are not release blockers
 - **DevTools** — macOS uses private APIs; avoid in Mac App Store release builds
 - **macOS input** — keyboard focus is shared between Tk and the WebView on the main thread; typing may feel slightly less snappy than a standalone browser (especially with IME on)
 - **Drag & drop** — drop target is the WebView area only (not arbitrary Tk widgets; use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for those)
@@ -228,7 +228,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 |----|------|---------------|--------|-------|
 | **Windows** | x86_64 | `Frame.winfo_id()` → HWND | WebView2 | WebView2 Runtime required |
 | **macOS** | arm64, x86_64 | Toplevel content `NSView` | WKWebView | See [macOS embedding](#macos-embedding) below |
-| **Linux** | — | `winfo_id()` → X11 window ID | WebKitGTK | GTK pumped on a Tk timer; source install |
+| **Linux** | — | `winfo_id()` → X11 window ID | WebKitGTK | Source install; **best-effort** (not a wheel release target) |
 
 ### macOS embedding
 
@@ -263,7 +263,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Navigation hooks** — `on_navigation`, `on_page_load`, `on_title_changed`, `on_new_window`
 - **Multiple layouts** — works with `pack`, `grid`, `place`, `Notebook`, and `PanedWindow` (see examples)
 - **Plotly-ready** — load HTML + `eval_js` for interactive charts
-- **Alpha, but tested** — CI on Ubuntu (Xvfb + WebKitGTK), Windows, and macOS
+- **Alpha, but tested** — CI on Windows and macOS; Linux CI is smoke/build only (best-effort)
 
 ---
 

@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.0.3] - 2026-07-02
+
+### Added
+
+- `sync_bounds()` — manually push host frame geometry to the native WebView
+- Documented navigation (**last-wins**), page-load, and `eval_js` / `eval_js_with_callback` semantics
+- Callback exceptions are printed to stderr; the Tk event poll keeps running
+
+### Fixed
+
+- Initial URL/HTML load deferred until after bounds sync (fixes blank startup on macOS)
+- `eval_js_with_callback` pairs each result with its callback (no FIFO mismatch)
+- Linux Xvfb: do not rely on `winfo_viewable()` for bounds and initial load
+
+### Changed
+
+- **Linux stability is best-effort for v0.0.x** — release quality targets **Windows** and **macOS** wheels; Linux remains source-installable but timing, headless CI, and edge cases are not release blockers
+
 ## [0.0.2] - 2026-07-01
 
 ### Fixed
@@ -39,5 +57,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.0.3]: https://github.com/mashu3/tkwry/releases/tag/v0.0.3
 [0.0.2]: https://github.com/mashu3/tkwry/releases/tag/v0.0.2
 [0.0.1]: https://github.com/mashu3/tkwry/releases/tag/v0.0.1

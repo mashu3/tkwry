@@ -1,4 +1,8 @@
-"""Content loading, callbacks, and drag-and-drop queueing."""
+"""Content loading, callbacks, and drag-and-drop queueing.
+
+Linux integration tests that depend on WebKitGTK event timing are skipped on
+Linux — v0.0.x treats Linux as best-effort (see README / CHANGELOG).
+"""
 
 from __future__ import annotations
 
