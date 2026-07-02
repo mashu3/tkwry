@@ -1,26 +1,12 @@
-"""Shared helpers for Tk / WebView integration tests."""
+"""JavaScript viewport measurement helpers."""
 
 from __future__ import annotations
 
 import json
-import os
-import sys
-from collections.abc import Callable
-
-import pytest
 
 from tkwry import WebView
 
-# Xvfb + WebKitGTK headless CI does not reliably reproduce desktop Tk layout timing.
-skip_linux_layout = pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK headless CI: Tk layout timing unreliable",
-)
-
-skip_linux_ci = pytest.mark.skipif(
-    sys.platform == "linux" and os.environ.get("GITHUB_ACTIONS") == "true",
-    reason="WebKitGTK headless CI: integration checks unreliable",
-)
+from support.tk import pump, wait_until
 
 VIEWPORT_HTML = (
     "<!DOCTYPE html><html><head><meta charset='utf-8'></head>"
@@ -29,43 +15,30 @@ VIEWPORT_HTML = (
 VIEWPORT_TOLERANCE = 8
 
 
-def is_github_actions() -> bool:
-    return os.environ.get("GITHUB_ACTIONS") == "true"
+def frame_client_size(frame) -> tuple[int, int]:
+    frame.update_idletasks()
+    return (max(frame.winfo_width(), 1), max(frame.winfo_height(), 1))
 
 
-def pump(root, *, steps: int = 80, delay_ms: int = 50) -> None:
-    """Drive the Tk event loop for up to *steps* iterations."""
-    gtk_pump = None
-    if sys.platform == "linux":
-        from tkwry._core import pump_events as gtk_pump
-
-    for _ in range(steps):
-        root.update_idletasks()
-        root.update()
-        if gtk_pump is not None:
-            gtk_pump()
-        root.after(delay_ms)
-        root.update()
-
-
-def wait_until(root, predicate: Callable[[], bool], *, steps: int = 100) -> bool:
-    """Return True once *predicate* is truthy, else False after *steps*."""
-    for _ in range(steps):
-        if predicate():
-            return True
-        pump(root, steps=1, delay_ms=30)
-    return predicate()
+def viewport_matches_frame(
+    viewport: tuple[int, int] | None,
+    frame,
+    *,
+    tolerance: int = VIEWPORT_TOLERANCE,
+) -> bool:
+    if viewport is None:
+        return False
+    expected = frame_client_size(frame)
+    return (
+        abs(viewport[0] - expected[0]) <= tolerance
+        and abs(viewport[1] - expected[1]) <= tolerance
+    )
 
 
 def read_viewport_via_callback(
     web: WebView, root, *, steps: int = 200
 ) -> tuple[int, int] | None:
-    """Return viewport size via ``eval_js_with_callback``.
-
-    Requires a native build that supports script callbacks.
-    """
-    import json
-
+    """Return viewport size via ``eval_js_with_callback``."""
     results: list[tuple[int, int]] = []
 
     def callback(raw: str) -> None:
@@ -118,24 +91,3 @@ def read_viewport(
         if wait_until(root, lambda: len(results) > 0, steps=per_try):
             return results[-1]
     return None
-
-
-def frame_client_size(frame) -> tuple[int, int]:
-    frame.update_idletasks()
-    return (max(frame.winfo_width(), 1), max(frame.winfo_height(), 1))
-
-
-def viewport_matches_frame(
-    viewport: tuple[int, int] | None,
-    frame,
-    *,
-    tolerance: int = VIEWPORT_TOLERANCE,
-) -> bool:
-    if viewport is None:
-        return False
-    expected = frame_client_size(frame)
-    return (
-        abs(viewport[0] - expected[0]) <= tolerance
-        and abs(viewport[1] - expected[1]) <= tolerance
-    )
-

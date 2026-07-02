@@ -1,33 +1,23 @@
-"""End-to-end viewport size checks via JavaScript eval."""
+"""JavaScript viewport size checks against Tk frame geometry."""
 
 from __future__ import annotations
 
 import sys
 
 import pytest
-from helpers import (
+
+from support.tk import pump, skip_linux_ci, skip_linux_layout, wait_ready, wait_until
+from support.viewport import (
     VIEWPORT_HTML,
-    pump,
     read_viewport,
-    skip_linux_ci,
-    skip_linux_layout,
+    read_viewport_via_callback,
     viewport_matches_frame,
-    wait_until,
 )
-
-from tkwry import WebView
-
-pytestmark = pytest.mark.integration
-
-
-def _wait_ready(tk_root, web: WebView) -> None:
-    assert wait_until(tk_root, lambda: web.native is not None)
-    pump(tk_root, steps=40)
+from tkwry import PageLoadEvent, WebView
 
 
 @skip_linux_layout
 def test_viewport_matches_frame_after_web_pack(tk_root) -> None:
-    """``web.pack()`` before native create: JS viewport must match host frame."""
     import tkinter as tk
 
     tk_root.geometry("520x380")
@@ -35,7 +25,7 @@ def test_viewport_matches_frame_after_web_pack(tk_root) -> None:
     web = WebView(host, html=VIEWPORT_HTML)
     web.pack(fill="both", expand=True)
 
-    _wait_ready(tk_root, web)
+    wait_ready(tk_root, web)
     viewport = read_viewport(web, tk_root)
 
     assert viewport_matches_frame(viewport, host), (
@@ -48,7 +38,6 @@ def test_viewport_matches_frame_after_web_pack(tk_root) -> None:
 
 @skip_linux_layout
 def test_viewport_matches_frame_after_late_host_pack(tk_root) -> None:
-    """Host ``pack()`` after ``WebView()``: JS viewport must match final geometry."""
     import tkinter as tk
 
     tk_root.geometry("520x380")
@@ -57,7 +46,7 @@ def test_viewport_matches_frame_after_late_host_pack(tk_root) -> None:
 
     assert wait_until(tk_root, lambda: web.native is not None, steps=20) is False
     host.pack(fill="both", expand=True)
-    _wait_ready(tk_root, web)
+    wait_ready(tk_root, web)
 
     viewport = read_viewport(web, tk_root)
     assert viewport_matches_frame(viewport, host), (
@@ -73,7 +62,6 @@ def test_viewport_matches_frame_after_late_host_pack(tk_root) -> None:
     reason="Windows WebView2 layout",
 )
 def test_viewport_shrinks_after_sibling_pack(tk_root) -> None:
-    """Packing a header after WebView exists must shrink JS viewport height."""
     import tkinter as tk
 
     tk_root.geometry("520x380")
@@ -84,7 +72,7 @@ def test_viewport_shrinks_after_sibling_pack(tk_root) -> None:
     host.pack(fill="both", expand=True)
 
     web = WebView(host, html=VIEWPORT_HTML)
-    _wait_ready(tk_root, web)
+    wait_ready(tk_root, web)
 
     before = read_viewport(web, tk_root)
     assert before is not None
@@ -115,14 +103,13 @@ def test_viewport_shrinks_after_sibling_pack(tk_root) -> None:
     reason="Windows WebView2 layout",
 )
 def test_viewport_stable_after_resize_and_redraw(tk_root) -> None:
-    """Resize/redraw keeps JS viewport matching the frame on re-read."""
     import tkinter as tk
 
     tk_root.geometry("520x380")
     host = tk.Frame(tk_root, bg="#222")
     web = WebView(host, html=VIEWPORT_HTML)
     web.pack(fill="both", expand=True)
-    _wait_ready(tk_root, web)
+    wait_ready(tk_root, web)
 
     tk_root.geometry("460x300")
     pump(tk_root, steps=60)
@@ -153,10 +140,7 @@ def test_viewport_stable_after_resize_and_redraw(tk_root) -> None:
     ),
 )
 def test_viewport_via_eval_callback_matches_frame(tk_root) -> None:
-    """``eval_js_with_callback`` path must agree with Tk frame size after page load."""
     import tkinter as tk
-
-    from tkwry import PageLoadEvent
 
     tk_root.geometry("520x380")
     host = tk.Frame(tk_root, bg="#222")
@@ -176,8 +160,6 @@ def test_viewport_via_eval_callback_matches_frame(tk_root) -> None:
     )
     pump(tk_root, steps=20)
 
-    from helpers import read_viewport_via_callback
-
     viewport = read_viewport_via_callback(web, tk_root, steps=300)
     assert viewport_matches_frame(viewport, host), (
         f"callback viewport={viewport}, "
@@ -190,7 +172,6 @@ def test_viewport_via_eval_callback_matches_frame(tk_root) -> None:
 
 @skip_linux_layout
 def test_viewport_not_stale_after_repack(tk_root) -> None:
-    """Re-``pack()`` with identical options must not leave a stale JS viewport."""
     import tkinter as tk
 
     tk_root.geometry("400x300")
@@ -199,7 +180,7 @@ def test_viewport_not_stale_after_repack(tk_root) -> None:
     host.pack()
 
     web = WebView(host, html=VIEWPORT_HTML)
-    _wait_ready(tk_root, web)
+    wait_ready(tk_root, web)
 
     before = read_viewport(web, tk_root)
     assert viewport_matches_frame(before, host)

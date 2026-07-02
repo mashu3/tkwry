@@ -66,5 +66,5 @@ ignore = ["UP045"]
 testpaths = ["tests"]
 addopts = ["-v"]
 markers = [
-    "integration: requires display and native WebView",
+    "integration: requires display and native WebView (tests/integration, tests/macos)",
 ]

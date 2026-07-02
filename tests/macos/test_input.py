@@ -8,10 +8,12 @@ from tkinter import ttk
 from types import SimpleNamespace
 
 import pytest
-from helpers import is_github_actions
+
+from support.tk import is_github_actions
+from tkwry import WebView
 
 if sys.platform == "darwin":
-    from macos_input_helpers import (
+    from support.macos_input import (
         activate_window,
         center,
         cgevent_clicks_reach_tk,
@@ -24,8 +26,6 @@ if sys.platform == "darwin":
         wait_until,
         wry_point,
     )
-
-from tkwry import WebView
 
 
 @pytest.fixture
@@ -52,10 +52,8 @@ def _wait_native(web: WebView, root: tk.Misc) -> None:
     )
 
 
-@pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 def test_hit_test_separates_url_bar_from_web(url_demo_layout) -> None:
-    """URL bar center must not hit the webview (regression for coord-system bug)."""
     web = WebView(url_demo_layout.web_frame, html="<p>hit</p>")
     try:
         _wait_native(web, url_demo_layout.root)
@@ -75,7 +73,6 @@ def test_hit_test_separates_url_bar_from_web(url_demo_layout) -> None:
         web.destroy()
 
 
-@pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 def test_url_bar_types_after_leaving_web(url_demo_layout) -> None:
     web = WebView(url_demo_layout.web_frame, html="<p>focus</p>")
@@ -105,14 +102,12 @@ def test_url_bar_types_after_leaving_web(url_demo_layout) -> None:
         web.destroy()
 
 
-@pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 @pytest.mark.skipif(
     is_github_actions(),
     reason="GHA macOS: Tcl focus drain timing not reliable on virtual runners",
 )
 def test_tcl_unfocus_drains_within_50ms(url_demo_layout) -> None:
-    """Rust click path sets a flag; Python must release Entry focus quickly."""
     web = WebView(url_demo_layout.web_frame, html="<p>latency</p>")
     try:
         _wait_native(web, url_demo_layout.root)
@@ -133,10 +128,8 @@ def test_tcl_unfocus_drains_within_50ms(url_demo_layout) -> None:
         web.destroy()
 
 
-@pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 def test_rapid_keys_do_not_reach_entry_while_web_active(url_demo_layout) -> None:
-    """50 rapid KeyPress events must not append to Entry while web owns keyboard."""
     web = WebView(url_demo_layout.web_frame, html="<p>latency</p>")
     try:
         _wait_native(web, url_demo_layout.root)
@@ -156,10 +149,8 @@ def test_rapid_keys_do_not_reach_entry_while_web_active(url_demo_layout) -> None
         web.destroy()
 
 
-@pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 def test_key_guard_blocks_entry_while_web_active(url_demo_layout) -> None:
-    """Bindtag guard must stop Tcl text widgets before default KeyPress handling."""
     web = WebView(url_demo_layout.web_frame, html="<p>keys</p>")
     try:
         _wait_native(web, url_demo_layout.root)
@@ -180,7 +171,6 @@ def test_key_guard_blocks_entry_while_web_active(url_demo_layout) -> None:
         web.destroy()
 
 
-@pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 def test_web_mode_blocks_url_bar_keys(url_demo_layout) -> None:
     web = WebView(url_demo_layout.web_frame, html="<p>focus</p>")
@@ -208,14 +198,12 @@ def test_web_mode_blocks_url_bar_keys(url_demo_layout) -> None:
         web.destroy()
 
 
-@pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 @pytest.mark.skipif(
     is_github_actions(),
     reason="GHA macOS: CGEvent / Accessibility unavailable (can abort)",
 )
 def test_cgevent_web_click_activates_web_mode(url_demo_layout) -> None:
-    """When Accessibility allows CGEvent, NSEvent routing must flip web mode."""
     web = WebView(url_demo_layout.web_frame, html="<p>focus</p>")
     try:
         _wait_native(web, url_demo_layout.root)
