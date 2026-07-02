@@ -788,6 +788,12 @@ class WebView:
             _validate_url(url)
 
         html = self._pending_html
+        initial_load: Optional[tuple[_LoadKind, str]] = None
+        if html is not None:
+            initial_load = ("html", html)
+        elif url is not None:
+            initial_load = ("url", url)
+
         kwargs: dict = {
             "width": width,
             "height": height,
@@ -811,10 +817,6 @@ class WebView:
             kwargs["on_new_window"] = self._on_new_window
         if self._drag_drop_handler is not None:
             kwargs["drag_drop_handler"] = self._native_drag_drop
-        if html is not None:
-            kwargs["html"] = html
-        elif url is not None:
-            kwargs["url"] = url
 
         if sys.platform == "linux":
             from tkwry._core import pump_events
@@ -827,6 +829,9 @@ class WebView:
         self._pending_html = None
         self._sync_bounds()
         self._schedule_bounds_sync()
+        if initial_load is not None:
+            self._pending_load = initial_load
+            self._schedule_flush_load()
         if sys.platform == "darwin" and self._webview is not None:
             toplevel = self._frame.winfo_toplevel()
             _ensure_mac_wakeup_pipe(toplevel, self._webview)
@@ -862,9 +867,9 @@ class WebView:
             self._webview.load_url(payload)
         else:
             self._webview.load_html(payload)
+        self._service_linux_events()
         if self._on_page_load is not None:
             self._ensure_event_poll()
-            self._service_linux_events()
 
     def _frame_should_show(self) -> bool:
         try:

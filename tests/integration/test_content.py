@@ -47,6 +47,20 @@ def test_load_html_supersedes_pending_url_before_create(tk_root) -> None:
     frame.destroy()
 
 
+def test_initial_url_loads_after_bounds_sync(tk_root) -> None:
+    frame = host_frame(tk_root)
+    web = WebView(frame, url="https://example.com")
+
+    assert wait_until(tk_root, lambda: web.ready, steps=200)
+    pump(tk_root, steps=30)
+
+    assert web.url is not None
+    assert web.url.startswith("https://example.com")
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_load_coalesces_to_last_pending(tk_root) -> None:
     frame = host_frame(tk_root)
     web = WebView(frame, html="<p>init</p>")
