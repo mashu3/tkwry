@@ -833,7 +833,10 @@ class WebView:
         self._schedule_bounds_sync()
         if initial_load is not None:
             self._initial_load = initial_load
-            self._schedule_initial_load()
+            if sys.platform == "linux":
+                self._run_initial_load()
+            if self._initial_load is not None:
+                self._schedule_initial_load()
         if sys.platform == "darwin" and self._webview is not None:
             toplevel = self._frame.winfo_toplevel()
             _ensure_mac_wakeup_pipe(toplevel, self._webview)
@@ -852,6 +855,20 @@ class WebView:
             self._webview.eval_js(script)
         except Exception:
             traceback.print_exc()
+
+    def _frame_ready_for_initial_load(self) -> bool:
+        """Whether the host frame is laid out enough to load content."""
+        try:
+            if not self._frame.winfo_exists():
+                return False
+            if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
+                return False
+            # Xvfb + WebKitGTK often report not viewable while the frame is usable.
+            if sys.platform == "linux":
+                return True
+            return bool(self._frame.winfo_viewable())
+        except tk.TclError:
+            return False
 
     def _schedule_flush_load(self) -> None:
         if self._flush_load_scheduled:
@@ -881,7 +898,7 @@ class WebView:
         load = self._initial_load
         if load is None or self._destroyed or self._webview is None:
             return
-        if not self._frame.winfo_viewable():
+        if not self._frame_ready_for_initial_load():
             return
         self._sync_bounds()
         kind, payload = load
@@ -892,12 +909,12 @@ class WebView:
                 self._webview.load_html(payload)
         except Exception:
             traceback.print_exc()
-            return
-        self._sync_bounds()
-        gtk_rounds = 128 if sys.platform == "linux" else 32
-        self._service_linux_events(gtk_rounds=gtk_rounds)
-        if self._on_page_load is not None:
-            self._ensure_event_poll()
+        else:
+            self._sync_bounds()
+            gtk_rounds = 128 if sys.platform == "linux" else 32
+            self._service_linux_events(gtk_rounds=gtk_rounds)
+            if self._on_page_load is not None:
+                self._ensure_event_poll()
         self._initial_load_attempt += 1
         if self._initial_load_attempt >= self._initial_load_attempts():
             self._initial_load = None
@@ -921,7 +938,7 @@ class WebView:
         try:
             if not self._frame.winfo_exists():
                 return False
-            if not self._frame.winfo_viewable():
+            if sys.platform != "linux" and not self._frame.winfo_viewable():
                 return False
             if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
                 return False
