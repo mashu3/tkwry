@@ -17,7 +17,7 @@ fn make_rect(x: f64, y: f64, width: f64, height: f64) -> wry::Rect {
 
 /// Print a Python exception (with traceback) to stderr from a Rust callback.
 fn report_py_error(py: Python<'_>, err: PyErr) {
-    let _ = err.print(py);
+    err.print(py);
 }
 
 #[pyclass(eq, eq_int, frozen, skip_from_py_object)]
