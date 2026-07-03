@@ -411,6 +411,12 @@ impl WebView {
         }
     }
 
+    fn clear_on_navigation(&self) {
+        if let Ok(mut guard) = self.nav_cb.lock() {
+            *guard = None;
+        }
+    }
+
     fn set_on_page_load(&self, _handler: Py<PyAny>) {}
 
     fn drain_page_load_events(&self) -> Vec<(PageLoadEvent, String)> {

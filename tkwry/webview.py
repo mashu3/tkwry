@@ -35,6 +35,9 @@ DragDropHandler = Callable[[DragDropEvent, list[str], tuple[int, int]], bool]
 EvalCallback = Callable[[str], None]
 _LoadKind = str  # "url" | "html"
 
+_DEFAULT_WIDTH = 800
+_DEFAULT_HEIGHT = 600
+
 _MAC_TEXT_CLASSES = ("Entry", "TEntry", "Text", "Spinbox", "TSpinbox")
 _MAC_KEY_GUARD_TAG = "TkwryMacWebKeyGuard"
 
@@ -295,8 +298,8 @@ class WebView:
         self,
         frame: tk.Frame,
         *,
-        width: int = 800,
-        height: int = 600,
+        width: int | None = None,
+        height: int | None = None,
         url: Optional[str] = None,
         html: Optional[str] = None,
         ipc_handler: Optional[Callable[[str], None]] = None,
@@ -312,9 +315,9 @@ class WebView:
         drag_drop_handler: Optional[DragDropHandler] = None,
     ) -> None:
         self._frame = frame
-        self._init_width = max(width, 1)
-        self._init_height = max(height, 1)
-        self._early_create = width != 800 or height != 600
+        self._early_create = width is not None or height is not None
+        self._init_width = max(width if width is not None else _DEFAULT_WIDTH, 1)
+        self._init_height = max(height if height is not None else _DEFAULT_HEIGHT, 1)
         self._destroyed = False
         self._ready_callbacks: list[Callable[[], None]] = []
         self._create_pending = False
@@ -576,8 +579,13 @@ class WebView:
 
     def set_on_navigation(self, handler: Optional[NavigationHandler]) -> None:
         self._on_navigation = handler
-        if self._webview is not None and handler is not None:
-            self._webview.set_on_navigation(self._native_navigation)
+        if self._webview is not None:
+            if handler is not None:
+                self._webview.set_on_navigation(self._native_navigation)
+            else:
+                clear = getattr(self._webview, "clear_on_navigation", None)
+                if clear is not None:
+                    clear()
 
     def set_on_page_load(self, handler: Optional[PageLoadHandler]) -> None:
         self._on_page_load = handler

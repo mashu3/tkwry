@@ -24,6 +24,18 @@ def test_initial_size_creates_without_pack(tk_root) -> None:
     frame.destroy()
 
 
+def test_explicit_default_size_creates_without_pack(tk_root) -> None:
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=800, height=600, html="<p>default-size</p>")
+
+    assert web.wait_until_ready(timeout=10.0)
+    assert web.ready
+    assert web.native is not None
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_eval_js_raises_before_ready(tk_root) -> None:
     frame = bare_frame(tk_root)
     web = WebView(frame, width=400, height=300)
@@ -146,6 +158,30 @@ def test_set_on_new_window_none_clears_handler(tk_root) -> None:
 
     web.set_on_new_window(None)
     assert web._native_new_window("https://example.com/2") == NewWindowResponse.Allow
+    assert calls == ["https://example.com/"]
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_set_on_navigation_none_clears_handler(tk_root) -> None:
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>nav</p>")
+    assert web.wait_until_ready(timeout=10.0)
+
+    calls: list[str] = []
+
+    def handler(url: str) -> bool:
+        calls.append(url)
+        return False
+
+    web.set_on_navigation(handler)
+    assert web._native_navigation("https://example.com/") is False
+    assert calls == ["https://example.com/"]
+
+    web.set_on_navigation(None)
+    assert web._on_navigation is None
+    assert web._native_navigation("https://example.com/2") is True
     assert calls == ["https://example.com/"]
 
     web.destroy()
