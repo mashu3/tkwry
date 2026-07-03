@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
-from tkwry._parent import EmbedParent, tk_embed_origin, tk_embed_parent
+import sys
+import threading
+
+import pytest
+
+from tkwry._parent import (
+    EmbedParent,
+    require_tk_thread,
+    tk_embed_origin,
+    tk_embed_parent,
+)
 
 
 def test_embed_origin_not_root_relative(tk_root) -> None:
@@ -38,3 +48,55 @@ def test_embed_parent_returns_nonzero_handle(tk_root) -> None:
     embed = tk_embed_parent(frame)
     assert isinstance(embed, EmbedParent)
     assert embed.handle != 0
+
+
+def test_require_tk_thread_rejects_other_thread(tk_root) -> None:
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root)
+    require_tk_thread(frame)
+
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            require_tk_thread(frame)
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], RuntimeError)
+    assert "thread" in str(errors[0]).lower()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only lookup path")
+def test_mac_nsview_lookup_uses_existing_widget_tcl(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    from tkwry import _parent
+
+    created: list[object] = []
+    original_tk = tk.Tk
+
+    def tracking_tk(*args: object, **kwargs: object):
+        root = original_tk(*args, **kwargs)
+        created.append(root)
+        return root
+
+    monkeypatch.setattr(tk, "Tk", tracking_tk)
+    _parent._mac_nsview_lookup.cache_clear()
+
+    frame = tk.Frame(tk_root, width=200, height=150)
+    frame.pack_propagate(False)
+    frame.pack()
+    tk_root.update_idletasks()
+
+    embed = tk_embed_parent(frame)
+    assert embed.handle != 0
+    assert created == []

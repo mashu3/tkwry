@@ -19,7 +19,7 @@ from tkwry._core import (
 from tkwry._core import (
     WebView as NativeWebView,
 )
-from tkwry._parent import tk_embed_origin, tk_embed_parent
+from tkwry._parent import require_tk_thread, tk_embed_origin, tk_embed_parent
 from tkwry._runtime import GtkPump
 from tkwry._url import _normalize_url, _validate_url
 from tkwry.exceptions import WebViewDestroyedError, WebViewNotReadyError
@@ -293,6 +293,10 @@ class WebView:
     asynchronous; the callback receives the result string on the Tk main thread.
 
     Call :meth:`destroy` or destroy the host frame to release the native view.
+
+    All public methods must run on the **Tk thread** (the thread that created
+    the host frame's Tcl interpreter and runs the event loop). Calls from other
+    threads raise ``RuntimeError``.
     """
 
     def __init__(
@@ -315,6 +319,7 @@ class WebView:
         on_new_window: Optional[NewWindowHandler] = None,
         drag_drop_handler: Optional[DragDropHandler] = None,
     ) -> None:
+        require_tk_thread(frame)
         self._frame = frame
         self._early_create = width is not None or height is not None
         self._init_width = max(width if width is not None else _DEFAULT_WIDTH, 1)
@@ -367,16 +372,19 @@ class WebView:
             self._schedule_try_create()
 
     def pack(self, **kwargs) -> None:
+        self._require_tk_thread()
         self._frame.pack(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
 
     def grid(self, **kwargs) -> None:
+        self._require_tk_thread()
         self._frame.grid(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
 
     def place(self, **kwargs) -> None:
+        self._require_tk_thread()
         self._frame.place(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
@@ -405,11 +413,13 @@ class WebView:
     @property
     def ready(self) -> bool:
         """``True`` once the native webview has been created and not destroyed."""
+        self._require_tk_thread()
         return self._webview is not None and not self._destroyed
 
     @property
     def url(self) -> Optional[str]:
         """Current document URL, or the pending URL before creation."""
+        self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
         if self._webview is None:
@@ -419,15 +429,18 @@ class WebView:
     @property
     def native(self) -> Optional[NativeWebViewType]:
         """Underlying :class:`tkwry._core.WebView`, or ``None`` if not created."""
+        self._require_tk_thread()
         return self._webview
 
     @property
     def destroyed(self) -> bool:
         """``True`` after :meth:`destroy` or host-frame destruction."""
+        self._require_tk_thread()
         return self._destroyed
 
     def bind(self, sequence: str, func: Callable, add: str | None = None) -> str:
         """Bind a Tk event on the host frame (e.g. ``\"<<WebViewReady>>\"``)."""
+        self._require_tk_thread()
         result = self._frame.bind(sequence, func, add=add)
         if sequence == "<<WebViewReady>>" and self.ready:
 
@@ -443,16 +456,18 @@ class WebView:
 
     def when_ready(self, callback: Callable[[], None]) -> None:
         """Schedule *callback* on the Tk main thread once the native view exists."""
+        self._require_tk_thread()
         if self._destroyed:
             return
-        if self.ready:
+        if self._webview is not None:
             self._frame.after_idle(callback)
         else:
             self._ready_callbacks.append(callback)
 
     def wait_until_ready(self, timeout: float | None = 30.0) -> bool:
         """Pump the Tk loop until the native webview is created or *timeout* elapses."""
-        if self.ready:
+        self._require_tk_thread()
+        if self._webview is not None and not self._destroyed:
             return True
         if self._destroyed:
             return False
@@ -475,6 +490,7 @@ class WebView:
 
     def destroy(self) -> None:
         """Hide and release the native webview without destroying the host frame."""
+        self._require_tk_thread()
         if self._destroyed:
             return
         self._destroyed = True
@@ -496,6 +512,7 @@ class WebView:
         is loaded. Before the native view exists, the URL is stored and applied
         at creation (unless superseded by :meth:`load_html`).
         """
+        self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
         normalized = _normalize_url(url)
@@ -513,6 +530,7 @@ class WebView:
         Like :meth:`load_url`, rapid calls are coalesced (**last-wins**).
         ``load_html`` supersedes any pending :meth:`load_url` call.
         """
+        self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
         if self._webview is None:
@@ -593,6 +611,7 @@ class WebView:
         return self._webview.is_devtools_open()
 
     def set_ipc_handler(self, handler: Optional[IpcHandler]) -> None:
+        self._require_tk_thread()
         self._ipc_handler = handler
         if self._webview is not None:
             if handler is not None:
@@ -603,6 +622,7 @@ class WebView:
             self._ensure_event_poll()
 
     def set_on_navigation(self, handler: Optional[NavigationHandler]) -> None:
+        self._require_tk_thread()
         self._on_navigation = handler
         if self._webview is not None:
             if handler is not None:
@@ -613,6 +633,7 @@ class WebView:
                     clear()
 
     def set_on_page_load(self, handler: Optional[PageLoadHandler]) -> None:
+        self._require_tk_thread()
         self._on_page_load = handler
         if handler is not None:
             self._discard_page_load_backlog()
@@ -626,11 +647,13 @@ class WebView:
         (e.g. custom geometry) so the WebView reflows — useful for centered
         images and responsive content.
         """
+        self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
         self._sync_bounds()
 
     def set_on_title_changed(self, handler: Optional[TitleChangedHandler]) -> None:
+        self._require_tk_thread()
         self._on_title_changed = handler
         if self._webview is not None and handler is not None:
             self._webview.set_on_title_changed(self._native_title_changed)
@@ -638,11 +661,13 @@ class WebView:
             self._ensure_event_poll()
 
     def set_on_new_window(self, handler: Optional[NewWindowHandler]) -> None:
+        self._require_tk_thread()
         self._on_new_window = handler
         if self._webview is not None:
             self._webview.set_on_new_window(self._native_new_window)
 
     def set_drag_drop_handler(self, handler: Optional[DragDropHandler]) -> None:
+        self._require_tk_thread()
         self._drag_drop_handler = handler
         if self._webview is not None and handler is not None:
             self._webview.set_drag_drop_handler(self._native_drag_drop)
@@ -659,7 +684,11 @@ class WebView:
         self._create_pending = False
         self._try_create()
 
+    def _require_tk_thread(self) -> None:
+        require_tk_thread(self._frame)
+
     def _require_ready(self, method: str) -> None:
+        self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError(
                 f"WebView.destroy() was called; cannot call {method}()"

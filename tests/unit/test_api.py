@@ -105,6 +105,32 @@ def test_webview_repr_states(tk_root) -> None:
     frame.destroy()
 
 
+def test_webview_rejects_other_thread(tk_root) -> None:
+    import threading
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, url="https://example.com")
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            web.load_url("https://example.com/other")
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], RuntimeError)
+    assert "thread" in str(errors[0]).lower()
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_webview_exposes_documented_members() -> None:
     for name in WEBVIEW_METHODS:
         assert callable(getattr(WebView, name, None)), name

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from ctypes import CDLL, c_void_p
 from dataclasses import dataclass
 from functools import lru_cache
@@ -11,6 +12,9 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import tkinter as tk
+
+# Tcl interpreter id -> thread that first used it with tkwry (must be the owner).
+_interp_threads: dict[int, int] = {}
 
 
 @dataclass(frozen=True)
@@ -25,6 +29,25 @@ class EmbedParent:
 
     handle: int
     root_relative: bool = False
+
+
+def require_tk_thread(widget: tk.Misc) -> None:
+    """Raise ``RuntimeError`` if called off the thread that owns *widget*.
+
+    Tkinter is not thread-safe. tkwry records the thread that first touches each
+    Tcl interpreter and rejects later calls from any other thread.
+    """
+    interp = id(widget.tk)
+    ident = threading.get_ident()
+    owner = _interp_threads.get(interp)
+    if owner is None:
+        _interp_threads[interp] = ident
+        return
+    if ident != owner:
+        raise RuntimeError(
+            "tkwry must be called from the thread that created the Tk "
+            "application (the thread that runs the Tk event loop)"
+        )
 
 
 def _mac_libtk_path(tcl_lib: str) -> str:
@@ -66,16 +89,8 @@ def _mac_libtk_path(tcl_lib: str) -> str:
 
 
 @lru_cache(maxsize=1)
-def _mac_nsview_lookup() -> CDLL:
-    import tkinter as tk
-
-    root = tk.Tk()
-    root.withdraw()
-    try:
-        tcl_lib = root.tk.call("info", "library")
-    finally:
-        root.destroy()
-
+def _mac_nsview_lookup(tcl_lib: str):
+    """Return ``TkMacOSXGetRootControl`` for the Tk build next to *tcl_lib*."""
     dylib = CDLL(_mac_libtk_path(tcl_lib))
     fn = dylib.TkMacOSXGetRootControl
     fn.restype = c_void_p
@@ -85,6 +100,7 @@ def _mac_nsview_lookup() -> CDLL:
 
 def tk_embed_parent(widget: tk.Misc) -> EmbedParent:
     """Return the native parent handle and positioning mode for *widget*."""
+    require_tk_thread(widget)
     widget.update_idletasks()
     wid = widget.winfo_id()
 
@@ -92,12 +108,14 @@ def tk_embed_parent(widget: tk.Misc) -> EmbedParent:
         return EmbedParent(wid)
 
     if sys.platform == "darwin":
-        nsview = _mac_nsview_lookup()(c_void_p(wid))
+        tcl_lib = widget.tk.call("info", "library")
+        lookup = _mac_nsview_lookup(tcl_lib)
+        nsview = lookup(c_void_p(wid))
         if not nsview:
             raise RuntimeError("TkMacOSXGetRootControl returned NULL")
         handle = int(nsview)
         top = widget.winfo_toplevel()
-        top_ns = _mac_nsview_lookup()(c_void_p(top.winfo_id()))
+        top_ns = lookup(c_void_p(top.winfo_id()))
         root_relative = bool(top_ns) and handle == int(top_ns)
         return EmbedParent(handle, root_relative=root_relative)
 
@@ -112,6 +130,7 @@ def tk_parent_handle(widget: tk.Misc) -> int:
 
 def tk_embed_origin(widget: tk.Misc, *, root_relative: bool) -> tuple[int, int]:
     """Return the (x, y) origin for ``set_bounds`` inside the embed parent."""
+    require_tk_thread(widget)
     if not root_relative:
         return (0, 0)
     toplevel = widget.winfo_toplevel()
