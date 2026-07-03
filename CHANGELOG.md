@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.0.4] - 2026-07-04
+
+### Added
+
+- `file://` URLs and local filesystem paths in `load_url` (relative assets resolve correctly)
+- Public callback type aliases (`IpcHandler`, `NavigationHandler`, `PageLoadHandler`, and others)
+- `WebView.__repr__` for easier debugging
+- Off-thread `WebView` API calls raise `RuntimeError` instead of failing unpredictably
+
+### Fixed
+
+- `<<WebViewReady>>` handlers bound after ready now receive a Tk event argument
+- `set_on_new_window(None)` and `set_on_navigation(None)` clear the active handler
+- Explicit `width=800, height=600` is treated as an intentional size (no magic-number default check)
+- Windows drive paths (`C:\...`) normalize to `file://` URIs
+- macOS no longer creates a temporary `Tk()` to resolve the libtk path
+
 ## [0.0.3] - 2026-07-02
 
 ### Added
@@ -57,6 +74,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.0.4]: https://github.com/mashu3/tkwry/releases/tag/v0.0.4
 [0.0.3]: https://github.com/mashu3/tkwry/releases/tag/v0.0.3
 [0.0.2]: https://github.com/mashu3/tkwry/releases/tag/v0.0.2
 [0.0.1]: https://github.com/mashu3/tkwry/releases/tag/v0.0.1
