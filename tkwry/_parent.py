@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import tkinter as tk
 
-# Tcl interpreter id -> owning thread id (set only from the Tk thread).
+# Tcl interpreter id / widget id -> owning thread id (bound only on the Tk thread).
 _interp_threads: dict[int, int] = {}
+_widget_threads: dict[int, int] = {}
 
-_TK_THREAD_ATTR = "_tkwry_tk_thread"
 _THREAD_ERROR = (
     "tkwry must be called from the thread that created the Tk "
     "application (the thread that runs the Tk event loop)"
@@ -43,27 +43,29 @@ def check_tk_thread_id(owner: int) -> None:
         raise RuntimeError(_THREAD_ERROR)
 
 
-def require_tk_thread(widget: tk.Misc) -> None:
-    """Raise ``RuntimeError`` if called off the thread that owns *widget*.
-
-    Tkinter is not thread-safe. The owning thread is recorded on first use and
-    cached on the widget as a plain Python attribute so later checks never touch
-    Tcl from a foreign thread (which can abort the process on Linux).
-    """
-    ident = threading.get_ident()
-    # Safe from any thread: plain Python attribute, no Tcl access.
-    owner = getattr(widget, _TK_THREAD_ATTR, None)
-    if owner is not None:
-        check_tk_thread_id(owner)
-        return
-
-    # First bind must run on the Tk thread (accessing widget.tk is only safe there).
+def _bind_tk_thread(widget: tk.Misc, key: int) -> int:
+    """Record the owning thread for *widget* (must run on the Tk thread)."""
     interp = id(widget.tk)
     owner = _interp_threads.get(interp)
     if owner is None:
-        owner = ident
+        owner = threading.get_ident()
         _interp_threads[interp] = owner
-    setattr(widget, _TK_THREAD_ATTR, owner)
+    _widget_threads[key] = owner
+    return owner
+
+
+def require_tk_thread(widget: tk.Misc) -> None:
+    """Raise ``RuntimeError`` if called off the thread that owns *widget*.
+
+    Tkinter is not thread-safe. The owning thread is recorded on first use.
+    Later checks use only ``id(widget)`` and integer comparison so foreign
+    threads never touch the widget or Tcl (either can abort on Linux).
+    """
+    # id() is safe from any thread; do not getattr/setattr the widget off-thread.
+    key = id(widget)
+    owner = _widget_threads.get(key)
+    if owner is None:
+        owner = _bind_tk_thread(widget, key)
     check_tk_thread_id(owner)
 
 

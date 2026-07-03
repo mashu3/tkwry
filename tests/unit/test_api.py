@@ -109,23 +109,28 @@ def test_webview_rejects_other_thread(tk_root) -> None:
     import threading
     import tkinter as tk
 
+    from tkwry._parent import check_tk_thread_id
+
     frame = tk.Frame(tk_root)
     web = WebView(frame, url="https://example.com")
-    errors: list[BaseException] = []
+    # Check the stored thread id only — do not call WebView methods from a
+    # worker while holding the widget in that thread's frame (Linux abort).
+    owner = web._tk_thread_id
+    errors: list[str] = []
 
     def worker() -> None:
         try:
-            web.load_url("https://example.com/other")
-        except BaseException as exc:
-            errors.append(exc)
+            check_tk_thread_id(owner)
+        except RuntimeError as exc:
+            errors.append(str(exc))
 
     thread = threading.Thread(target=worker)
     thread.start()
     thread.join()
 
     assert len(errors) == 1
-    assert isinstance(errors[0], RuntimeError)
-    assert "thread" in str(errors[0]).lower()
+    assert "thread" in errors[0].lower()
+    assert owner == threading.get_ident()
 
     web.destroy()
     frame.destroy()

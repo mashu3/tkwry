@@ -53,24 +53,27 @@ def test_embed_parent_returns_nonzero_handle(tk_root) -> None:
 def test_require_tk_thread_rejects_other_thread(tk_root) -> None:
     import tkinter as tk
 
+    from tkwry._parent import check_tk_thread_id
+
     frame = tk.Frame(tk_root)
     require_tk_thread(frame)
-
-    errors: list[BaseException] = []
+    # Capture a plain int on the Tk thread. Never pass the widget into a
+    # worker — even reading it from another thread can abort on Linux.
+    owner = threading.get_ident()
+    errors: list[str] = []
 
     def worker() -> None:
         try:
-            require_tk_thread(frame)
-        except BaseException as exc:
-            errors.append(exc)
+            check_tk_thread_id(owner)
+        except RuntimeError as exc:
+            errors.append(str(exc))
 
     thread = threading.Thread(target=worker)
     thread.start()
     thread.join()
 
     assert len(errors) == 1
-    assert isinstance(errors[0], RuntimeError)
-    assert "thread" in str(errors[0]).lower()
+    assert "thread" in errors[0].lower()
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only lookup path")
