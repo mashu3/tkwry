@@ -403,9 +403,18 @@ class WebView:
 
     def bind(self, sequence: str, func: Callable, add: str | None = None) -> str:
         """Bind a Tk event on the host frame (e.g. ``\"<<WebViewReady>>\"``)."""
+        result = self._frame.bind(sequence, func, add=add)
         if sequence == "<<WebViewReady>>" and self.ready:
-            self._frame.after_idle(func)
-        return self._frame.bind(sequence, func, add=add)
+
+            def _deliver_ready(
+                _func: Callable = func, _frame: tk.Misc = self._frame
+            ) -> None:
+                evt = tk.Event()
+                evt.widget = _frame
+                _func(evt)
+
+            self._frame.after_idle(_deliver_ready)
+        return result
 
     def when_ready(self, callback: Callable[[], None]) -> None:
         """Schedule *callback* on the Tk main thread once the native view exists."""
@@ -597,8 +606,8 @@ class WebView:
 
     def set_on_new_window(self, handler: Optional[NewWindowHandler]) -> None:
         self._on_new_window = handler
-        if self._webview is not None and handler is not None:
-            self._webview.set_on_new_window(self._on_new_window)
+        if self._webview is not None:
+            self._webview.set_on_new_window(self._native_new_window)
 
     def set_drag_drop_handler(self, handler: Optional[DragDropHandler]) -> None:
         self._drag_drop_handler = handler
@@ -673,6 +682,11 @@ class WebView:
 
     def _native_title_changed(self, title: str) -> None:
         self._title_queue.put(title)
+
+    def _native_new_window(self, url: str) -> NewWindowResponse:
+        if self._on_new_window is None:
+            return NewWindowResponse.Allow
+        return self._on_new_window(url)
 
     def _enqueue_ipc(self, message: str) -> None:
         self._ipc_queue.put(message)
@@ -816,7 +830,7 @@ class WebView:
         if self._on_title_changed is not None:
             kwargs["on_title_changed"] = self._native_title_changed
         if self._on_new_window is not None:
-            kwargs["on_new_window"] = self._on_new_window
+            kwargs["on_new_window"] = self._native_new_window
         if self._drag_drop_handler is not None:
             kwargs["drag_drop_handler"] = self._native_drag_drop
 

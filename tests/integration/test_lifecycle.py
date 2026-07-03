@@ -106,6 +106,52 @@ def test_when_ready_fires_immediately_if_already_ready(tk_root) -> None:
     frame.destroy()
 
 
+def test_ready_bind_after_ready_passes_event(tk_root) -> None:
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root, width=400, height=300)
+    frame.pack_propagate(False)
+    frame.pack()
+    tk_root.update_idletasks()
+
+    web = WebView(frame, html="<p>bind-after-ready</p>")
+    assert web.wait_until_ready(timeout=10.0)
+
+    events: list[tk.Event] = []
+    web.bind("<<WebViewReady>>", lambda evt: events.append(evt))
+    pump(tk_root, steps=5)
+    assert len(events) == 1
+    assert events[0].widget is web._frame
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_set_on_new_window_none_clears_handler(tk_root) -> None:
+    from tkwry import NewWindowResponse
+
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>newwin</p>")
+    assert web.wait_until_ready(timeout=10.0)
+
+    calls: list[str] = []
+
+    def handler(url: str) -> NewWindowResponse:
+        calls.append(url)
+        return NewWindowResponse.Deny
+
+    web.set_on_new_window(handler)
+    assert web._native_new_window("https://example.com/") == NewWindowResponse.Deny
+    assert calls == ["https://example.com/"]
+
+    web.set_on_new_window(None)
+    assert web._native_new_window("https://example.com/2") == NewWindowResponse.Allow
+    assert calls == ["https://example.com/"]
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_double_destroy_is_safe(tk_root) -> None:
     frame = bare_frame(tk_root)
     web = WebView(frame, width=400, height=300, html="<p>destroy</p>")
