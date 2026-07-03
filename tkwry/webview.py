@@ -465,7 +465,10 @@ class WebView:
             self._webview = None
 
     def load_url(self, url: str) -> None:
-        """Navigate to *url* (``http``/``https`` only; scheme optional).
+        """Navigate to *url* (``http``/``https``/``file``; scheme optional).
+
+        Local filesystem paths (``/path/to/page.html``, ``C:\\page.html``) are
+        normalized to ``file://`` URLs so relative assets resolve correctly.
 
         Multiple rapid calls are coalesced (**last-wins**): only the final URL
         is loaded. Before the native view exists, the URL is stored and applied

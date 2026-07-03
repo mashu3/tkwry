@@ -7,6 +7,7 @@ Linux — v0.0.x treats Linux as best-effort (see README / CHANGELOG).
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 from support.tk import host_frame, pump, wait_until
@@ -220,6 +221,53 @@ def test_drag_drop_native_queues_without_blocking(tk_root) -> None:
     assert wait_until(tk_root, lambda: len(received) >= 2, steps=100), (
         f"expected queued drag events, got {received!r}"
     )
+
+    web.destroy()
+    frame.destroy()
+
+
+@pytest.mark.skipif(
+    sys.platform == "linux",
+    reason="WebKitGTK headless CI: local file URL loading unreliable",
+)
+def test_load_local_html_resolves_relative_resources(tk_root, tmp_path: Path) -> None:
+    (tmp_path / "style.css").write_text(
+        "p { color: rgb(255, 0, 0); }", encoding="utf-8"
+    )
+    (tmp_path / "index.html").write_text(
+        (
+            "<!doctype html><html><head>"
+            '<link rel="stylesheet" href="style.css">'
+            "</head><body><p id='t'>local</p></body></html>"
+        ),
+        encoding="utf-8",
+    )
+
+    events: list[tuple[PageLoadEvent, str]] = []
+    frame = host_frame(tk_root)
+    web = WebView(
+        frame,
+        on_page_load=lambda evt, url: events.append((evt, url)),
+    )
+    web.load_url(str(tmp_path / "index.html"))
+
+    assert wait_until(tk_root, lambda: web.ready, steps=200)
+    assert wait_until(
+        tk_root,
+        lambda: any(evt == PageLoadEvent.Finished for evt, _ in events),
+        steps=400,
+    ), f"expected page load, got {events!r}"
+    pump(tk_root, steps=50)
+
+    colors: list[str] = []
+
+    def on_color(value: str) -> None:
+        colors.append(value)
+
+    script = "getComputedStyle(document.getElementById('t')).color"
+    web.eval_js_with_callback(script, on_color)
+    assert wait_until(tk_root, lambda: colors, steps=100), "expected computed color"
+    assert "255" in colors[0] or "rgb(255" in colors[0].replace(" ", "")
 
     web.destroy()
     frame.destroy()
