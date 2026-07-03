@@ -10,12 +10,16 @@ from urllib.request import url2pathname
 _SUPPORTED_SCHEMES = frozenset({"http", "https", "file"})
 
 
+def _is_windows_drive_path(url: str) -> bool:
+    return len(url) >= 3 and url[0].isalpha() and url[1] == ":" and url[2] in "/\\"
+
+
 def _looks_like_file_path(url: str) -> bool:
     if url.startswith(("/", "./", "../", "~")):
         return True
     if len(url) >= 2 and url[0] == "." and url[1] in "/\\":
         return True
-    if len(url) >= 3 and url[0].isalpha() and url[1] == ":" and url[2] in "/\\":
+    if _is_windows_drive_path(url):
         return True
     return Path(os.path.expanduser(url)).exists()
 
@@ -41,6 +45,8 @@ def _normalize_url(url: str) -> str:
         cleaned = cleaned.replace(invisible, "")
     if not cleaned:
         raise ValueError("URL is empty")
+    if _is_windows_drive_path(cleaned):
+        return _file_uri_from_path(cleaned)
     parsed = urlparse(cleaned)
     if parsed.scheme == "file":
         return _normalize_file_url(cleaned)

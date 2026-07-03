@@ -72,3 +72,18 @@ def test_normalize_relative_path_to_file_uri(
     monkeypatch.chdir(tmp_path)
 
     assert _normalize_url("index.html") == page.resolve().as_uri()
+
+
+def test_normalize_windows_drive_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+
+    def fake_file_uri(path: str) -> str:
+        seen.append(path)
+        return "file:///C:/Users/foo/index.html"
+
+    monkeypatch.setattr("tkwry._url._file_uri_from_path", fake_file_uri)
+
+    assert (
+        _normalize_url(r"C:\Users\foo\index.html") == "file:///C:/Users/foo/index.html"
+    )
+    assert seen == [r"C:\Users\foo\index.html"]
