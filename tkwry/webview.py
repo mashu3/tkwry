@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import queue
 import sys
+import threading
 import time
 import tkinter as tk
 import traceback
@@ -19,7 +20,12 @@ from tkwry._core import (
 from tkwry._core import (
     WebView as NativeWebView,
 )
-from tkwry._parent import require_tk_thread, tk_embed_origin, tk_embed_parent
+from tkwry._parent import (
+    check_tk_thread_id,
+    require_tk_thread,
+    tk_embed_origin,
+    tk_embed_parent,
+)
 from tkwry._runtime import GtkPump
 from tkwry._url import _normalize_url, _validate_url
 from tkwry.exceptions import WebViewDestroyedError, WebViewNotReadyError
@@ -321,6 +327,7 @@ class WebView:
     ) -> None:
         require_tk_thread(frame)
         self._frame = frame
+        self._tk_thread_id = threading.get_ident()
         self._early_create = width is not None or height is not None
         self._init_width = max(width if width is not None else _DEFAULT_WIDTH, 1)
         self._init_height = max(height if height is not None else _DEFAULT_HEIGHT, 1)
@@ -685,7 +692,8 @@ class WebView:
         self._try_create()
 
     def _require_tk_thread(self) -> None:
-        require_tk_thread(self._frame)
+        # Compare a plain int only — never touch Tk/Tcl from a foreign thread.
+        check_tk_thread_id(self._tk_thread_id)
 
     def _require_ready(self, method: str) -> None:
         self._require_tk_thread()

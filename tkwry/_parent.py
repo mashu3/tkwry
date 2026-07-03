@@ -13,8 +13,14 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import tkinter as tk
 
-# Tcl interpreter id -> thread that first used it with tkwry (must be the owner).
+# Tcl interpreter id -> owning thread id (set only from the Tk thread).
 _interp_threads: dict[int, int] = {}
+
+_TK_THREAD_ATTR = "_tkwry_tk_thread"
+_THREAD_ERROR = (
+    "tkwry must be called from the thread that created the Tk "
+    "application (the thread that runs the Tk event loop)"
+)
 
 
 @dataclass(frozen=True)
@@ -31,23 +37,34 @@ class EmbedParent:
     root_relative: bool = False
 
 
+def check_tk_thread_id(owner: int) -> None:
+    """Raise ``RuntimeError`` if the current thread is not *owner*."""
+    if threading.get_ident() != owner:
+        raise RuntimeError(_THREAD_ERROR)
+
+
 def require_tk_thread(widget: tk.Misc) -> None:
     """Raise ``RuntimeError`` if called off the thread that owns *widget*.
 
-    Tkinter is not thread-safe. tkwry records the thread that first touches each
-    Tcl interpreter and rejects later calls from any other thread.
+    Tkinter is not thread-safe. The owning thread is recorded on first use and
+    cached on the widget as a plain Python attribute so later checks never touch
+    Tcl from a foreign thread (which can abort the process on Linux).
     """
-    interp = id(widget.tk)
     ident = threading.get_ident()
+    # Safe from any thread: plain Python attribute, no Tcl access.
+    owner = getattr(widget, _TK_THREAD_ATTR, None)
+    if owner is not None:
+        check_tk_thread_id(owner)
+        return
+
+    # First bind must run on the Tk thread (accessing widget.tk is only safe there).
+    interp = id(widget.tk)
     owner = _interp_threads.get(interp)
     if owner is None:
-        _interp_threads[interp] = ident
-        return
-    if ident != owner:
-        raise RuntimeError(
-            "tkwry must be called from the thread that created the Tk "
-            "application (the thread that runs the Tk event loop)"
-        )
+        owner = ident
+        _interp_threads[interp] = owner
+    setattr(widget, _TK_THREAD_ATTR, owner)
+    check_tk_thread_id(owner)
 
 
 def _mac_libtk_path(tcl_lib: str) -> str:
