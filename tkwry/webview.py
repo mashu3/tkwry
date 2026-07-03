@@ -9,7 +9,7 @@ import time
 import tkinter as tk
 import traceback
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Literal, Optional, TypeAlias
 
 from tkwry._core import (
     DragDropEvent,
@@ -27,13 +27,14 @@ from tkwry.exceptions import WebViewDestroyedError, WebViewNotReadyError
 if TYPE_CHECKING:
     from tkwry._core import WebView as NativeWebViewType
 
-NavigationHandler = Callable[[str], bool]
-PageLoadHandler = Callable[[PageLoadEvent, str], None]
-TitleChangedHandler = Callable[[str], None]
-NewWindowHandler = Callable[[str], NewWindowResponse]
-DragDropHandler = Callable[[DragDropEvent, list[str], tuple[int, int]], bool]
-EvalCallback = Callable[[str], None]
-_LoadKind = str  # "url" | "html"
+IpcHandler: TypeAlias = Callable[[str], None]
+NavigationHandler: TypeAlias = Callable[[str], bool]
+PageLoadHandler: TypeAlias = Callable[[PageLoadEvent, str], None]
+TitleChangedHandler: TypeAlias = Callable[[str], None]
+NewWindowHandler: TypeAlias = Callable[[str], NewWindowResponse]
+DragDropHandler: TypeAlias = Callable[[DragDropEvent, list[str], tuple[int, int]], bool]
+EvalCallback: TypeAlias = Callable[[str], None]
+_LoadKind: TypeAlias = Literal["url", "html"]
 
 _DEFAULT_WIDTH = 800
 _DEFAULT_HEIGHT = 600
@@ -302,7 +303,7 @@ class WebView:
         height: int | None = None,
         url: Optional[str] = None,
         html: Optional[str] = None,
-        ipc_handler: Optional[Callable[[str], None]] = None,
+        ipc_handler: Optional[IpcHandler] = None,
         devtools: bool = False,
         background_color: Optional[tuple[int, int, int, int]] = None,
         user_agent: Optional[str] = None,
@@ -379,6 +380,27 @@ class WebView:
         self._frame.place(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
+
+    def __repr__(self) -> str:
+        if self._destroyed:
+            state = "destroyed"
+            url = None
+        elif self._webview is None:
+            state = "pending"
+            url = self._pending_url
+            if url is None and self._pending_html is not None:
+                url = "<html>"
+        else:
+            state = "ready"
+            try:
+                url = self._webview.url()
+            except Exception:
+                url = None
+        try:
+            frame = str(self._frame)
+        except Exception:
+            frame = "<unavailable>"
+        return f"<WebView state={state} url={url!r} frame={frame}>"
 
     @property
     def ready(self) -> bool:
@@ -570,7 +592,7 @@ class WebView:
         self._require_ready("is_devtools_open")
         return self._webview.is_devtools_open()
 
-    def set_ipc_handler(self, handler: Optional[Callable[[str], None]]) -> None:
+    def set_ipc_handler(self, handler: Optional[IpcHandler]) -> None:
         self._ipc_handler = handler
         if self._webview is not None:
             if handler is not None:

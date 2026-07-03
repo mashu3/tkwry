@@ -10,9 +10,26 @@ from tkwry._core import WebView as NativeWebView
 import tkwry
 from tkwry import (
     DragDropEvent,
+    DragDropHandler,
+    EvalCallback,
+    IpcHandler,
+    NavigationHandler,
+    NewWindowHandler,
     NewWindowResponse,
     PageLoadEvent,
+    PageLoadHandler,
+    TitleChangedHandler,
     WebView,
+)
+
+PUBLIC_TYPE_ALIASES = (
+    DragDropHandler,
+    EvalCallback,
+    IpcHandler,
+    NavigationHandler,
+    NewWindowHandler,
+    PageLoadHandler,
+    TitleChangedHandler,
 )
 
 WEBVIEW_METHODS = (
@@ -68,6 +85,24 @@ def test_public_exports() -> None:
     assert NewWindowResponse is not None
     assert tkwry.WebViewNotReadyError is not None
     assert tkwry.WebViewDestroyedError is not None
+    for alias in PUBLIC_TYPE_ALIASES:
+        assert alias is not None
+
+
+def test_webview_repr_states(tk_root) -> None:
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, url="https://example.com")
+    text = repr(web)
+    assert "WebView" in text
+    assert "pending" in text
+    assert "https://example.com" in text
+    assert str(frame) in text
+
+    web.destroy()
+    assert "destroyed" in repr(web)
+    frame.destroy()
 
 
 def test_webview_exposes_documented_members() -> None:

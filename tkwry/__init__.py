@@ -7,7 +7,16 @@ from tkwry._version import __version__
 from tkwry.exceptions import WebViewDestroyedError, WebViewNotReadyError
 
 try:
-    from tkwry.webview import WebView
+    from tkwry.webview import (
+        DragDropHandler,
+        EvalCallback,
+        IpcHandler,
+        NavigationHandler,
+        NewWindowHandler,
+        PageLoadHandler,
+        TitleChangedHandler,
+        WebView,
+    )
 except ImportError as exc:
     if sys.platform.startswith("linux") and "_core" in str(exc):
         raise ImportError(
@@ -19,8 +28,15 @@ except ImportError as exc:
 
 __all__ = [
     "DragDropEvent",
+    "DragDropHandler",
+    "EvalCallback",
+    "IpcHandler",
+    "NavigationHandler",
+    "NewWindowHandler",
     "NewWindowResponse",
     "PageLoadEvent",
+    "PageLoadHandler",
+    "TitleChangedHandler",
     "WebView",
     "WebViewDestroyedError",
     "WebViewNotReadyError",
