@@ -18,13 +18,14 @@ try:
         TitleChangedHandler,
         WebView,
     )
-except ImportError as exc:
-    if sys.platform.startswith("linux") and "_core" in str(exc):
+except ImportError:
+    err = sys.exc_info()[1]
+    if err is not None and sys.platform.startswith("linux") and "_core" in str(err):
         raise ImportError(
             "tkwry publishes pre-built wheels for Windows and macOS only. "
             "On Linux, install WebKitGTK development packages and build from "
             "source (see README)."
-        ) from exc
+        ) from err
     raise
 
 __all__ = [

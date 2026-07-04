@@ -9,7 +9,7 @@ import time
 import tkinter as tk
 import traceback
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal, TypeAlias
+from typing import Literal, TypeAlias
 
 from tkwry._core import (
     DragDropEvent,
@@ -40,9 +40,6 @@ if sys.platform == "darwin":
         _unregister_macos_webview,
     )
 
-if TYPE_CHECKING:
-    from tkwry._core import WebView as NativeWebViewType
-
 IpcHandler: TypeAlias = Callable[[str], None]
 NavigationHandler: TypeAlias = Callable[[str], bool]
 PageLoadHandler: TypeAlias = Callable[[PageLoadEvent, str], None]
@@ -51,7 +48,7 @@ NewWindowHandler: TypeAlias = Callable[[str], NewWindowResponse]
 DragDropHandler: TypeAlias = Callable[[DragDropEvent, list[str], tuple[int, int]], bool]
 EvalCallback: TypeAlias = Callable[[str], None]
 EvalErrorHandler: TypeAlias = Callable[[Exception], None]
-_LoadKind: TypeAlias = Literal["url", "html"]
+_PendingLoad: TypeAlias = tuple[Literal["url"], str] | tuple[Literal["html"], str]
 
 _DEFAULT_WIDTH = 800
 _DEFAULT_HEIGHT = 600
@@ -131,7 +128,7 @@ class WebView:
         self._ready_callbacks: list[Callable[[], None]] = []
         self._create_pending = False
         self._embed = tk_embed_parent(frame)
-        self._webview: NativeWebViewType | None = None
+        self._webview: NativeWebView | None = None
         self._ipc_handler = ipc_handler
         self._on_navigation = on_navigation
         self._on_page_load = on_page_load
@@ -157,10 +154,10 @@ class WebView:
         self._event_poll_active = False
         self._pending_url: str | None = url
         self._pending_html: str | None = html
-        self._pending_load: tuple[_LoadKind, str] | None = None
+        self._pending_load: _PendingLoad | None = None
         self._flush_load_scheduled = False
         self._bounds_sync_scheduled = False
-        self._initial_load: tuple[_LoadKind, str] | None = None
+        self._initial_load: _PendingLoad | None = None
         self._initial_load_attempt = 0
 
         GtkPump.attach(frame)
@@ -231,7 +228,7 @@ class WebView:
         return self._webview.url()
 
     @property
-    def native(self) -> NativeWebViewType | None:
+    def native(self) -> NativeWebView | None:
         """Underlying :class:`tkwry._core.WebView`, or ``None`` if not created."""
         self._require_tk_thread()
         return self._webview
@@ -242,7 +239,12 @@ class WebView:
         self._require_tk_thread()
         return self._destroyed
 
-    def bind(self, sequence: str, func: Callable, add: str | None = None) -> str:
+    def bind(
+        self,
+        sequence: str,
+        func: Callable[..., object],
+        add: Literal["", "+"] | None = None,
+    ) -> str:
         """Bind a Tk event on the host frame (e.g. ``\"<<WebViewReady>>\"``)."""
         self._require_tk_thread()
         result = self._frame.bind(sequence, func, add=add)
@@ -288,7 +290,7 @@ class WebView:
             root.update()
             if gtk_pump is not None:
                 gtk_pump()
-            root.after(10)
+            root.after(10, lambda: None)
             root.update()
         return self.ready
 
@@ -345,8 +347,8 @@ class WebView:
         self._schedule_flush_load()
 
     def reload(self) -> None:
-        self._require_ready("reload")
-        self._webview.reload()
+        native = self._require_ready("reload")
+        native.reload()
         if self._on_page_load is not None:
             self._ensure_event_poll()
             self._service_linux_events()
@@ -384,8 +386,8 @@ class WebView:
 
     def focus(self) -> None:
         """Move keyboard focus to the WebView (``makeFirstResponder`` on macOS)."""
-        self._require_ready("focus")
-        self._webview.focus()
+        native = self._require_ready("focus")
+        native.focus()
         if sys.platform == "darwin":
             toplevel = self._frame.winfo_toplevel()
             _set_mac_webviews_input_active(toplevel, self)
@@ -393,28 +395,25 @@ class WebView:
 
     def focus_parent(self) -> None:
         """Return keyboard focus to the native parent view (macOS Tk coexistence)."""
-        self._require_ready("focus_parent")
-        self._webview.focus_parent()
+        native = self._require_ready("focus_parent")
+        native.focus_parent()
         if sys.platform == "darwin":
             _set_mac_webviews_input_active(self._frame.winfo_toplevel(), None)
 
     def set_background_color(self, r: int, g: int, b: int, a: int = 255) -> None:
-        self._require_ready("set_background_color")
+        native = self._require_ready("set_background_color")
         for val, name in ((r, "r"), (g, "g"), (b, "b"), (a, "a")):
             _validate_color_component(val, name)
-        self._webview.set_background_color(r, g, b, a)
+        native.set_background_color(r, g, b, a)
 
     def open_devtools(self) -> None:
-        self._require_ready("open_devtools")
-        self._webview.open_devtools()
+        self._require_ready("open_devtools").open_devtools()
 
     def close_devtools(self) -> None:
-        self._require_ready("close_devtools")
-        self._webview.close_devtools()
+        self._require_ready("close_devtools").close_devtools()
 
     def is_devtools_open(self) -> bool:
-        self._require_ready("is_devtools_open")
-        return self._webview.is_devtools_open()
+        return self._require_ready("is_devtools_open").is_devtools_open()
 
     def set_ipc_handler(self, handler: IpcHandler | None) -> None:
         self._require_tk_thread()
@@ -504,7 +503,7 @@ class WebView:
         # Compare a plain int only — never touch Tk/Tcl from a foreign thread.
         check_tk_thread_id(self._tk_thread_id)
 
-    def _require_ready(self, method: str) -> None:
+    def _require_ready(self, method: str) -> NativeWebView:
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError(
@@ -515,6 +514,7 @@ class WebView:
                 f"WebView is not ready; call wait_until_ready() or bind to "
                 f"<<WebViewReady>> before calling {method}()"
             )
+        return self._webview
 
     def _creation_size(self) -> tuple[int, int] | None:
         self._frame.update_idletasks()
@@ -531,7 +531,11 @@ class WebView:
         self._ready_callbacks = []
         self._frame.event_generate("<<WebViewReady>>", when="tail")
         for callback in callbacks:
-            self._frame.after_idle(lambda cb=callback: self._invoke_callback(cb))
+
+            def _deliver_ready(cb: Callable[[], object] = callback) -> None:
+                self._invoke_callback(cb)
+
+            self._frame.after_idle(_deliver_ready)
 
     def _needs_event_poll(self) -> bool:
         return any(
@@ -590,7 +594,7 @@ class WebView:
         if native is not None:
             native.drain_page_load_events()
 
-    def _invoke_callback(self, callback: Callable[..., None], *args: object) -> None:
+    def _invoke_callback(self, callback: Callable[..., object], *args: object) -> None:
         try:
             callback(*args)
         except Exception:
@@ -698,7 +702,7 @@ class WebView:
             _validate_url(url)
 
         html = self._pending_html
-        initial_load: tuple[_LoadKind, str] | None = None
+        initial_load: _PendingLoad | None = None
         if html is not None:
             initial_load = ("html", html)
         elif url is not None:

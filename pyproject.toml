@@ -39,6 +39,7 @@ Changelog = "https://github.com/mashu3/tkwry/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 dev = [
     "maturin>=1.0",
+    "mypy>=1.13",
     "pytest>=8.0",
     "ruff>=0.9",
 ]
@@ -69,3 +70,11 @@ addopts = ["-v"]
 markers = [
     "integration: requires display and native WebView (tests/integration, tests/macos)",
 ]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["tkwry._macos", "tkwry._parent"]
+ignore_errors = true

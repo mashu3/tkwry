@@ -37,6 +37,21 @@ jobs:
       - name: Ruff format
         run: ruff format --check tkwry tests examples
 
+      - name: Install Python build dependencies
+        run: pip install "maturin>=1.0" "mypy>=1.13"
+
+      - name: Build and install package
+        env:
+          PKG_CONFIG_PATH: ""
+        run: |
+          maturin build --profile ci --out dist
+          pip install dist/*.whl
+
+      - name: Stubtest
+        run: >-
+          python -m mypy.stubtest --mypy-config-file pyproject.toml
+          tkwry._core tkwry.exceptions tkwry.webview
+
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
