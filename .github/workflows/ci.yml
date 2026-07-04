@@ -31,19 +31,23 @@ jobs:
       - name: Install ruff
         run: pip install "ruff>=0.9"
 
-      - name: Ruff
+      - name: Ruff check
         run: ruff check tkwry tests examples
+
+      - name: Ruff format
+        run: ruff format --check tkwry tests examples
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
+      - uses: Swatinem/rust-cache@v2
+
       - run: cargo fmt --check
 
       - name: Clippy
         env:
-          # setup-python points PKG_CONFIG_PATH at Python only; use system GTK.
           PKG_CONFIG_PATH: ""
         run: cargo clippy -- -D warnings
 
@@ -65,9 +69,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - uses: Swatinem/rust-cache@v2
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
@@ -89,7 +96,7 @@ jobs:
         env:
           PKG_CONFIG_PATH: ""
         run: |
-          maturin build --release --out dist
+          maturin build --profile ci --out dist
           pip install dist/*.whl
 
       - name: Configure Tcl/Tk (Windows)
