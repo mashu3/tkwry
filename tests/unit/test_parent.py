@@ -93,7 +93,7 @@ def test_mac_nsview_lookup_uses_existing_widget_tcl(
         return root
 
     monkeypatch.setattr(tk, "Tk", tracking_tk)
-    _parent._mac_nsview_lookup.cache_clear()
+    _parent._mac_tk_dylib.cache_clear()
 
     frame = tk.Frame(tk_root, width=200, height=150)
     frame.pack_propagate(False)

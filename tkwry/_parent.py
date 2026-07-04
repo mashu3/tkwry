@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
-from ctypes import CDLL, c_void_p
+from ctypes import CDLL, c_char_p, c_void_p
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING
@@ -102,15 +102,80 @@ def _mac_libtk_path(tcl_lib: str) -> str:
         return sorted(combined)[0]
     if libtk_only:
         return sorted(libtk_only)[0]
+
+    # Fallback: macOS system Tk.framework binary.  On Big Sur+ the on-disk
+    # file may be a broken symlink but dlopen resolves it via the dyld
+    # shared cache.
+    fw_idx = tcl_lib.find("Tcl.framework")
+    if fw_idx >= 0:
+        candidate = os.path.join(tcl_lib[:fw_idx], "Tk.framework", "Tk")
+        if os.path.exists(candidate) or os.path.islink(candidate):
+            return candidate
+
     raise RuntimeError(
         f"libtk dylib not found near tcl library {tcl_lib!r} (searched {search_dirs})"
     )
 
 
+def _mac_tk_version(widget: tk.Misc) -> tuple[int, ...]:
+    """Return the Tk major.minor version as a tuple."""
+    ver = widget.tk.call("info", "patchlevel")
+    return tuple(int(x) for x in str(ver).split(".")[:2])
+
+
+# Offset of the ``window`` (Drawable) field inside the TkWindow struct.
+# Stable across Tk 8.5–9.x on 64-bit platforms:
+#   Display*, TkDisplay*, int screenNum (+ 4 pad), Visual*, int depth (+ 4 pad)
+#   = 8 + 8 + 8 + 8 + 8 = 40.
+_TK_WINDOW_DRAWABLE_OFFSET = 40
+
+
+def _mac_drawable(widget: tk.Misc, dylib: CDLL) -> int:
+    """Return the full 64-bit Drawable pointer for *widget*.
+
+    Tk 8.5's ``winfo id`` truncates pointers to 32 bits on 64-bit systems.
+    This bypasses the Tcl integer conversion by reading the ``window`` field
+    directly from the C ``TkWindow`` struct.
+    """
+    wid = widget.winfo_id()
+    if _mac_tk_version(widget) >= (8, 6):
+        return wid
+
+    interp = c_void_p(widget.tk.interpaddr())
+
+    main_win_fn = dylib.Tk_MainWindow
+    main_win_fn.restype = c_void_p
+    main_win_fn.argtypes = (c_void_p,)
+    main_win = main_win_fn(interp)
+    if not main_win:
+        raise RuntimeError("Tk_MainWindow returned NULL")
+
+    name_to_win = dylib.Tk_NameToWindow
+    name_to_win.restype = c_void_p
+    name_to_win.argtypes = (c_void_p, c_char_p, c_void_p)
+    tk_win = name_to_win(interp, str(widget).encode(), c_void_p(main_win))
+    if not tk_win:
+        raise RuntimeError(f"Tk_NameToWindow failed for {widget!r}")
+
+    full = c_void_p.from_address(tk_win + _TK_WINDOW_DRAWABLE_OFFSET).value
+    if full is None or full == 0:
+        raise RuntimeError("Drawable is NULL in TkWindow struct")
+    if (full & 0xFFFFFFFF) != (wid & 0xFFFFFFFF):
+        raise RuntimeError(
+            f"Drawable sanity check failed: struct has {full:#x}, "
+            f"winfo_id returned {wid:#x}"
+        )
+    return full
+
+
 @lru_cache(maxsize=1)
-def _mac_nsview_lookup(tcl_lib: str):
-    """Return ``TkMacOSXGetRootControl`` for the Tk build next to *tcl_lib*."""
-    dylib = CDLL(_mac_libtk_path(tcl_lib))
+def _mac_tk_dylib(tcl_lib: str) -> CDLL:
+    """Load and return the Tk shared library next to *tcl_lib*."""
+    return CDLL(_mac_libtk_path(tcl_lib))
+
+
+def _mac_nsview_lookup(dylib: CDLL):
+    """Return ``TkMacOSXGetRootControl`` from *dylib*."""
     fn = dylib.TkMacOSXGetRootControl
     fn.restype = c_void_p
     fn.argtypes = (c_void_p,)
@@ -128,13 +193,16 @@ def tk_embed_parent(widget: tk.Misc) -> EmbedParent:
 
     if sys.platform == "darwin":
         tcl_lib = widget.tk.call("info", "library")
-        lookup = _mac_nsview_lookup(tcl_lib)
-        nsview = lookup(c_void_p(wid))
+        dylib = _mac_tk_dylib(tcl_lib)
+        lookup = _mac_nsview_lookup(dylib)
+        drawable = _mac_drawable(widget, dylib)
+        nsview = lookup(c_void_p(drawable))
         if not nsview:
             raise RuntimeError("TkMacOSXGetRootControl returned NULL")
         handle = int(nsview)
         top = widget.winfo_toplevel()
-        top_ns = lookup(c_void_p(top.winfo_id()))
+        top_drawable = _mac_drawable(top, dylib)
+        top_ns = lookup(c_void_p(top_drawable))
         root_relative = bool(top_ns) and handle == int(top_ns)
         return EmbedParent(handle, root_relative=root_relative)
 
