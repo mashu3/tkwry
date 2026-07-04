@@ -381,6 +381,7 @@ class WebView:
         self._pending_html: str | None = html
         self._pending_load: tuple[_LoadKind, str] | None = None
         self._flush_load_scheduled = False
+        self._bounds_sync_scheduled = False
         self._initial_load: tuple[_LoadKind, str] | None = None
         self._initial_load_attempt = 0
 
@@ -1061,10 +1062,14 @@ class WebView:
             return False
 
     def _schedule_bounds_sync(self) -> None:
-        if self._destroyed:
+        if self._destroyed or self._bounds_sync_scheduled:
             return
-        self._frame.update_idletasks()
-        self._frame.after_idle(self._sync_bounds)
+        self._bounds_sync_scheduled = True
+        self._frame.after_idle(self._deferred_sync_bounds)
+
+    def _deferred_sync_bounds(self) -> None:
+        self._bounds_sync_scheduled = False
+        self._sync_bounds()
 
     def _sync_bounds(self) -> None:
         if self._webview is None:
@@ -1085,16 +1090,16 @@ class WebView:
         if self._webview is None:
             self._schedule_try_create()
         else:
-            self._sync_bounds()
+            self._schedule_bounds_sync()
 
     def _on_map(self, event: tk.Event) -> None:
         if event.widget is self._frame:
-            self._frame.after_idle(self._sync_bounds)
+            self._schedule_bounds_sync()
             self._frame.after_idle(self._run_initial_load)
 
     def _on_unmap(self, event: tk.Event) -> None:
         if event.widget is self._frame:
-            self._frame.after_idle(self._sync_bounds)
+            self._schedule_bounds_sync()
 
     def _on_destroy(self, event: tk.Event) -> None:
         if event.widget is not self._frame:
