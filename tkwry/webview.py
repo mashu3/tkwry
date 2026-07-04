@@ -904,7 +904,7 @@ class WebView:
         kwargs: dict = {
             "width": width,
             "height": height,
-            "visible": True,
+            "visible": self._frame_should_show(),
             "devtools": self._devtools,
             "focused": self._focused,
         }
@@ -1063,6 +1063,7 @@ class WebView:
         if self._destroyed or self._bounds_sync_scheduled:
             return
         self._bounds_sync_scheduled = True
+        self._frame.update_idletasks()
         self._frame.after_idle(self._deferred_sync_bounds)
 
     def _deferred_sync_bounds(self) -> None:
