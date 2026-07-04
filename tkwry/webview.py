@@ -467,7 +467,7 @@ class WebView:
         if self._destroyed:
             return
         if self._webview is not None:
-            self._frame.after_idle(callback)
+            self._frame.after_idle(lambda: self._invoke_callback(callback))
         else:
             self._ready_callbacks.append(callback)
 
@@ -722,7 +722,7 @@ class WebView:
         self._ready_callbacks = []
         self._frame.event_generate("<<WebViewReady>>", when="tail")
         for callback in callbacks:
-            self._frame.after_idle(callback)
+            self._frame.after_idle(lambda cb=callback: self._invoke_callback(cb))
 
     def _needs_event_poll(self) -> bool:
         return any(
