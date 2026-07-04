@@ -461,10 +461,15 @@ class WebView:
     def set_on_title_changed(self, handler: TitleChangedHandler | None) -> None:
         self._require_tk_thread()
         self._on_title_changed = handler
-        if self._webview is not None and handler is not None:
-            self._webview.set_on_title_changed(self._native_title_changed)
+        if self._webview is not None:
+            if handler is not None:
+                self._webview.set_on_title_changed(self._native_title_changed)
+            else:
+                self._webview.clear_on_title_changed()
         if handler is not None:
             self._ensure_event_poll()
+        else:
+            self._drain_title_queue()
 
     def set_on_new_window(self, handler: NewWindowHandler | None) -> None:
         self._require_tk_thread()
@@ -475,10 +480,15 @@ class WebView:
     def set_drag_drop_handler(self, handler: DragDropHandler | None) -> None:
         self._require_tk_thread()
         self._drag_drop_handler = handler
-        if self._webview is not None and handler is not None:
-            self._webview.set_drag_drop_handler(self._native_drag_drop)
+        if self._webview is not None:
+            if handler is not None:
+                self._webview.set_drag_drop_handler(self._native_drag_drop)
+            else:
+                self._webview.clear_drag_drop_handler()
         if handler is not None:
             self._ensure_event_poll()
+        else:
+            self._drain_drag_drop_queue()
 
     def _schedule_try_create(self) -> None:
         if self._destroyed or self._webview is not None or self._create_pending:
@@ -550,7 +560,8 @@ class WebView:
         return self._on_navigation(url)
 
     def _native_title_changed(self, title: str) -> None:
-        self._title_queue.put(title)
+        if self._on_title_changed is not None:
+            self._title_queue.put(title)
 
     def _native_new_window(self, url: str) -> NewWindowResponse:
         if self._on_new_window is None:
@@ -559,6 +570,20 @@ class WebView:
 
     def _enqueue_ipc(self, message: str) -> None:
         self._ipc_queue.put(message)
+
+    def _drain_title_queue(self) -> None:
+        while True:
+            try:
+                self._title_queue.get_nowait()
+            except queue.Empty:
+                break
+
+    def _drain_drag_drop_queue(self) -> None:
+        while True:
+            try:
+                self._drag_drop_queue.get_nowait()
+            except queue.Empty:
+                break
 
     def _discard_page_load_backlog(self) -> None:
         native = self._webview

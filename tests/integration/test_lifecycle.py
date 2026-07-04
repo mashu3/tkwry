@@ -188,6 +188,59 @@ def test_set_on_navigation_none_clears_handler(tk_root) -> None:
     frame.destroy()
 
 
+def test_set_on_title_changed_none_clears_handler(tk_root) -> None:
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>title</p>")
+    assert web.wait_until_ready(timeout=10.0)
+
+    received: list[str] = []
+
+    def handler(title: str) -> None:
+        received.append(title)
+
+    web.set_on_title_changed(handler)
+    web._native_title_changed("First")
+    pump(tk_root, steps=10)
+    assert received == ["First"]
+
+    web.set_on_title_changed(None)
+    web._native_title_changed("Second")
+    pump(tk_root, steps=10)
+    assert received == ["First"]
+    assert web._title_queue.empty()
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_set_drag_drop_handler_none_clears_handler(tk_root) -> None:
+    from tkwry import DragDropEvent
+
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>dnd</p>")
+    assert web.wait_until_ready(timeout=10.0)
+
+    received: list[tuple] = []
+
+    def handler(evt, paths, pos):
+        received.append((evt, paths, pos))
+        return True
+
+    web.set_drag_drop_handler(handler)
+    assert web._native_drag_drop(DragDropEvent.Drop, ["/tmp/a.txt"], (1, 2)) is True
+    pump(tk_root, steps=10)
+    assert len(received) == 1
+
+    web.set_drag_drop_handler(None)
+    assert web._native_drag_drop(DragDropEvent.Drop, ["/tmp/b.txt"], (3, 4)) is True
+    pump(tk_root, steps=10)
+    assert len(received) == 1
+    assert web._drag_drop_queue.empty()
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_double_destroy_is_safe(tk_root) -> None:
     frame = bare_frame(tk_root)
     web = WebView(frame, width=400, height=300, html="<p>destroy</p>")

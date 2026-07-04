@@ -464,6 +464,15 @@ impl WebView {
         Ok(())
     }
 
+    fn clear_on_title_changed(&self) -> PyResult<()> {
+        let mut guard = self
+            .title_cb
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+        *guard = None;
+        Ok(())
+    }
+
     fn set_on_new_window(&self, handler: Py<PyAny>) -> PyResult<()> {
         let mut guard = self
             .newwin_cb
@@ -479,6 +488,15 @@ impl WebView {
             .lock()
             .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
         *guard = Some(handler);
+        Ok(())
+    }
+
+    fn clear_drag_drop_handler(&self) -> PyResult<()> {
+        let mut guard = self
+            .drag_drop_cb
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+        *guard = None;
         Ok(())
     }
 
