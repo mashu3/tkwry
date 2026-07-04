@@ -1062,8 +1062,11 @@ class WebView:
         if self._destroyed or self._bounds_sync_scheduled:
             return
         self._bounds_sync_scheduled = True
-        self._frame.update_idletasks()
-        self._frame.after_idle(self._deferred_sync_bounds)
+        try:
+            self._frame.update_idletasks()
+            self._frame.after_idle(self._deferred_sync_bounds)
+        except tk.TclError:
+            self._bounds_sync_scheduled = False
 
     def _deferred_sync_bounds(self) -> None:
         self._bounds_sync_scheduled = False
@@ -1075,10 +1078,13 @@ class WebView:
         if not self._frame_should_show():
             self._webview.set_visible(False)
             return
-        self._frame.update_idletasks()
-        width = max(self._frame.winfo_width(), 1)
-        height = max(self._frame.winfo_height(), 1)
-        x, y = tk_embed_origin(self._frame, root_relative=self._embed.root_relative)
+        try:
+            self._frame.update_idletasks()
+            width = max(self._frame.winfo_width(), 1)
+            height = max(self._frame.winfo_height(), 1)
+            x, y = tk_embed_origin(self._frame, root_relative=self._embed.root_relative)
+        except tk.TclError:
+            return
         self._webview.set_bounds(x, y, width, height)
         self._webview.set_visible(True)
 
