@@ -904,7 +904,7 @@ class WebView:
         kwargs: dict = {
             "width": width,
             "height": height,
-            "visible": self._frame_should_show(),
+            "visible": True,
             "devtools": self._devtools,
             "focused": self._focused,
         }
