@@ -103,6 +103,82 @@ def test_url_bar_types_after_leaving_web(url_demo_layout) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+def test_focus_parent_round_trip_restores_web_mode(url_demo_layout) -> None:
+    """focus → focus_parent → focus must toggle mac_web_input_active reliably."""
+    web = WebView(url_demo_layout.web_frame, html="<p>round-trip</p>")
+    try:
+        _wait_native(web, url_demo_layout.root)
+        activate_window(url_demo_layout.root)
+        entry = url_demo_layout.url_entry
+        entry.delete(0, tk.END)
+        native = web.native
+        assert native is not None
+
+        web.focus()
+        pump(url_demo_layout.root, seconds=0.15)
+        assert native.mac_web_input_active()
+
+        web.focus_parent()
+        pump(url_demo_layout.root, seconds=0.05)
+        assert not native.mac_web_input_active()
+
+        click_entry(url_demo_layout.root, entry)
+        type_a_on_entry(url_demo_layout.root, entry)
+        assert entry.get() == "a"
+
+        web.focus()
+        pump(url_demo_layout.root, seconds=0.15)
+        assert native.mac_web_input_active()
+
+        before = entry.get()
+        type_a_on_entry(url_demo_layout.root, entry)
+        assert entry.get() == before
+    finally:
+        web.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+def test_multi_webview_focus_is_exclusive(url_demo_layout) -> None:
+    """Only one WebView should own macOS keyboard input at a time."""
+    left = tk.Frame(url_demo_layout.web_frame, bg="#111")
+    right = tk.Frame(url_demo_layout.web_frame, bg="#222")
+    left.pack(side="left", fill="both", expand=True)
+    right.pack(side="right", fill="both", expand=True)
+
+    web_a = WebView(left, html="<p>a</p>")
+    web_b = WebView(right, html="<p>b</p>")
+    try:
+        _wait_native(web_a, url_demo_layout.root)
+        assert wait_until(url_demo_layout.root, lambda: web_b.native is not None)
+        native_a = web_a.native
+        native_b = web_b.native
+        assert native_a is not None and native_b is not None
+
+        web_a.focus()
+        pump(url_demo_layout.root, seconds=0.15)
+        assert native_a.mac_web_input_active()
+        assert not native_b.mac_web_input_active()
+
+        web_b.focus()
+        pump(url_demo_layout.root, seconds=0.15)
+        assert not native_a.mac_web_input_active()
+        assert native_b.mac_web_input_active()
+
+        web_b.focus_parent()
+        pump(url_demo_layout.root, seconds=0.05)
+        assert not native_a.mac_web_input_active()
+        assert not native_b.mac_web_input_active()
+
+        web_a.focus()
+        pump(url_demo_layout.root, seconds=0.15)
+        assert native_a.mac_web_input_active()
+        assert not native_b.mac_web_input_active()
+    finally:
+        web_b.destroy()
+        web_a.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 @pytest.mark.skipif(
     is_github_actions(),
     reason="GHA macOS: Tcl focus drain timing not reliable on virtual runners",

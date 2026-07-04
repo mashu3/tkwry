@@ -195,6 +195,44 @@ def test_ipc_handler_exception_does_not_stop_poll(tk_root) -> None:
 
 @pytest.mark.skipif(
     sys.platform == "linux",
+    reason="WebKitGTK headless CI: title-changed callback timing unreliable",
+)
+def test_title_changed_delivers_on_document_title_set(tk_root) -> None:
+    titles: list[str] = []
+
+    frame = host_frame(tk_root)
+    web = WebView(
+        frame,
+        html="<title>initial</title><p>title</p>",
+        on_title_changed=lambda title: titles.append(title),
+    )
+
+    assert wait_until(tk_root, lambda: web.ready, steps=200)
+    pump(tk_root, steps=50)
+    titles.clear()
+
+    web.eval_js("document.title = 'tkwry-title-test'")
+    assert wait_until(
+        tk_root,
+        lambda: "tkwry-title-test" in titles,
+        steps=200,
+    ), f"expected title callback, got {titles!r}"
+
+    titles.clear()
+    web.set_on_title_changed(lambda title: titles.append(title))
+    web.eval_js("document.title = 'tkwry-title-after-set'")
+    assert wait_until(
+        tk_root,
+        lambda: "tkwry-title-after-set" in titles,
+        steps=200,
+    ), f"expected title after set_on_title_changed, got {titles!r}"
+
+    web.destroy()
+    frame.destroy()
+
+
+@pytest.mark.skipif(
+    sys.platform == "linux",
     reason="WebKitGTK headless CI: drag-drop event poll unreliable",
 )
 def test_drag_drop_native_queues_without_blocking(tk_root) -> None:
