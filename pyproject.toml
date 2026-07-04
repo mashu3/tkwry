@@ -64,6 +64,7 @@ ignore = ["UP045"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
 addopts = ["-v"]
 markers = [
     "integration: requires display and native WebView (tests/integration, tests/macos)",

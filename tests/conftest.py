@@ -1,4 +1,4 @@
-"""Shared pytest fixtures and path setup."""
+"""Shared pytest fixtures."""
 
 from __future__ import annotations
 
@@ -6,13 +6,8 @@ import glob
 import os
 import sys
 import time
-from pathlib import Path
 
 import pytest
-
-TESTS_DIR = Path(__file__).resolve().parent
-if str(TESTS_DIR) not in sys.path:
-    sys.path.insert(0, str(TESTS_DIR))
 
 
 def pytest_configure(config: pytest.Config) -> None:
