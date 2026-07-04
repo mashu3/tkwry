@@ -21,7 +21,15 @@ def _looks_like_file_path(url: str) -> bool:
         return True
     if _is_windows_drive_path(url):
         return True
-    return Path(os.path.expanduser(url)).exists()
+    return os.sep in url or ("/" in url and not _looks_like_netloc(url))
+
+
+def _looks_like_netloc(url: str) -> bool:
+    """Heuristic: contains a dot before the first slash (e.g. example.com/path)."""
+    slash = url.find("/")
+    if slash < 0:
+        return False
+    return "." in url[:slash]
 
 
 def _file_uri_from_path(path: str) -> str:

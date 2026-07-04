@@ -71,7 +71,7 @@ def test_normalize_relative_path_to_file_uri(
     page.write_text("<p>local</p>", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    assert _normalize_url("index.html") == page.resolve().as_uri()
+    assert _normalize_url("./index.html") == page.resolve().as_uri()
 
 
 def test_normalize_windows_drive_path(monkeypatch: pytest.MonkeyPatch) -> None:
