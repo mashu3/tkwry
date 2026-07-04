@@ -37,6 +37,13 @@ jobs:
       - name: Ruff format
         run: ruff format --check tkwry tests examples
 
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
       - name: Install Python build dependencies
         run: pip install "maturin>=1.0" "mypy>=1.13"
 
@@ -46,18 +53,15 @@ jobs:
         run: |
           maturin build --profile ci --out dist
           pip install dist/*.whl
+          cd /tmp
+          python -c "import tkwry._core"
 
       - name: Stubtest
-        run: >-
-          python -m mypy.stubtest --mypy-config-file pyproject.toml
-          tkwry._core tkwry.exceptions tkwry.webview
-
-      - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
+        run: |
+          cd /tmp
+          python -m mypy.stubtest \
+            --mypy-config-file "$GITHUB_WORKSPACE/pyproject.toml" \
+            tkwry._core tkwry.exceptions tkwry.webview
 
       - run: cargo fmt --check
 
