@@ -1001,7 +1001,6 @@ class WebView:
         if self._initial_load is None:
             return
         toplevel = self._frame.winfo_toplevel()
-        toplevel.after_idle(self._run_initial_load)
         if sys.platform == "darwin":
             toplevel.after(200, self._run_initial_load)
         else:

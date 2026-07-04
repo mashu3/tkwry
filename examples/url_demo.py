@@ -26,7 +26,6 @@ def main() -> None:
 
     web_kwargs: dict = {"url": "https://github.com"}
     if sys.platform == "win32":
-        # WebView2 takes keyboard focus on create when focused=True.
         web_kwargs["focused"] = False
     web = WebView(frame, **web_kwargs)
 
