@@ -40,10 +40,25 @@ TitleChangedHandler: TypeAlias = Callable[[str], None]
 NewWindowHandler: TypeAlias = Callable[[str], NewWindowResponse]
 DragDropHandler: TypeAlias = Callable[[DragDropEvent, list[str], tuple[int, int]], bool]
 EvalCallback: TypeAlias = Callable[[str], None]
+EvalErrorHandler: TypeAlias = Callable[[Exception], None]
 _LoadKind: TypeAlias = Literal["url", "html"]
 
 _DEFAULT_WIDTH = 800
 _DEFAULT_HEIGHT = 600
+
+
+def _validate_color_component(value: int, name: str) -> None:
+    if not isinstance(value, int):
+        raise TypeError(f"{name} must be an int, got {type(value).__name__}")
+    if not (0 <= value <= 255):
+        raise ValueError(f"{name} must be 0-255, got {value}")
+
+
+def _validate_background_color(color: tuple[int, int, int, int]) -> None:
+    if not isinstance(color, tuple) or len(color) != 4:
+        raise ValueError("background_color must be a (r, g, b, a) tuple of 4 ints")
+    for val, name in zip(color, ("r", "g", "b", "a")):
+        _validate_color_component(val, name)
 
 _MAC_TEXT_CLASSES = ("Entry", "TEntry", "Text", "Spinbox", "TSpinbox")
 _MAC_KEY_GUARD_TAG = "TkwryMacWebKeyGuard"
@@ -326,6 +341,8 @@ class WebView:
         drag_drop_handler: Optional[DragDropHandler] = None,
     ) -> None:
         require_tk_thread(frame)
+        if background_color is not None:
+            _validate_background_color(background_color)
         self._frame = frame
         self._tk_thread_id = threading.get_ident()
         self._early_create = width is not None or height is not None
@@ -554,16 +571,18 @@ class WebView:
             self._ensure_event_poll()
             self._service_linux_events()
 
-    def eval_js(self, script: str) -> None:
+    def eval_js(
+        self, script: str, *, on_error: Optional[EvalErrorHandler] = None
+    ) -> None:
         """Evaluate JavaScript without waiting for a result.
 
         The script is scheduled on the Tk idle loop (not synchronous). There is
         no return value; use :meth:`eval_js_with_callback` when you need the
-        result. JavaScript errors are printed to stderr and do not propagate to
-        the caller.
+        result. If *on_error* is provided, it is called with the exception on
+        failure; otherwise the traceback is printed to stderr.
         """
         self._require_ready("eval_js")
-        self._frame.after_idle(lambda: self._run_eval_js(script))
+        self._frame.after_idle(lambda: self._run_eval_js(script, on_error))
 
     def eval_js_with_callback(self, script: str, callback: EvalCallback) -> None:
         """Evaluate JavaScript and invoke *callback* with the result string.
@@ -603,6 +622,8 @@ class WebView:
 
     def set_background_color(self, r: int, g: int, b: int, a: int = 255) -> None:
         self._require_ready("set_background_color")
+        for val, name in ((r, "r"), (g, "g"), (b, "b"), (a, "a")):
+            _validate_color_component(val, name)
         self._webview.set_background_color(r, g, b, a)
 
     def open_devtools(self) -> None:
@@ -932,13 +953,18 @@ class WebView:
                     self._service_linux_events()
         self._fire_ready()
 
-    def _run_eval_js(self, script: str) -> None:
+    def _run_eval_js(
+        self, script: str, on_error: Optional[EvalErrorHandler] = None
+    ) -> None:
         if self._destroyed or self._webview is None:
             return
         try:
             self._webview.eval_js(script)
-        except Exception:
-            traceback.print_exc()
+        except Exception as exc:
+            if on_error is not None:
+                self._invoke_callback(on_error, exc)
+            else:
+                traceback.print_exc()
 
     def _frame_ready_for_initial_load(self) -> bool:
         """Whether the host frame is laid out enough to load content."""

@@ -10,6 +10,7 @@ try:
     from tkwry.webview import (
         DragDropHandler,
         EvalCallback,
+        EvalErrorHandler,
         IpcHandler,
         NavigationHandler,
         NewWindowHandler,
@@ -30,6 +31,7 @@ __all__ = [
     "DragDropEvent",
     "DragDropHandler",
     "EvalCallback",
+    "EvalErrorHandler",
     "IpcHandler",
     "NavigationHandler",
     "NewWindowHandler",
