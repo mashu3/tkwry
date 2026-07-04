@@ -361,8 +361,8 @@ impl WebView {
 
     fn load_html(&self, html: &str) -> PyResult<()> {
         with_webview(self, |wv| {
-            let _ = wv.load_html(html);
-            Ok(())
+            wv.load_html(html)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
         })
     }
 
