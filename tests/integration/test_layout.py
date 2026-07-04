@@ -80,7 +80,7 @@ def test_pack_schedules_bounds_sync_without_configure(tk_root, monkeypatch) -> N
     original_after_idle = host.after_idle
 
     def track_after_idle(callback):
-        if callback == web._sync_bounds:
+        if callback == web._deferred_sync_bounds:
             scheduled.append(True)
         return original_after_idle(callback)
 

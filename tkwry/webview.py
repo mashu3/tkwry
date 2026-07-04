@@ -1003,18 +1003,16 @@ class WebView:
         toplevel = self._frame.winfo_toplevel()
         toplevel.after_idle(self._run_initial_load)
         if sys.platform == "darwin":
-            # WKWebView may paint blank when navigation runs before compositing.
             toplevel.after(200, self._run_initial_load)
-        elif sys.platform == "linux":
-            # WebKitGTK needs extra GTK time in headless CI before URL settles.
-            toplevel.after(150, self._run_initial_load)
+        else:
+            delay = 150 if sys.platform == "linux" else 100
+            toplevel.after(delay, self._run_initial_load)
 
     def _run_initial_load(self) -> None:
         load = self._initial_load
         if load is None or self._destroyed or self._webview is None:
             return
         if not self._frame_ready_for_initial_load():
-            self._bump_initial_load_attempt()
             return
         self._sync_bounds()
         kind, payload = load
