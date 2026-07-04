@@ -20,6 +20,9 @@ fn report_py_error(py: Python<'_>, err: PyErr) {
     err.print(py);
 }
 
+/// Maximum IPC message size (10 MiB). Messages exceeding this are dropped.
+const MAX_IPC_MESSAGE_BYTES: usize = 10 * 1024 * 1024;
+
 #[pyclass(eq, eq_int, frozen, skip_from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PageLoadEvent {
@@ -143,6 +146,14 @@ impl WebView {
         let ipc_cb_clone = ipc_cb.clone();
         let ipc_handler_wry = move |req: wry::http::Request<String>| {
             let body = req.body().clone();
+            if body.len() > MAX_IPC_MESSAGE_BYTES {
+                eprintln!(
+                    "tkwry: IPC message dropped ({} bytes exceeds {} byte limit)",
+                    body.len(),
+                    MAX_IPC_MESSAGE_BYTES
+                );
+                return;
+            }
             Python::attach(|py| {
                 if let Ok(guard) = ipc_cb_clone.lock() {
                     if let Some(ref func) = *guard {
