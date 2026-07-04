@@ -8,7 +8,6 @@ import threading
 import weakref
 from ctypes import CDLL, c_char_p, c_void_p
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -170,10 +169,18 @@ def _mac_drawable(widget: tk.Misc, dylib: CDLL) -> int:
     return full
 
 
-@lru_cache(maxsize=1)
+_mac_tk_dylib_key: str | None = None
+_mac_tk_dylib_handle: CDLL | None = None
+
+
 def _mac_tk_dylib(tcl_lib: str) -> CDLL:
     """Load and return the Tk shared library next to *tcl_lib*."""
-    return CDLL(_mac_libtk_path(tcl_lib))
+    global _mac_tk_dylib_key, _mac_tk_dylib_handle
+    if _mac_tk_dylib_key != tcl_lib:
+        _mac_tk_dylib_key = tcl_lib
+        _mac_tk_dylib_handle = CDLL(_mac_libtk_path(tcl_lib))
+    assert _mac_tk_dylib_handle is not None
+    return _mac_tk_dylib_handle
 
 
 def _mac_nsview_lookup(dylib: CDLL):

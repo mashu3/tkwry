@@ -27,15 +27,13 @@ def is_github_actions() -> bool:
 
 def pump(root, *, steps: int = 80, delay_ms: int = 50) -> None:
     """Drive the Tk event loop for up to *steps* iterations."""
-    gtk_pump = None
-    if sys.platform == "linux":
-        from tkwry._core import pump_events as gtk_pump
-
     for _ in range(steps):
         root.update_idletasks()
         root.update()
-        if gtk_pump is not None:
-            gtk_pump()
+        if sys.platform == "linux":
+            from tkwry._core import pump_events
+
+            pump_events()
         root.after(delay_ms)
         root.update()
 

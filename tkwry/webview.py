@@ -279,17 +279,16 @@ class WebView:
             return False
         root = self._frame.winfo_toplevel()
         deadline = time.monotonic() + timeout if timeout is not None else None
-        gtk_pump = None
-        if sys.platform == "linux":
-            from tkwry._core import pump_events as gtk_pump
 
         while not self.ready and not self._destroyed:
             if deadline is not None and time.monotonic() >= deadline:
                 return False
             root.update_idletasks()
             root.update()
-            if gtk_pump is not None:
-                gtk_pump()
+            if sys.platform == "linux":
+                from tkwry._core import pump_events
+
+                pump_events()
             root.after(10, lambda: None)
             root.update()
         return self.ready
