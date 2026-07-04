@@ -5,8 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from tkwry._core import WebView as NativeWebView
-
 import tkwry
 from tkwry import (
     DragDropEvent,
@@ -21,6 +19,7 @@ from tkwry import (
     TitleChangedHandler,
     WebView,
 )
+from tkwry._core import WebView as NativeWebView
 
 PUBLIC_TYPE_ALIASES = (
     DragDropHandler,
