@@ -4,6 +4,32 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.0.5] - 2026-07-04
+
+### Fixed
+
+- Initial load no longer silently lost on macOS (`after_idle` scheduling removed)
+- Native webview always created as visible to prevent script execution stalls
+- `_schedule_bounds_sync` restores `update_idletasks` so the frame is mapped before webview creation
+- Initial load not abandoned when the frame is not yet viewable
+- Mutex-poisoned errors propagated from callback setter methods instead of silently ignored
+- `background_color` components validated at the Python boundary with clear error messages
+- `_looks_like_file_path` avoids filesystem I/O — uses string heuristics only
+- 10 MiB size limit on IPC messages to prevent DoS from malicious pages
+- `when_ready` callbacks routed through `_invoke_callback` for consistent error handling
+- Dead `set_on_page_load` stub removed from the Rust native layer
+- `_widget_threads` entries cleaned up on widget GC to prevent memory leak
+- `load_html` errors propagated instead of silently ignored
+- macOS system `Tk.framework` supported; Tk 8.5 pointer truncation fixed
+- `_version.py` hardened — catches only `PackageNotFoundError` and guards `Cargo.toml` fallback
+
+### Changed
+
+- `_sync_bounds` debounced to reduce CPU load during rapid resizes
+- `Optional[X]` unified to `X | None` across `webview.py`
+- `conftest.py` uses pytest `pythonpath` setting instead of `sys.path` hack
+- CI: pip/cargo caches, ruff format check, version tag guard, and fast CI profile
+
 ## [0.0.4] - 2026-07-04
 
 ### Added
@@ -74,6 +100,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.0.5]: https://github.com/mashu3/tkwry/releases/tag/v0.0.5
 [0.0.4]: https://github.com/mashu3/tkwry/releases/tag/v0.0.4
 [0.0.3]: https://github.com/mashu3/tkwry/releases/tag/v0.0.3
 [0.0.2]: https://github.com/mashu3/tkwry/releases/tag/v0.0.2
