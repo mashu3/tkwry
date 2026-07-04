@@ -148,7 +148,7 @@ def wait_tcl_focus_leaves(
     timeout: float = 0.25,
 ) -> float:
     """Return seconds until Tcl focus leaves *entry*; *timeout* if it never does."""
-    from tkwry.webview import _mac_service_wakeup
+    from tkwry._macos import _mac_service_wakeup
 
     start = time.monotonic()
     deadline = start + timeout
