@@ -417,8 +417,6 @@ impl WebView {
         }
     }
 
-    fn set_on_page_load(&self, _handler: Py<PyAny>) {}
-
     fn drain_page_load_events(&self) -> Vec<(PageLoadEvent, String)> {
         self.page_load_pending
             .lock()
