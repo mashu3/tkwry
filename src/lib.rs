@@ -23,6 +23,10 @@ fn report_py_error(py: Python<'_>, err: PyErr) {
 /// Maximum IPC message size (10 MiB). Messages exceeding this are dropped.
 const MAX_IPC_MESSAGE_BYTES: usize = 10 * 1024 * 1024;
 
+/// Maximum number of buffered page-load events. When no Python handler is
+/// draining the queue, older events are discarded to prevent unbounded growth.
+const MAX_PAGE_LOAD_PENDING: usize = 256;
+
 #[pyclass(eq, eq_int, frozen, skip_from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PageLoadEvent {
@@ -187,6 +191,10 @@ impl WebView {
                 wry::PageLoadEvent::Finished => PageLoadEvent::Finished,
             };
             if let Ok(mut pending) = page_load_pending_clone.lock() {
+                if pending.len() >= MAX_PAGE_LOAD_PENDING {
+                    let half = pending.len() / 2;
+                    pending.drain(..half);
+                }
                 pending.push((evt, url));
             }
         };
