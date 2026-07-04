@@ -10,7 +10,7 @@ import time
 import tkinter as tk
 import traceback
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal, Optional, TypeAlias
+from typing import TYPE_CHECKING, Literal, TypeAlias
 
 from tkwry._core import (
     DragDropEvent,
@@ -327,19 +327,19 @@ class WebView:
         *,
         width: int | None = None,
         height: int | None = None,
-        url: Optional[str] = None,
-        html: Optional[str] = None,
-        ipc_handler: Optional[IpcHandler] = None,
+        url: str | None = None,
+        html: str | None = None,
+        ipc_handler: IpcHandler | None = None,
         devtools: bool = False,
-        background_color: Optional[tuple[int, int, int, int]] = None,
-        user_agent: Optional[str] = None,
-        initialization_script: Optional[str] = None,
+        background_color: tuple[int, int, int, int] | None = None,
+        user_agent: str | None = None,
+        initialization_script: str | None = None,
         focused: bool = True,
-        on_navigation: Optional[NavigationHandler] = None,
-        on_page_load: Optional[PageLoadHandler] = None,
-        on_title_changed: Optional[TitleChangedHandler] = None,
-        on_new_window: Optional[NewWindowHandler] = None,
-        drag_drop_handler: Optional[DragDropHandler] = None,
+        on_navigation: NavigationHandler | None = None,
+        on_page_load: PageLoadHandler | None = None,
+        on_title_changed: TitleChangedHandler | None = None,
+        on_new_window: NewWindowHandler | None = None,
+        drag_drop_handler: DragDropHandler | None = None,
     ) -> None:
         require_tk_thread(frame)
         if background_color is not None:
@@ -353,7 +353,7 @@ class WebView:
         self._ready_callbacks: list[Callable[[], None]] = []
         self._create_pending = False
         self._embed = tk_embed_parent(frame)
-        self._webview: Optional[NativeWebViewType] = None
+        self._webview: NativeWebViewType | None = None
         self._ipc_handler = ipc_handler
         self._on_navigation = on_navigation
         self._on_page_load = on_page_load
@@ -377,11 +377,11 @@ class WebView:
             tuple[DragDropEvent, list[str], tuple[int, int]]
         ] = queue.SimpleQueue()
         self._event_poll_active = False
-        self._pending_url: Optional[str] = url
-        self._pending_html: Optional[str] = html
-        self._pending_load: Optional[tuple[_LoadKind, str]] = None
+        self._pending_url: str | None = url
+        self._pending_html: str | None = html
+        self._pending_load: tuple[_LoadKind, str] | None = None
         self._flush_load_scheduled = False
-        self._initial_load: Optional[tuple[_LoadKind, str]] = None
+        self._initial_load: tuple[_LoadKind, str] | None = None
         self._initial_load_attempt = 0
 
         GtkPump.attach(frame)
@@ -442,7 +442,7 @@ class WebView:
         return self._webview is not None and not self._destroyed
 
     @property
-    def url(self) -> Optional[str]:
+    def url(self) -> str | None:
         """Current document URL, or the pending URL before creation."""
         self._require_tk_thread()
         if self._destroyed:
@@ -452,7 +452,7 @@ class WebView:
         return self._webview.url()
 
     @property
-    def native(self) -> Optional[NativeWebViewType]:
+    def native(self) -> NativeWebViewType | None:
         """Underlying :class:`tkwry._core.WebView`, or ``None`` if not created."""
         self._require_tk_thread()
         return self._webview
@@ -572,9 +572,7 @@ class WebView:
             self._ensure_event_poll()
             self._service_linux_events()
 
-    def eval_js(
-        self, script: str, *, on_error: Optional[EvalErrorHandler] = None
-    ) -> None:
+    def eval_js(self, script: str, *, on_error: EvalErrorHandler | None = None) -> None:
         """Evaluate JavaScript without waiting for a result.
 
         The script is scheduled on the Tk idle loop (not synchronous). There is
@@ -639,7 +637,7 @@ class WebView:
         self._require_ready("is_devtools_open")
         return self._webview.is_devtools_open()
 
-    def set_ipc_handler(self, handler: Optional[IpcHandler]) -> None:
+    def set_ipc_handler(self, handler: IpcHandler | None) -> None:
         self._require_tk_thread()
         self._ipc_handler = handler
         if self._webview is not None:
@@ -650,7 +648,7 @@ class WebView:
         if handler is not None:
             self._ensure_event_poll()
 
-    def set_on_navigation(self, handler: Optional[NavigationHandler]) -> None:
+    def set_on_navigation(self, handler: NavigationHandler | None) -> None:
         self._require_tk_thread()
         self._on_navigation = handler
         if self._webview is not None:
@@ -661,7 +659,7 @@ class WebView:
                 if clear is not None:
                     clear()
 
-    def set_on_page_load(self, handler: Optional[PageLoadHandler]) -> None:
+    def set_on_page_load(self, handler: PageLoadHandler | None) -> None:
         self._require_tk_thread()
         self._on_page_load = handler
         if handler is not None:
@@ -681,7 +679,7 @@ class WebView:
             raise WebViewDestroyedError("WebView.destroy() was called")
         self._sync_bounds()
 
-    def set_on_title_changed(self, handler: Optional[TitleChangedHandler]) -> None:
+    def set_on_title_changed(self, handler: TitleChangedHandler | None) -> None:
         self._require_tk_thread()
         self._on_title_changed = handler
         if self._webview is not None and handler is not None:
@@ -689,13 +687,13 @@ class WebView:
         if handler is not None:
             self._ensure_event_poll()
 
-    def set_on_new_window(self, handler: Optional[NewWindowHandler]) -> None:
+    def set_on_new_window(self, handler: NewWindowHandler | None) -> None:
         self._require_tk_thread()
         self._on_new_window = handler
         if self._webview is not None:
             self._webview.set_on_new_window(self._native_new_window)
 
-    def set_drag_drop_handler(self, handler: Optional[DragDropHandler]) -> None:
+    def set_drag_drop_handler(self, handler: DragDropHandler | None) -> None:
         self._require_tk_thread()
         self._drag_drop_handler = handler
         if self._webview is not None and handler is not None:
@@ -896,7 +894,7 @@ class WebView:
             _validate_url(url)
 
         html = self._pending_html
-        initial_load: Optional[tuple[_LoadKind, str]] = None
+        initial_load: tuple[_LoadKind, str] | None = None
         if html is not None:
             initial_load = ("html", html)
         elif url is not None:
@@ -955,7 +953,7 @@ class WebView:
         self._fire_ready()
 
     def _run_eval_js(
-        self, script: str, on_error: Optional[EvalErrorHandler] = None
+        self, script: str, on_error: EvalErrorHandler | None = None
     ) -> None:
         if self._destroyed or self._webview is None:
             return
