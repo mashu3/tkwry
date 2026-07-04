@@ -404,28 +404,40 @@ impl WebView {
         })
     }
 
-    fn set_ipc_handler(&self, handler: Py<PyAny>) {
-        if let Ok(mut guard) = self.ipc_cb.lock() {
-            *guard = Some(handler);
-        }
+    fn set_ipc_handler(&self, handler: Py<PyAny>) -> PyResult<()> {
+        let mut guard = self
+            .ipc_cb
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+        *guard = Some(handler);
+        Ok(())
     }
 
-    fn clear_ipc_handler(&self) {
-        if let Ok(mut guard) = self.ipc_cb.lock() {
-            *guard = None;
-        }
+    fn clear_ipc_handler(&self) -> PyResult<()> {
+        let mut guard = self
+            .ipc_cb
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+        *guard = None;
+        Ok(())
     }
 
-    fn set_on_navigation(&self, handler: Py<PyAny>) {
-        if let Ok(mut guard) = self.nav_cb.lock() {
-            *guard = Some(handler);
-        }
+    fn set_on_navigation(&self, handler: Py<PyAny>) -> PyResult<()> {
+        let mut guard = self
+            .nav_cb
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+        *guard = Some(handler);
+        Ok(())
     }
 
-    fn clear_on_navigation(&self) {
-        if let Ok(mut guard) = self.nav_cb.lock() {
-            *guard = None;
-        }
+    fn clear_on_navigation(&self) -> PyResult<()> {
+        let mut guard = self
+            .nav_cb
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+        *guard = None;
+        Ok(())
     }
 
     fn drain_page_load_events(&self) -> Vec<(PageLoadEvent, String)> {
@@ -435,22 +447,31 @@ impl WebView {
             .unwrap_or_default()
     }
 
-    fn set_on_title_changed(&self, handler: Py<PyAny>) {
-        if let Ok(mut guard) = self.title_cb.lock() {
-            *guard = Some(handler);
-        }
+    fn set_on_title_changed(&self, handler: Py<PyAny>) -> PyResult<()> {
+        let mut guard = self
+            .title_cb
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+        *guard = Some(handler);
+        Ok(())
     }
 
-    fn set_on_new_window(&self, handler: Py<PyAny>) {
-        if let Ok(mut guard) = self.newwin_cb.lock() {
-            *guard = Some(handler);
-        }
+    fn set_on_new_window(&self, handler: Py<PyAny>) -> PyResult<()> {
+        let mut guard = self
+            .newwin_cb
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+        *guard = Some(handler);
+        Ok(())
     }
 
-    fn set_drag_drop_handler(&self, handler: Py<PyAny>) {
-        if let Ok(mut guard) = self.drag_drop_cb.lock() {
-            *guard = Some(handler);
-        }
+    fn set_drag_drop_handler(&self, handler: Py<PyAny>) -> PyResult<()> {
+        let mut guard = self
+            .drag_drop_cb
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+        *guard = Some(handler);
+        Ok(())
     }
 
     fn set_bounds(&self, x: f64, y: f64, width: f64, height: f64) -> PyResult<()> {

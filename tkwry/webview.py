@@ -60,6 +60,7 @@ def _validate_background_color(color: tuple[int, int, int, int]) -> None:
     for val, name in zip(color, ("r", "g", "b", "a")):
         _validate_color_component(val, name)
 
+
 _MAC_TEXT_CLASSES = ("Entry", "TEntry", "Text", "Spinbox", "TSpinbox")
 _MAC_KEY_GUARD_TAG = "TkwryMacWebKeyGuard"
 
