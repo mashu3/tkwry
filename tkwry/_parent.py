@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import weakref
 from ctypes import CDLL, c_char_p, c_void_p
 from dataclasses import dataclass
 from functools import lru_cache
@@ -51,6 +52,7 @@ def _bind_tk_thread(widget: tk.Misc, key: int) -> int:
         owner = threading.get_ident()
         _interp_threads[interp] = owner
     _widget_threads[key] = owner
+    weakref.finalize(widget, _widget_threads.pop, key, None)
     return owner
 
 
