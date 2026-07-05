@@ -6,6 +6,7 @@ Linux — v0.0.x treats Linux as best-effort (see README / CHANGELOG).
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -130,6 +131,64 @@ def test_page_load_callback_receives_finished(tk_root) -> None:
         assert wait_until(tk_root, finished, steps=200), (
             f"expected PageLoadEvent.Finished, got {events!r}"
         )
+
+    web.destroy()
+    frame.destroy()
+
+
+@pytest.mark.skipif(
+    sys.platform == "linux",
+    reason="WebKitGTK headless CI: local file URL loading unreliable",
+)
+@pytest.mark.skipif(
+    sys.platform == "linux",
+    reason="WebKitGTK headless CI does not reliably deliver page-load callbacks",
+)
+def test_reload_after_ready_fires_page_load(tk_root, tmp_path: Path) -> None:
+    page = tmp_path / "reload.html"
+    page.write_text(
+        "<title>reload-test</title><p id='t'>v1</p>",
+        encoding="utf-8",
+    )
+
+    events: list[tuple[PageLoadEvent, str]] = []
+
+    frame = host_frame(tk_root)
+    web = WebView(
+        frame,
+        on_page_load=lambda evt, url: events.append((evt, url)),
+    )
+    web.load_url(str(page))
+
+    assert wait_until(tk_root, lambda: web.native is not None)
+
+    def initial_finished() -> bool:
+        return any(evt == PageLoadEvent.Finished for evt, _ in events)
+
+    assert wait_until(tk_root, initial_finished, steps=400), (
+        f"expected initial PageLoadEvent.Finished, got {events!r}"
+    )
+    finished_before = sum(1 for evt, _ in events if evt == PageLoadEvent.Finished)
+    started_before = sum(1 for evt, _ in events if evt == PageLoadEvent.Started)
+
+    web.reload()
+    pump(tk_root, steps=50)
+
+    def reload_finished() -> bool:
+        finished = sum(1 for evt, _ in events if evt == PageLoadEvent.Finished)
+        started = sum(1 for evt, _ in events if evt == PageLoadEvent.Started)
+        return finished >= finished_before + 1 and started >= started_before + 1
+
+    assert wait_until(tk_root, reload_finished, steps=400), (
+        f"expected Started+Finished after reload(), got {events!r}"
+    )
+
+    text: list[str] = []
+    web.eval_js_with_callback("document.getElementById('t').textContent", text.append)
+    assert wait_until(tk_root, lambda: text, steps=200), (
+        f"expected reloaded document content, got {text!r}"
+    )
+    assert json.loads(text[0]) == "v1"
 
     web.destroy()
     frame.destroy()
