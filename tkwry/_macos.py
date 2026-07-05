@@ -10,7 +10,14 @@ if TYPE_CHECKING:
     from tkwry._core import WebView as NativeWebViewType
     from tkwry.webview import WebView
 
-_MAC_TEXT_CLASSES = ("Entry", "TEntry", "Text", "Spinbox", "TSpinbox")
+_MAC_TEXT_CLASSES = (
+    "Entry",
+    "TEntry",
+    "Text",
+    "Spinbox",
+    "TSpinbox",
+    "TCombobox",
+)
 _MAC_KEY_GUARD_TAG = "TkwryMacWebKeyGuard"
 
 
@@ -126,11 +133,18 @@ def _ensure_mac_pump(toplevel: tk.Misc) -> None:
     toplevel.after(0, _mac_pump_tick, toplevel)
 
 
+def _refresh_mac_key_guards(toplevel: tk.Misc) -> None:
+    """Tag text-like widgets added after the first WebView was registered."""
+    if getattr(toplevel, "_tkwry_mac_key_guard", False):
+        _tag_mac_text_widgets(toplevel)
+
+
 def _mac_input_wakeup(event: tk.Event) -> None:
     """Drain Rust focus flags promptly when Tcl sees a click."""
     toplevel = event.widget.winfo_toplevel()
     if not getattr(toplevel, "_tkwry_mac_webviews", None):
         return
+    _refresh_mac_key_guards(toplevel)
     _mac_service_wakeup(toplevel)
     pump_idle = not getattr(toplevel, "_tkwry_mac_pump_active", False)
     if pump_idle and _mac_webviews(toplevel):
@@ -228,6 +242,7 @@ def _register_macos_webview(web: WebView) -> None:
         toplevel._tkwry_mac_web_input_active = False
         _ensure_mac_key_guard(toplevel)
     views.append(web)
+    _refresh_mac_key_guards(toplevel)
 
 
 def _unregister_macos_webview(web: WebView) -> None:

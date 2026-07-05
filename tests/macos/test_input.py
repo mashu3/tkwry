@@ -226,6 +226,31 @@ def test_rapid_keys_do_not_reach_entry_while_web_active(url_demo_layout) -> None
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+def test_key_guard_blocks_combobox_while_web_active(url_demo_layout) -> None:
+    web = WebView(url_demo_layout.web_frame, html="<p>keys</p>")
+    try:
+        _wait_native(web, url_demo_layout.root)
+        combo = ttk.Combobox(url_demo_layout.toolbar, values=("a", "b"))
+        combo.pack(side="left", padx=(8, 0))
+        url_demo_layout.root.update_idletasks()
+
+        combo.focus_force()
+        combo.set("a")
+        url_demo_layout.root.update()
+
+        web.focus()
+        pump(url_demo_layout.root, seconds=0.05)
+        assert combo.bindtags()[0] == "TkwryMacWebKeyGuard"
+
+        before = combo.get()
+        combo.event_generate("<KeyPress-b>")
+        url_demo_layout.root.update()
+        assert combo.get() == before
+    finally:
+        web.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 def test_key_guard_blocks_entry_while_web_active(url_demo_layout) -> None:
     web = WebView(url_demo_layout.web_frame, html="<p>keys</p>")
     try:
