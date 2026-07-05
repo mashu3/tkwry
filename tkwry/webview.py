@@ -72,9 +72,15 @@ class WebView:
     """Embed a system WebView (wry) inside an existing Tk ``Frame``.
 
     The host *frame* must be laid out with a real size (``pack`` / ``grid`` /
-    ``place``) before the native webview is created. IPC, page-load, title,
-    eval callbacks, and drag-and-drop handlers run on the **Tk main thread**
-    via an internal queue.
+    ``place``) before the native webview is created. IPC, page-load,
+    title-changed, eval callbacks, and drag-and-drop handlers run on the
+    **Tk main thread** via an internal queue.
+
+    **Navigation hooks** (``on_navigation``, ``on_new_window``) are invoked
+    **synchronously on the WebKit thread** — wry needs an immediate return
+    value, so they cannot be queued. Keep handlers fast; do not call Tk
+    widgets or other thread-unsafe APIs from them. Defer work with
+    ``frame.after`` if needed.
 
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
@@ -426,6 +432,7 @@ class WebView:
             self._ensure_event_poll()
 
     def set_on_navigation(self, handler: NavigationHandler | None) -> None:
+        """Register a navigation hook (runs synchronously on the WebKit thread)."""
         self._require_tk_thread()
         self._on_navigation = handler
         if self._webview is not None:
@@ -470,6 +477,7 @@ class WebView:
             self._drain_title_queue()
 
     def set_on_new_window(self, handler: NewWindowHandler | None) -> None:
+        """Register a new-window hook (runs synchronously on the WebKit thread)."""
         self._require_tk_thread()
         self._on_new_window = handler
         if self._webview is not None:

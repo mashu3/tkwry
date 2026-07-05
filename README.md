@@ -163,6 +163,8 @@ web = WebView(
 
 `on_page_load` fires `PageLoadEvent.Started` and `PageLoadEvent.Finished` **for every navigation**. Events that occurred before a handler was registered are **discarded** when you call `set_on_page_load` (or pass `on_page_load` in the constructor from the start).
 
+**Callback threads:** `on_page_load` and `on_title_changed` run on the **Tk main thread** (queued). `on_navigation` and `on_new_window` run **synchronously on the WebKit thread** — wry needs an immediate return value, so they cannot be queued. Keep those handlers fast and avoid Tk widget calls; defer work with `root.after` if needed.
+
 Callback exceptions are printed to stderr and do not stop event delivery.
 
 ### Drag & drop (native OS path)
@@ -242,7 +244,7 @@ tkwry works around this by:
 
 **Keyboard focus (macOS):** tkwry routes input between Tk widgets (`Entry`, `Text`, …) and the WebView automatically. Rust hit-tests clicks at the `NSEvent` layer and switches first responder; Python drains focus signals on the Tk main thread so keystrokes reach the correct target. Use `web.focus()` and `web.focus_parent()` when you need explicit control — see [`examples/url_demo.py`](examples/url_demo.py). IME and other advanced input may still behave differently than in a standalone browser.
 
-**You do not need extra code for tabs or panes** — see [`examples/multi_demo.py`](examples/multi_demo.py). IPC, page-load, title, eval, and drag-and-drop handlers are dispatched on the **Tk main thread** via an internal queue (avoids WebKit deadlocks).
+**You do not need extra code for tabs or panes** — see [`examples/multi_demo.py`](examples/multi_demo.py). IPC, page-load, title, eval, and drag-and-drop handlers are dispatched on the **Tk main thread** via an internal queue (avoids WebKit deadlocks). `on_navigation` and `on_new_window` are synchronous WebKit-thread hooks — see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks).
 
 ---
 
@@ -260,7 +262,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **URL safety** — normalizes and validates URLs before navigation
 - **DevTools** — `open_devtools()` / `devtools=True` for debugging
 - **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)
-- **Navigation hooks** — `on_navigation`, `on_page_load`, `on_title_changed`, `on_new_window`
+- **Navigation hooks** — `on_page_load`, `on_title_changed` (Tk thread); `on_navigation`, `on_new_window` (WebKit thread, synchronous)
 - **Multiple layouts** — works with `pack`, `grid`, `place`, `Notebook`, and `PanedWindow` (see examples)
 - **Plotly-ready** — load HTML + `eval_js` for interactive charts
 - **Folium-ready** — embed Leaflet maps from Folium HTML (right-click to pin)
