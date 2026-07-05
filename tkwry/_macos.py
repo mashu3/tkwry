@@ -116,7 +116,6 @@ def _mac_pump_tick(toplevel: tk.Misc) -> None:
     if not _mac_webviews(toplevel):
         toplevel._tkwry_mac_pump_active = False
         return
-    _refresh_mac_key_guards(toplevel)
     _mac_service_wakeup(toplevel)
     if _mac_unfocus_pending(toplevel) or _mac_pipe_readable(toplevel):
         delay = 0
@@ -134,12 +133,6 @@ def _ensure_mac_pump(toplevel: tk.Misc) -> None:
     toplevel.after(0, _mac_pump_tick, toplevel)
 
 
-def _refresh_mac_key_guards(toplevel: tk.Misc) -> None:
-    """Tag text-like widgets added after the first WebView was registered."""
-    if getattr(toplevel, "_tkwry_mac_key_guard", False):
-        _tag_mac_text_widgets(toplevel)
-
-
 def _mac_widget_mapped(event: tk.Event) -> None:
     """Tag text-like widgets when they (or a subtree) is mapped at runtime."""
     toplevel = event.widget.winfo_toplevel()
@@ -153,7 +146,6 @@ def _mac_input_wakeup(event: tk.Event) -> None:
     toplevel = event.widget.winfo_toplevel()
     if not getattr(toplevel, "_tkwry_mac_webviews", None):
         return
-    _refresh_mac_key_guards(toplevel)
     _mac_service_wakeup(toplevel)
     pump_idle = not getattr(toplevel, "_tkwry_mac_pump_active", False)
     if pump_idle and _mac_webviews(toplevel):
@@ -252,7 +244,6 @@ def _register_macos_webview(web: WebView) -> None:
         toplevel._tkwry_mac_web_input_active = False
         _ensure_mac_key_guard(toplevel)
     views.append(web)
-    _refresh_mac_key_guards(toplevel)
 
 
 def _unregister_macos_webview(web: WebView) -> None:

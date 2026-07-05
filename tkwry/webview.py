@@ -34,7 +34,6 @@ if sys.platform == "darwin":
         _ensure_mac_pump,
         _ensure_mac_wakeup_pipe,
         _mac_service_wakeup,
-        _refresh_mac_key_guards,
         _register_macos_webview,
         _release_tk_keyboard_focus,
         _set_mac_webviews_input_active,
@@ -397,7 +396,6 @@ class WebView:
         if sys.platform == "darwin":
             toplevel = self._frame.winfo_toplevel()
             _set_mac_webviews_input_active(toplevel, self)
-            _refresh_mac_key_guards(toplevel)
             _release_tk_keyboard_focus(toplevel)
 
     def focus_parent(self) -> None:
