@@ -111,7 +111,7 @@ def main() -> None:
     city_box.bind("<<ComboboxSelected>>", lambda _e: push_map())
     zoom_scale.bind("<ButtonRelease-1>", lambda _e: push_map())
 
-    root.after(800, push_map)
+    web.when_ready(push_map)
     root.mainloop()
 
 
