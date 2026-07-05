@@ -1,4 +1,8 @@
-"""Demo: interactive Folium maps embedded in Tkinter via tkwry."""
+"""Demo: interactive Folium maps embedded in Tkinter via tkwry.
+
+Requires network access: Folium/Leaflet fetch map tiles from remote servers
+(CDN + OpenStreetMap). Offline, the WebView loads but tiles stay blank.
+"""
 
 from __future__ import annotations
 
@@ -68,7 +72,11 @@ def main() -> None:
     ttk.Label(panel, text="Map controls", font=("", 14, "bold")).pack(anchor="w")
     ttk.Label(
         panel,
-        text="Tkinter reloads the Folium map.\nRight-click the map to drop a pin.",
+        text=(
+            "Tkinter reloads the Folium map.\n"
+            "Right-click the map to drop a pin.\n"
+            "Map tiles load from the network (CDN); offline maps stay blank."
+        ),
         wraplength=220,
         foreground="#555",
     ).pack(anchor="w", pady=(4, 16))
