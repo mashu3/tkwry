@@ -157,6 +157,7 @@ def test_set_on_new_window_none_clears_handler(tk_root) -> None:
     assert calls == ["https://example.com/"]
 
     web.set_on_new_window(None)
+    assert web._on_new_window is None
     assert web._native_new_window("https://example.com/2") == NewWindowResponse.Allow
     assert calls == ["https://example.com/"]
 

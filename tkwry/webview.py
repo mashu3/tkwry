@@ -473,7 +473,10 @@ class WebView:
         self._require_tk_thread()
         self._on_new_window = handler
         if self._webview is not None:
-            self._webview.set_on_new_window(self._native_new_window)
+            if handler is not None:
+                self._webview.set_on_new_window(self._native_new_window)
+            else:
+                self._webview.clear_on_new_window()
 
     def set_drag_drop_handler(self, handler: DragDropHandler | None) -> None:
         self._require_tk_thread()

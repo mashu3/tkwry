@@ -482,6 +482,15 @@ impl WebView {
         Ok(())
     }
 
+    fn clear_on_new_window(&self) -> PyResult<()> {
+        let mut guard = self
+            .newwin_cb
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+        *guard = None;
+        Ok(())
+    }
+
     fn set_drag_drop_handler(&self, handler: Py<PyAny>) -> PyResult<()> {
         let mut guard = self
             .drag_drop_cb

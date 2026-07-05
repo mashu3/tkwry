@@ -69,6 +69,7 @@ class WebView:
     def set_on_new_window(
         self, handler: Callable[[str], NewWindowResponse]
     ) -> None: ...
+    def clear_on_new_window(self) -> None: ...
     def set_drag_drop_handler(
         self,
         handler: Callable[[DragDropEvent, list[str], tuple[int, int]], bool],
