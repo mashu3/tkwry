@@ -193,6 +193,11 @@ impl WebView {
             if let Ok(mut pending) = page_load_pending_clone.lock() {
                 if pending.len() >= MAX_PAGE_LOAD_PENDING {
                     let half = pending.len() / 2;
+                    eprintln!(
+                        "tkwry: discarding {} oldest page-load event(s) (pending queue exceeded {} event limit)",
+                        half,
+                        MAX_PAGE_LOAD_PENDING
+                    );
                     pending.drain(..half);
                 }
                 pending.push((evt, url));
