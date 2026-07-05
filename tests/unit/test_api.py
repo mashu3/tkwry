@@ -40,6 +40,7 @@ WEBVIEW_METHODS = (
     "eval_js",
     "eval_js_with_callback",
     "focus",
+    "focus_parent",
     "set_background_color",
     "open_devtools",
     "close_devtools",
