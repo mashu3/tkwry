@@ -4,6 +4,30 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.0.6] - 2026-07-05
+
+### Added
+
+- `examples/folium_demo.py` — Folium maps via `load_html`, city hall markers, right-click pins
+- Pre-built **abi3** wheels for **Windows arm64** (alongside x86_64)
+- `clear_on_new_window()` — `set_on_new_window(None)` clears the Rust callback (matches other handlers)
+- CI: stubtest for typed `_core` API; `windows-11-arm` in test and release matrices
+- Integration tests: `reload()` after ready; macOS focus, title-changed, and multi-WebView coverage
+
+### Fixed
+
+- macOS key guard for `ttk.Combobox` and dynamically added text widgets (`<Map>`); removed per-pump full-tree rescans
+- Log when `page_load_pending` queue overflows (was silent discard)
+- `set_on_title_changed(None)` and `set_drag_drop_handler(None)` clear Rust callbacks
+- `_sync_bounds` / `_schedule_bounds_sync` guard against `TclError` on destroyed frames
+- `page_load_pending` capped to prevent unbounded growth
+- macOS focus helpers moved to `_macos.py`; wakeup pipe fd teardown order
+
+### Changed
+
+- README: current macOS focus routing, WebKit-thread vs Tk-thread callbacks, `EvalErrorHandler`, Linux CI scope, Windows arm64
+- `folium_demo` uses `when_ready` for initial map load; documents CDN/network requirement
+
 ## [0.0.5] - 2026-07-04
 
 ### Fixed
@@ -100,6 +124,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.0.6]: https://github.com/mashu3/tkwry/releases/tag/v0.0.6
 [0.0.5]: https://github.com/mashu3/tkwry/releases/tag/v0.0.5
 [0.0.4]: https://github.com/mashu3/tkwry/releases/tag/v0.0.4
 [0.0.3]: https://github.com/mashu3/tkwry/releases/tag/v0.0.3
