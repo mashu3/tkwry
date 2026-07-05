@@ -263,6 +263,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Navigation hooks** — `on_navigation`, `on_page_load`, `on_title_changed`, `on_new_window`
 - **Multiple layouts** — works with `pack`, `grid`, `place`, `Notebook`, and `PanedWindow` (see examples)
 - **Plotly-ready** — load HTML + `eval_js` for interactive charts
+- **Folium-ready** — embed Leaflet maps from Folium HTML (right-click to pin)
 - **Alpha, but tested** — CI on Windows and macOS; Linux CI is smoke/build only (best-effort)
 
 ---
@@ -281,6 +282,7 @@ pip install -e .
 | [`examples/ipc_demo.py`](examples/ipc_demo.py) | JavaScript ↔ Tkinter IPC |
 | [`examples/multi_demo.py`](examples/multi_demo.py) | Multiple WebViews, tabs, panes |
 | [`examples/plotly_demo.py`](examples/plotly_demo.py) | Plotly charts (`pip install plotly`) |
+| [`examples/folium_demo.py`](examples/folium_demo.py) | Folium maps (`pip install folium`) |
 | [`examples/dnd_demo.py`](examples/dnd_demo.py) | Native file drag & drop into WebView |
 
 ```bash
@@ -288,6 +290,7 @@ python examples/url_demo.py
 python examples/ipc_demo.py
 python examples/multi_demo.py
 python examples/plotly_demo.py
+python examples/folium_demo.py
 python examples/dnd_demo.py
 ```
 
