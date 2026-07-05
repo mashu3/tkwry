@@ -266,7 +266,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Multiple layouts** — works with `pack`, `grid`, `place`, `Notebook`, and `PanedWindow` (see examples)
 - **Plotly-ready** — load HTML + `eval_js` for interactive charts
 - **Folium-ready** — embed Leaflet maps from Folium HTML (right-click to pin)
-- **Alpha, but tested** — CI on Windows and macOS; Linux CI is smoke/build only (best-effort)
+- **Alpha, but tested** — CI runs `pytest tests/` on Windows, macOS, and Linux (Xvfb + WebKitGTK); many timing-sensitive integration tests are skipped on Linux CI (**best-effort**, not a release blocker)
 
 ---
 
