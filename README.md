@@ -126,6 +126,7 @@ web = WebView(
 ```python
 web.load_html("<h1>Hello</h1>")
 web.eval_js("document.title = 'Hi'")  # fire-and-forget (Tk idle, no return value)
+web.eval_js("bad()", on_error=lambda exc: print("eval failed:", exc))
 web.eval_js_with_callback("document.title", print)  # async; callback on Tk main thread
 web.load_url("https://example.com")
 web.reload()
@@ -136,7 +137,7 @@ web.open_devtools()
 
 Rapid `load_url` / `load_html` calls are **coalesced (last-wins)** — `load(A); load(B); load(C)` loads `C` only.
 
-`eval_js` does not return a result (not synchronous). Use `eval_js_with_callback` when you need the JavaScript return value as a `str`.
+`eval_js` does not return a result (not synchronous). Use `eval_js_with_callback` when you need the JavaScript return value as a `str`. Pass `on_error=` to handle evaluation failures on the Tk main thread; otherwise the traceback is printed to stderr (`EvalErrorHandler`).
 
 ### Layout / resize
 
@@ -197,7 +198,7 @@ web.destroy()   # release native webview; host Frame is kept
 | Category | Members |
 |----------|---------|
 | Content | `load_url`, `load_html`, `reload`, `url` |
-| JavaScript | `eval_js`, `eval_js_with_callback` |
+| JavaScript | `eval_js` (`on_error`), `eval_js_with_callback` |
 | IPC | `set_ipc_handler` |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler` |
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
@@ -208,6 +209,8 @@ Constructor options: `url`, `html`, `ipc_handler`, `devtools`, `background_color
 `user_agent`, `initialization_script`, `focused`, plus the callback hooks above.
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`.
+
+Type aliases: `IpcHandler`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`.
 
 ---
 
