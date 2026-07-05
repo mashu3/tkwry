@@ -269,6 +269,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Multiple layouts** — works with `pack`, `grid`, `place`, `Notebook`, and `PanedWindow` (see examples)
 - **Plotly-ready** — load HTML + `eval_js` for interactive charts
 - **Folium-ready** — embed Leaflet maps from Folium HTML (right-click to pin)
+- **Markdown-ready** — Monaco editor + live preview in a `PanedWindow` (see [`examples/markdown_demo.py`](examples/markdown_demo.py); CDN required)
 - **Alpha, but tested** — CI runs `pytest tests/` on Windows (x86_64 + arm64), macOS, and Linux (Xvfb + WebKitGTK); many timing-sensitive integration tests are skipped on Linux CI (**best-effort**, not a release blocker)
 
 ---
@@ -288,6 +289,7 @@ pip install -e .
 | [`examples/multi_demo.py`](examples/multi_demo.py) | Multiple WebViews, tabs, panes |
 | [`examples/plotly_demo.py`](examples/plotly_demo.py) | Plotly charts (`pip install plotly`) |
 | [`examples/folium_demo.py`](examples/folium_demo.py) | Folium maps (`pip install folium`) |
+| [`examples/markdown_demo.py`](examples/markdown_demo.py) | Monaco markdown editor + live preview (CDN) |
 | [`examples/dnd_demo.py`](examples/dnd_demo.py) | Native file drag & drop into WebView |
 
 ```bash
@@ -296,6 +298,7 @@ python examples/ipc_demo.py
 python examples/multi_demo.py
 python examples/plotly_demo.py
 python examples/folium_demo.py
+python examples/markdown_demo.py
 python examples/dnd_demo.py
 ```
 
