@@ -81,6 +81,8 @@ jobs:
             python-version: "3.12"
           - os: windows-latest
             python-version: "3.12"
+          - os: windows-11-arm
+            python-version: "3.12"
           - os: macos-latest
             python-version: "3.12"
     steps:

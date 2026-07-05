@@ -55,9 +55,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - id: windows
+          - id: windows-x86_64
             os: windows-latest
-            target: ""
+            target: x86_64-pc-windows-msvc
+          - id: windows-arm64
+            os: windows-11-arm
+            target: aarch64-pc-windows-msvc
           - id: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin

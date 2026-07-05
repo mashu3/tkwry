@@ -27,7 +27,7 @@ Tkinter is still a solid GUI shell — it just had no first-class way to host mo
 - **IPC bridge** — JavaScript → Python callbacks without freezing the UI
 - **Layout-aware** — tracks `pack` / `grid` / `place`, tabs, and `PanedWindow`
 
-Pre-built **abi3** wheels ship for **Windows (x86_64)** and **macOS (Apple Silicon + Intel)** — these are the primary release targets.
+Pre-built **abi3** wheels ship for **Windows (x86_64, arm64)** and **macOS (Apple Silicon + Intel)** — these are the primary release targets.
 **Linux** is **best-effort**: build from source (sdist / git); timing and headless behavior are not guaranteed in v0.0.x.
 
 ---
@@ -36,7 +36,7 @@ Pre-built **abi3** wheels ship for **Windows (x86_64)** and **macOS (Apple Silic
 
 - Python 3.10+
 - Tkinter (included with most Python builds)
-- **Windows (x86_64 only)**
+- **Windows (x86_64, arm64)**
   - [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) must be installed (pre-installed on many Windows 10/11 systems).
   - **Without WebView2, tkwry is not supported on Windows** — there is no fallback engine.
 - **macOS** — 11 (Big Sur) or later; Apple Silicon (**arm64**) or Intel (**x86_64**); system WKWebView (no extra runtime)
@@ -231,7 +231,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 | OS | Arch | Parent handle | Engine | Notes |
 |----|------|---------------|--------|-------|
-| **Windows** | x86_64 | `Frame.winfo_id()` → HWND | WebView2 | WebView2 Runtime required |
+| **Windows** | x86_64, arm64 | `Frame.winfo_id()` → HWND | WebView2 | WebView2 Runtime required |
 | **macOS** | arm64, x86_64 | Toplevel content `NSView` | WKWebView | See [macOS embedding](#macos-embedding) below |
 | **Linux** | — | `winfo_id()` → X11 window ID | WebKitGTK | Source install; **best-effort** (not a wheel release target) |
 
@@ -269,7 +269,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Multiple layouts** — works with `pack`, `grid`, `place`, `Notebook`, and `PanedWindow` (see examples)
 - **Plotly-ready** — load HTML + `eval_js` for interactive charts
 - **Folium-ready** — embed Leaflet maps from Folium HTML (right-click to pin)
-- **Alpha, but tested** — CI runs `pytest tests/` on Windows, macOS, and Linux (Xvfb + WebKitGTK); many timing-sensitive integration tests are skipped on Linux CI (**best-effort**, not a release blocker)
+- **Alpha, but tested** — CI runs `pytest tests/` on Windows (x86_64 + arm64), macOS, and Linux (Xvfb + WebKitGTK); many timing-sensitive integration tests are skipped on Linux CI (**best-effort**, not a release blocker)
 
 ---
 
