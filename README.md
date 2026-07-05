@@ -215,7 +215,7 @@ Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`.
 - **Windows** — WebView2 Runtime required; systems without it are unsupported
 - **Linux** — source install only (no PyPI wheel); **best-effort** in v0.0.x — headless CI and event timing are not release blockers
 - **DevTools** — macOS uses private APIs; avoid in Mac App Store release builds
-- **macOS input** — keyboard focus is shared between Tk and the WebView on the main thread; typing may feel slightly less snappy than a standalone browser (especially with IME on)
+- **macOS input** — Tk text widgets and the WebView share one window; tkwry routes focus automatically (see [macOS embedding](#macos-embedding)). IME and other advanced input may still differ from a standalone browser
 - **Drag & drop** — drop target is the WebView area only (not arbitrary Tk widgets; use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for those)
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
@@ -240,7 +240,7 @@ tkwry works around this by:
 2. Positioning it with `set_bounds` to match your `Frame` (`<Configure>`)
 3. Hiding it with `set_visible(False)` when the frame is unmapped (`<Unmap>`) — e.g. another `ttk.Notebook` tab is selected
 
-**Keyboard focus (macOS):** Rust routes clicks between Tk widgets and the WebView. You may notice slight input latency compared to a normal browser; v0.0.1 treats this as a known limitation.
+**Keyboard focus (macOS):** tkwry routes input between Tk widgets (`Entry`, `Text`, …) and the WebView automatically. Rust hit-tests clicks at the `NSEvent` layer and switches first responder; Python drains focus signals on the Tk main thread so keystrokes reach the correct target. Use `web.focus()` and `web.focus_parent()` when you need explicit control — see [`examples/url_demo.py`](examples/url_demo.py). IME and other advanced input may still behave differently than in a standalone browser.
 
 **You do not need extra code for tabs or panes** — see [`examples/multi_demo.py`](examples/multi_demo.py). IPC, page-load, title, eval, and drag-and-drop handlers are dispatched on the **Tk main thread** via an internal queue (avoids WebKit deadlocks).
 
