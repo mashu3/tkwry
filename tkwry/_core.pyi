@@ -46,7 +46,6 @@ class WebView:
         initialization_script: str | None = None,
         ipc_handler: Callable[[str], Any] | None = None,
         on_navigation: Callable[[str], bool] | None = None,
-        _on_page_load: Any | None = None,
         on_title_changed: Callable[[str], Any] | None = None,
         on_new_window: Callable[[str], NewWindowResponse] | None = None,
         drag_drop_handler: Callable[[DragDropEvent, list[str], tuple[int, int]], bool]
