@@ -19,7 +19,8 @@ Edit **Markdown** on the left — the preview on the right updates as you type.
 
 ## How it works
 
-1. **Left pane** — [Monaco Editor](https://microsoft.github.io/monaco-editor/) in a WebView
+1. **Left pane** — [Monaco Editor](https://microsoft.github.io/monaco-editor/)
+   in a WebView
 2. **Right pane** — rendered HTML (`marked` + `highlight.js`)
 3. **Bridge** — `window.ipc.postMessage()` → Tkinter → `eval_js()` on the preview pane
 
@@ -27,7 +28,8 @@ Drag the **sash** between panes to resize.
 
 ## Requirements
 
-**Network / CDN** — Monaco Editor, `marked`, and `highlight.js` load from CDN on first launch. Offline, the WebViews open but the editor and preview stay blank.
+**Network / CDN** — Monaco Editor, `marked`, and `highlight.js` load from CDN
+on first launch. Offline, the WebViews open but the editor and preview stay blank.
 
 ## Code sample
 
@@ -88,7 +90,9 @@ class HtmlPages:
     }}
 
     require.config({{
-      paths: {{ vs: "https://cdn.jsdelivr.net/npm/monaco-editor@{MONACO_VERSION}/min/vs" }},
+      paths: {{
+        vs: "https://cdn.jsdelivr.net/npm/monaco-editor@{MONACO_VERSION}/min/vs",
+      }},
     }});
 
     require(["vs/editor/editor.main"], function () {{
