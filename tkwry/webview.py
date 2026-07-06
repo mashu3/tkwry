@@ -50,9 +50,6 @@ EvalCallback: TypeAlias = Callable[[str], None]
 EvalErrorHandler: TypeAlias = Callable[[Exception], None]
 _PendingLoad: TypeAlias = tuple[Literal["url"], str] | tuple[Literal["html"], str]
 
-_DEFAULT_WIDTH = 800
-_DEFAULT_HEIGHT = 600
-
 
 def _validate_color_component(value: int, name: str) -> None:
     if not isinstance(value, int):
@@ -128,8 +125,8 @@ class WebView:
         self._frame = frame
         self._tk_thread_id = threading.get_ident()
         self._early_create = width is not None or height is not None
-        self._init_width = max(width if width is not None else _DEFAULT_WIDTH, 1)
-        self._init_height = max(height if height is not None else _DEFAULT_HEIGHT, 1)
+        self._init_width = max(width, 1) if width is not None else None
+        self._init_height = max(height, 1) if height is not None else None
         self._destroyed = False
         self._ready_callbacks: list[Callable[[], None]] = []
         self._create_pending = False
@@ -532,9 +529,12 @@ class WebView:
         frame_h = self._frame.winfo_height()
         if frame_w > 1 and frame_h > 1:
             return frame_w, frame_h
-        if self._early_create:
-            return self._init_width, self._init_height
-        return None
+
+        width = frame_w if frame_w > 1 else self._init_width
+        height = frame_h if frame_h > 1 else self._init_height
+        if width is None or height is None:
+            return None
+        return width, height
 
     def _fire_ready(self) -> None:
         callbacks = self._ready_callbacks
