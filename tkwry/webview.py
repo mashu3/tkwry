@@ -457,9 +457,7 @@ class WebView:
             if handler is not None:
                 self._webview.set_on_navigation(self._native_navigation)
             else:
-                clear = getattr(self._webview, "clear_on_navigation", None)
-                if clear is not None:
-                    clear()
+                self._webview.clear_on_navigation()
 
     def set_on_page_load(self, handler: PageLoadHandler | None) -> None:
         self._require_tk_thread()
