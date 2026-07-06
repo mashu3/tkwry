@@ -10,8 +10,17 @@ import pytest
 from tkwry import WebView
 
 
-def _suppress_poll_timer(web: WebView, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Block _poll_events reschedule; after_idle and other timers still run."""
+def _make_web(tk_root):
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root)
+    # Avoid eager native create in headless Linux CI unit tests.
+    return frame, WebView(frame)
+
+
+def _configure_poll_test(web: WebView, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Isolate poll logic from GTK pumps and rescheduling timers."""
+    monkeypatch.setattr("tkwry._core.pump_events", lambda: None, raising=False)
     original = web._frame.after
 
     def after(delay, func=None, *args):
@@ -25,10 +34,7 @@ def _suppress_poll_timer(web: WebView, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_should_keep_polling_while_eval_pending(tk_root) -> None:
-    import tkinter as tk
-
-    frame = tk.Frame(tk_root)
-    web = WebView(frame, width=400, height=300)
+    _frame, web = _make_web(tk_root)
 
     web._pending_eval_callbacks = 1
 
@@ -38,11 +44,8 @@ def test_should_keep_polling_while_eval_pending(tk_root) -> None:
 def test_poll_events_keeps_polling_until_eval_delivers(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import tkinter as tk
-
-    frame = tk.Frame(tk_root)
-    web = WebView(frame, width=400, height=300)
-    _suppress_poll_timer(web, monkeypatch)
+    _frame, web = _make_web(tk_root)
+    _configure_poll_test(web, monkeypatch)
     web._pending_eval_callbacks = 1
     web._event_poll_active = True
 
@@ -54,11 +57,8 @@ def test_poll_events_keeps_polling_until_eval_delivers(
 def test_poll_events_drains_late_eval_result(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import tkinter as tk
-
-    frame = tk.Frame(tk_root)
-    web = WebView(frame, width=400, height=300)
-    _suppress_poll_timer(web, monkeypatch)
+    _frame, web = _make_web(tk_root)
+    _configure_poll_test(web, monkeypatch)
     results: list[str] = []
     web._eval_result_queue.put((results.append, "ok"))
     web._event_poll_active = True
@@ -70,10 +70,7 @@ def test_poll_events_drains_late_eval_result(
 
 
 def test_eval_js_with_callback_on_error(tk_root) -> None:
-    import tkinter as tk
-
-    frame = tk.Frame(tk_root)
-    web = WebView(frame, width=400, height=300)
+    _frame, web = _make_web(tk_root)
     web._webview = MagicMock()
     web._webview.eval_js_with_callback.side_effect = RuntimeError("boom")
     errors: list[BaseException] = []
@@ -90,11 +87,8 @@ def test_eval_js_with_callback_on_error(tk_root) -> None:
 def test_eval_js_with_callback_pending_keeps_poll_until_deliver(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import tkinter as tk
-
-    frame = tk.Frame(tk_root)
-    web = WebView(frame, width=400, height=300)
-    _suppress_poll_timer(web, monkeypatch)
+    _frame, web = _make_web(tk_root)
+    _configure_poll_test(web, monkeypatch)
     web._webview = MagicMock()
     results: list[str] = []
 
