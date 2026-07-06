@@ -914,15 +914,28 @@ class WebView:
         if self._on_page_load is not None:
             self._ensure_event_poll()
 
+    def _bounds_size(self) -> tuple[int, int] | None:
+        """Return the width/height to push, or None when geometry is not meaningful."""
+        try:
+            if not self._frame.winfo_exists():
+                return None
+            frame_w = self._frame.winfo_width()
+            frame_h = self._frame.winfo_height()
+            width = frame_w if frame_w > 1 else self._init_width
+            height = frame_h if frame_h > 1 else self._init_height
+            if width is None or height is None or width <= 1 or height <= 1:
+                return None
+            return width, height
+        except tk.TclError:
+            return None
+
     def _frame_should_show(self) -> bool:
         try:
             if not self._frame.winfo_exists():
                 return False
             if sys.platform != "linux" and not self._frame.winfo_viewable():
                 return False
-            if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
-                return False
-            return True
+            return self._bounds_size() is not None
         except tk.TclError:
             return False
 
@@ -941,33 +954,25 @@ class WebView:
         self._sync_bounds()
         self._maybe_fire_ready()
 
-    def _sync_bounds(self) -> None:
+    def _sync_bounds(self) -> bool:
         if self._webview is None:
-            return
+            return False
         if not self._frame_should_show():
             self._webview.set_visible(False)
-            return
+            return False
+        size = self._bounds_size()
+        if size is None:
+            self._webview.set_visible(False)
+            return False
+        width, height = size
         try:
             self._frame.update_idletasks()
-            frame_w = self._frame.winfo_width()
-            frame_h = self._frame.winfo_height()
-            if frame_w > 1:
-                width = frame_w
-            elif self._init_width is not None:
-                width = self._init_width
-            else:
-                width = 1
-            if frame_h > 1:
-                height = frame_h
-            elif self._init_height is not None:
-                height = self._init_height
-            else:
-                height = 1
             x, y = tk_embed_origin(self._frame, root_relative=self._embed.root_relative)
         except tk.TclError:
-            return
+            return False
         self._webview.set_bounds(x, y, width, height)
         self._webview.set_visible(True)
+        return True
 
     def _on_configure(self, event: tk.Event) -> None:
         if event.widget is not self._frame or self._destroyed:

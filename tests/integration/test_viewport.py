@@ -196,3 +196,94 @@ def test_viewport_not_stale_after_repack(tk_root) -> None:
 
     web.destroy()
     host.destroy()
+
+
+@skip_linux_layout
+def test_viewport_matches_frame_after_grid(tk_root) -> None:
+    import tkinter as tk
+
+    tk_root.geometry("520x380")
+    host = tk.Frame(tk_root, bg="#222")
+    host.grid(row=0, column=0, sticky="nsew")
+    tk_root.grid_rowconfigure(0, weight=1)
+    tk_root.grid_columnconfigure(0, weight=1)
+
+    web = WebView(host, html=VIEWPORT_HTML)
+    web.grid(sticky="nsew")
+    host.grid_rowconfigure(0, weight=1)
+    host.grid_columnconfigure(0, weight=1)
+
+    wait_ready(tk_root, web)
+    viewport = read_viewport(web, tk_root)
+    assert viewport_matches_frame(viewport, host), (
+        f"viewport={viewport}, frame={host.winfo_width()}x{host.winfo_height()}"
+    )
+
+    web.destroy()
+    host.destroy()
+
+
+@skip_linux_layout
+def test_viewport_matches_frame_after_place(tk_root) -> None:
+    import tkinter as tk
+
+    tk_root.geometry("520x380")
+    host = tk.Frame(tk_root, width=480, height=320, bg="#222")
+    host.pack_propagate(False)
+    host.place(relx=0.5, rely=0.5, anchor="center")
+
+    web = WebView(host, html=VIEWPORT_HTML)
+    web.place(x=0, y=0, relwidth=1.0, relheight=1.0)
+
+    wait_ready(tk_root, web)
+    viewport = read_viewport(web, tk_root)
+    assert viewport_matches_frame(viewport, host), (
+        f"viewport={viewport}, frame={host.winfo_width()}x{host.winfo_height()}"
+    )
+
+    web.destroy()
+    host.destroy()
+
+
+@skip_linux_layout
+def test_viewport_matches_frame_with_explicit_width_only(tk_root) -> None:
+    import tkinter as tk
+
+    tk_root.geometry("520x380")
+    host = tk.Frame(tk_root, height=280, bg="#222")
+    host.pack_propagate(False)
+    host.pack(fill="x", padx=8, pady=8)
+
+    web = WebView(host, width=480, html=VIEWPORT_HTML)
+    web.pack(fill="both", expand=True)
+
+    wait_ready(tk_root, web)
+    viewport = read_viewport(web, tk_root)
+    assert viewport_matches_frame(viewport, host), (
+        f"viewport={viewport}, frame={host.winfo_width()}x{host.winfo_height()}"
+    )
+
+    web.destroy()
+    host.destroy()
+
+
+@skip_linux_layout
+def test_viewport_matches_frame_with_explicit_height_only(tk_root) -> None:
+    import tkinter as tk
+
+    tk_root.geometry("520x380")
+    host = tk.Frame(tk_root, width=360, bg="#222")
+    host.pack_propagate(False)
+    host.pack(side="left", fill="y", padx=8, pady=8)
+
+    web = WebView(host, height=280, html=VIEWPORT_HTML)
+    web.pack(fill="both", expand=True)
+
+    wait_ready(tk_root, web)
+    viewport = read_viewport(web, tk_root)
+    assert viewport_matches_frame(viewport, host), (
+        f"viewport={viewport}, frame={host.winfo_width()}x{host.winfo_height()}"
+    )
+
+    web.destroy()
+    host.destroy()

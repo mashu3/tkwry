@@ -64,6 +64,28 @@ def test_bounds_synced_after_host_packed_late(tk_root) -> None:
     host.destroy()
 
 
+def test_bounds_skip_1x1_during_late_host_pack(tk_root) -> None:
+    import tkinter as tk
+
+    tk_root.geometry("520x380")
+    host = tk.Frame(tk_root, bg="#222")
+    web = WebView(host, html="<p>no-1x1-sync</p>")
+    records = attach_bounds_recorder(web)
+
+    host.pack(fill="both", expand=True)
+    pump(tk_root, steps=80)
+    assert wait_until(tk_root, lambda: web.ready)
+
+    sizes = [(int(w), int(h)) for _x, _y, w, h in records]
+    assert sizes, "expected at least one applied bounds sync"
+    assert all(w > 1 and h > 1 for w, h in sizes), (
+        f"bounds sync should never apply 1x1 geometry: {sizes}"
+    )
+
+    web.destroy()
+    host.destroy()
+
+
 def test_pack_schedules_bounds_sync_without_configure(tk_root, monkeypatch) -> None:
     import tkinter as tk
 

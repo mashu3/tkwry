@@ -108,6 +108,40 @@ def test_layout_ready_true_when_frame_is_laid_out(tk_root, monkeypatch) -> None:
     assert web._layout_ready() is True
 
 
+def test_bounds_size_none_when_geometry_unknown(tk_root, monkeypatch) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame)
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 1)
+
+    assert web._bounds_size() is None
+
+
+def test_bounds_size_uses_explicit_dimensions_before_layout(
+    tk_root, monkeypatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 1)
+
+    assert web._bounds_size() == (300, 200)
+
+
+def test_bounds_size_uses_frame_width_with_explicit_height(
+    tk_root, monkeypatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, height=240)
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 500)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 1)
+
+    assert web._bounds_size() == (500, 240)
+
+
 def test_sync_bounds_uses_explicit_size_before_layout(tk_root, monkeypatch) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=300, height=200)
@@ -132,7 +166,32 @@ def test_sync_bounds_uses_explicit_size_before_layout(tk_root, monkeypatch) -> N
     monkeypatch.setattr(
         "tkwry.webview.tk_embed_origin", lambda *_args, **_kwargs: (0, 0)
     )
-    monkeypatch.setattr(web, "_frame_should_show", lambda: True)
 
-    web._sync_bounds()
+    assert web._sync_bounds() is True
     assert bounds == [(0.0, 0.0, 300.0, 200.0)]
+
+
+def test_sync_bounds_skips_1x1_without_explicit_size(tk_root, monkeypatch) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame)
+    bounds: list[tuple[float, float, float, float]] = []
+
+    class _Native:
+        def set_bounds(self, x, y, width, height) -> None:
+            bounds.append((x, y, width, height))
+
+        def set_visible(self, _visible: bool) -> None:
+            return None
+
+        def destroy(self) -> None:
+            return None
+
+    web._webview = _Native()
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: True)
+    monkeypatch.setattr(frame, "update_idletasks", lambda: None)
+
+    assert web._sync_bounds() is False
+    assert bounds == []

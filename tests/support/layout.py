@@ -37,9 +37,9 @@ def attach_bounds_recorder(
     original = web._sync_bounds
 
     def record() -> None:
-        web._frame.update_idletasks()
-        records.append(expected_bounds(web._frame))
-        original()
+        if original():
+            web._frame.update_idletasks()
+            records.append(expected_bounds(web._frame))
 
     web._sync_bounds = record  # type: ignore[method-assign]
     return records
