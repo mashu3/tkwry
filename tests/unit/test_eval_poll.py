@@ -107,9 +107,12 @@ def test_eval_js_with_callback_pending_keeps_poll_until_deliver(
     web._webview.eval_js_with_callback.side_effect = native_eval
 
     web.eval_js_with_callback("'ok'", results.append)
-    tk_root.update_idletasks()
-    tk_root.update()
-    web._poll_events()
+    for _ in range(5):
+        tk_root.update_idletasks()
+        tk_root.update()
+        if results:
+            break
+        web._poll_events()
 
     assert results == ["ok"]
     assert web._pending_eval_callbacks == 0

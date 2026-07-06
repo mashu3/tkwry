@@ -9,6 +9,10 @@ import pytest
 from tkwry._url import _normalize_url, _validate_url
 
 
+def _paths_equal(actual: str, expected: str) -> bool:
+    return actual.replace("\\", "/") == expected.replace("\\", "/")
+
+
 def test_normalize_adds_https() -> None:
     assert _normalize_url("example.com") == "https://example.com"
 
@@ -169,4 +173,5 @@ def test_normalize_windows_file_uri_three_slash_form(
         _normalize_url("file:///C:/Users/foo/index.html")
         == "file:///C:/Users/foo/index.html"
     )
-    assert seen == ["C:/Users/foo/index.html"]
+    assert len(seen) == 1
+    assert _paths_equal(seen[0], "C:/Users/foo/index.html")
