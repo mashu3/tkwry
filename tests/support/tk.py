@@ -70,3 +70,17 @@ def bare_frame(root):
     import tkinter as tk
 
     return tk.Frame(root)
+
+
+def layout_bare_frame(
+    frame,
+    *,
+    width: int = 400,
+    height: int = 300,
+) -> None:
+    """Pack an unpacked frame with stable geometry for layout-ready checks."""
+    root = frame.winfo_toplevel()
+    frame.pack_propagate(False)
+    frame.configure(width=width, height=height)
+    frame.pack(fill="both", expand=True)
+    root.update_idletasks()

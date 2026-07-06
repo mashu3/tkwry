@@ -82,3 +82,57 @@ def test_creation_size_prefers_laid_out_frame(tk_root, monkeypatch) -> None:
     monkeypatch.setattr(frame, "winfo_height", lambda: 480)
 
     assert web._creation_size() == (640, 480)
+
+
+def test_layout_ready_false_before_frame_geometry(tk_root, monkeypatch) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    web._webview = object()
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: True)
+
+    assert web._layout_ready() is False
+
+
+def test_layout_ready_true_when_frame_is_laid_out(tk_root, monkeypatch) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    web._webview = object()
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 400)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 300)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: True)
+
+    assert web._layout_ready() is True
+
+
+def test_sync_bounds_uses_explicit_size_before_layout(tk_root, monkeypatch) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    bounds: list[tuple[float, float, float, float]] = []
+
+    class _Native:
+        def set_bounds(self, x, y, width, height) -> None:
+            bounds.append((x, y, width, height))
+
+        def set_visible(self, _visible: bool) -> None:
+            return None
+
+        def destroy(self) -> None:
+            return None
+
+    web._webview = _Native()
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: True)
+    monkeypatch.setattr(frame, "update_idletasks", lambda: None)
+    monkeypatch.setattr(
+        "tkwry.webview.tk_embed_origin", lambda *_args, **_kwargs: (0, 0)
+    )
+    monkeypatch.setattr(web, "_frame_should_show", lambda: True)
+
+    web._sync_bounds()
+    assert bounds == [(0.0, 0.0, 300.0, 200.0)]

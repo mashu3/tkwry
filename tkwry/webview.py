@@ -128,6 +128,7 @@ class WebView:
         self._init_width = max(width, 1) if width is not None else None
         self._init_height = max(height, 1) if height is not None else None
         self._destroyed = False
+        self._ready_delivered = False
         self._ready_callbacks: list[Callable[[], None]] = []
         self._create_pending = False
         self._embed = tk_embed_parent(frame)
@@ -181,18 +182,21 @@ class WebView:
         self._frame.pack(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
+        self._maybe_fire_ready()
 
     def grid(self, **kwargs) -> None:
         self._require_tk_thread()
         self._frame.grid(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
+        self._maybe_fire_ready()
 
     def place(self, **kwargs) -> None:
         self._require_tk_thread()
         self._frame.place(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
+        self._maybe_fire_ready()
 
     def __repr__(self) -> str:
         if self._destroyed:
@@ -217,9 +221,11 @@ class WebView:
 
     @property
     def ready(self) -> bool:
-        """``True`` once the native webview has been created and not destroyed."""
+        """``True`` once the native webview exists with laid-out host geometry."""
         self._require_tk_thread()
-        return self._webview is not None and not self._destroyed
+        return (
+            self._webview is not None and not self._destroyed and self._layout_ready()
+        )
 
     @property
     def url(self) -> str | None:
@@ -265,17 +271,17 @@ class WebView:
         return result
 
     def when_ready(self, callback: Callable[[], None]) -> None:
-        """Schedule *callback* on the Tk main thread once the native view exists."""
+        """Schedule *callback* once the native view exists and the host is laid out."""
         self._require_tk_thread()
         if self._destroyed:
             return
-        if self._webview is not None:
+        if self.ready:
             self._frame.after_idle(lambda: self._invoke_callback(callback))
         else:
             self._ready_callbacks.append(callback)
 
     def wait_until_ready(self, timeout: float | None = 30.0) -> bool:
-        """Pump the Tk loop until the native webview is created or *timeout* elapses."""
+        """Pump the Tk loop until the webview is laid out or *timeout* elapses."""
         self._require_tk_thread()
         if self._webview is not None and not self._destroyed:
             return True
@@ -305,6 +311,7 @@ class WebView:
         self._destroyed = True
         self._event_poll_active = False
         self._pending_eval_callbacks = 0
+        self._ready_delivered = False
         self._ready_callbacks.clear()
         if self._webview is not None:
             self._webview.destroy()
@@ -535,11 +542,12 @@ class WebView:
             raise WebViewDestroyedError(
                 f"WebView.destroy() was called; cannot call {method}()"
             )
-        if self._webview is None:
+        if not self.ready:
             raise WebViewNotReadyError(
                 f"WebView is not ready; call wait_until_ready() or bind to "
                 f"<<WebViewReady>> before calling {method}()"
             )
+        assert self._webview is not None
         return self._webview
 
     def _creation_size(self) -> tuple[int, int] | None:
@@ -554,6 +562,29 @@ class WebView:
         if width is None or height is None:
             return None
         return width, height
+
+    def _layout_ready(self) -> bool:
+        """Whether the host frame has real geometry for callbacks and API use."""
+        if self._webview is None or self._destroyed:
+            return False
+        try:
+            if not self._frame.winfo_exists():
+                return False
+            if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
+                return False
+            if sys.platform != "linux" and not self._frame.winfo_viewable():
+                return False
+            return True
+        except tk.TclError:
+            return False
+
+    def _maybe_fire_ready(self) -> None:
+        if self._ready_delivered or self._destroyed or self._webview is None:
+            return
+        if not self._layout_ready():
+            return
+        self._ready_delivered = True
+        self._fire_ready()
 
     def _fire_ready(self) -> None:
         callbacks = self._ready_callbacks
@@ -788,7 +819,7 @@ class WebView:
             if sys.platform == "linux":
                 for _ in range(10):
                     self._service_linux_events()
-        self._fire_ready()
+        self._maybe_fire_ready()
 
     def _run_eval_js(
         self, script: str, on_error: EvalErrorHandler | None = None
@@ -908,6 +939,7 @@ class WebView:
     def _deferred_sync_bounds(self) -> None:
         self._bounds_sync_scheduled = False
         self._sync_bounds()
+        self._maybe_fire_ready()
 
     def _sync_bounds(self) -> None:
         if self._webview is None:
@@ -917,8 +949,20 @@ class WebView:
             return
         try:
             self._frame.update_idletasks()
-            width = max(self._frame.winfo_width(), 1)
-            height = max(self._frame.winfo_height(), 1)
+            frame_w = self._frame.winfo_width()
+            frame_h = self._frame.winfo_height()
+            if frame_w > 1:
+                width = frame_w
+            elif self._init_width is not None:
+                width = self._init_width
+            else:
+                width = 1
+            if frame_h > 1:
+                height = frame_h
+            elif self._init_height is not None:
+                height = self._init_height
+            else:
+                height = 1
             x, y = tk_embed_origin(self._frame, root_relative=self._embed.root_relative)
         except tk.TclError:
             return
@@ -932,10 +976,12 @@ class WebView:
             self._schedule_try_create()
         else:
             self._schedule_bounds_sync()
+            self._maybe_fire_ready()
 
     def _on_map(self, event: tk.Event) -> None:
         if event.widget is self._frame:
             self._schedule_bounds_sync()
+            self._maybe_fire_ready()
             self._frame.after_idle(self._run_initial_load)
 
     def _on_unmap(self, event: tk.Event) -> None:
