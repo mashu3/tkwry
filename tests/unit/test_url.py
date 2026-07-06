@@ -74,6 +74,53 @@ def test_normalize_relative_path_to_file_uri(
     assert _normalize_url("./index.html") == page.resolve().as_uri()
 
 
+def test_normalize_host_port_without_scheme() -> None:
+    assert _normalize_url("localhost:8080") == "https://localhost:8080"
+    assert _normalize_url("example.com:8080") == "https://example.com:8080"
+    assert _normalize_url("example.com:8080/api") == "https://example.com:8080/api"
+
+
+def test_normalize_host_path_without_scheme() -> None:
+    assert _normalize_url("localhost/path") == "https://localhost/path"
+    assert _normalize_url("myserver/api") == "https://myserver/api"
+    assert _normalize_url("api/v1") == "https://api/v1"
+    assert _normalize_url("not-a-domain/path") == "https://not-a-domain/path"
+    assert _normalize_url("example.com/path") == "https://example.com/path"
+
+
+def test_normalize_host_port_passes_validation() -> None:
+    cases = (
+        "localhost:8080",
+        "example.com:8080",
+        "localhost/path",
+        "api/v1",
+    )
+    for url in cases:
+        _validate_url(_normalize_url(url))
+
+
+def test_normalize_relative_path_still_file_uri(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    page = tmp_path / "subdir" / "page.html"
+    page.parent.mkdir()
+    page.write_text("<p>local</p>", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert _normalize_url("subdir/page.html") == page.resolve().as_uri()
+    assert _normalize_url("./subdir/page.html") == page.resolve().as_uri()
+
+
+def test_normalize_bare_filename_to_file_uri(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    page = tmp_path / "index.html"
+    page.write_text("<p>local</p>", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert _normalize_url("index.html") == page.resolve().as_uri()
+
+
 def test_normalize_windows_drive_path(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
 

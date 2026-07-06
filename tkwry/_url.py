@@ -3,15 +3,130 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
 _SUPPORTED_SCHEMES = frozenset({"http", "https", "file"})
 
+_FILE_EXTENSIONS = frozenset(
+    {
+        "asp",
+        "css",
+        "csv",
+        "eot",
+        "gif",
+        "htm",
+        "html",
+        "ico",
+        "jpeg",
+        "jpg",
+        "js",
+        "json",
+        "jsx",
+        "map",
+        "md",
+        "mjs",
+        "pdf",
+        "php",
+        "png",
+        "py",
+        "svg",
+        "ts",
+        "tsx",
+        "ttf",
+        "txt",
+        "wasm",
+        "webp",
+        "woff",
+        "woff2",
+        "xml",
+    }
+)
+
+_HOSTNAME_RE = re.compile(
+    r"^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*"
+    r"[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$"
+)
+
 
 def _is_windows_drive_path(url: str) -> bool:
     return len(url) >= 3 and url[0].isalpha() and url[1] == ":" and url[2] in "/\\"
+
+
+def _looks_like_hostname(host: str) -> bool:
+    if not host or len(host) > 253:
+        return False
+    if host == "localhost":
+        return True
+    return bool(_HOSTNAME_RE.match(host))
+
+
+def _looks_like_filename(name: str) -> bool:
+    if "/" in name or "\\" in name:
+        name = name.rsplit("/", 1)[-1]
+    if "." not in name:
+        return False
+    ext = name.rsplit(".", 1)[-1].lower()
+    return ext in _FILE_EXTENSIONS
+
+
+def _path_looks_like_file(path: str) -> bool:
+    if not path:
+        return False
+    return _looks_like_filename(path.rsplit("/", 1)[-1])
+
+
+def _is_misparsed_host_port(parsed) -> bool:
+    """urlparse treats ``host:port`` as ``scheme='host', path='port'``."""
+    if not parsed.scheme or parsed.netloc:
+        return False
+    if parsed.scheme in _SUPPORTED_SCHEMES:
+        return False
+    if not parsed.path:
+        return False
+    port_segment = parsed.path.split("/", 1)[0]
+    if not port_segment.isdigit():
+        return False
+    return _looks_like_hostname(parsed.scheme)
+
+
+def _looks_like_url_without_scheme(url: str) -> bool:
+    """Heuristic: host, host:port, or host/path without an explicit scheme."""
+    if "://" in url or " " in url:
+        return False
+
+    colon = url.find(":")
+    slash = url.find("/")
+
+    if colon >= 0 and (slash < 0 or colon < slash):
+        host = url[:colon]
+        rest = url[colon + 1 :]
+        port_str = rest.split("/", 1)[0]
+        if port_str.isdigit() and _looks_like_hostname(host):
+            return True
+
+    if slash > 0:
+        host = url[:slash]
+        path = url[slash + 1 :]
+        if not host or not path or host.startswith("."):
+            return False
+        if "." in host:
+            return True
+        if _looks_like_hostname(host) and not _path_looks_like_file(path):
+            return True
+        return False
+
+    if colon < 0:
+        if _looks_like_filename(url):
+            return False
+        if "." in url and not url.startswith("."):
+            return True
+        if _looks_like_hostname(url):
+            return True
+
+    return False
 
 
 def _looks_like_file_path(url: str) -> bool:
@@ -21,15 +136,15 @@ def _looks_like_file_path(url: str) -> bool:
         return True
     if _is_windows_drive_path(url):
         return True
-    return os.sep in url or ("/" in url and not _looks_like_netloc(url))
-
-
-def _looks_like_netloc(url: str) -> bool:
-    """Heuristic: contains a dot before the first slash (e.g. example.com/path)."""
-    slash = url.find("/")
-    if slash < 0:
+    if _looks_like_url_without_scheme(url):
         return False
-    return "." in url[:slash]
+    if "\\" in url:
+        return True
+    if "/" in url:
+        return True
+    if _looks_like_filename(url):
+        return True
+    return False
 
 
 def _file_uri_from_path(path: str) -> str:
@@ -56,6 +171,13 @@ def _normalize_url(url: str) -> str:
     if _is_windows_drive_path(cleaned):
         return _file_uri_from_path(cleaned)
     parsed = urlparse(cleaned)
+    if (
+        parsed.scheme
+        and parsed.scheme not in _SUPPORTED_SCHEMES
+        and _is_misparsed_host_port(parsed)
+    ):
+        cleaned = f"https://{cleaned}"
+        parsed = urlparse(cleaned)
     if parsed.scheme == "file":
         return _normalize_file_url(cleaned)
     if not parsed.scheme:
