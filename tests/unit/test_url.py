@@ -80,8 +80,29 @@ def test_normalize_relative_path_to_file_uri(
 
 def test_normalize_host_port_without_scheme() -> None:
     assert _normalize_url("localhost:8080") == "https://localhost:8080"
+    assert _normalize_url("localhost:8080/") == "https://localhost:8080/"
+    assert _normalize_url("localhost:8080/api") == "https://localhost:8080/api"
+    assert _normalize_url("127.0.0.1:8080") == "https://127.0.0.1:8080"
     assert _normalize_url("example.com:8080") == "https://example.com:8080"
     assert _normalize_url("example.com:8080/api") == "https://example.com:8080/api"
+
+
+def test_localhost_port_recovers_from_urlparse_misparsing() -> None:
+    """Regression: urlparse treats ``host:port`` as scheme + path, not netloc."""
+    from urllib.parse import urlparse
+
+    raw = "localhost:8080"
+    parsed = urlparse(raw)
+    assert parsed.scheme == "localhost"
+    assert parsed.netloc == ""
+    assert parsed.path == "8080"
+
+    with pytest.raises(ValueError, match="unsupported URL scheme: 'localhost'"):
+        _validate_url(raw)
+
+    normalized = _normalize_url(raw)
+    assert normalized == "https://localhost:8080"
+    _validate_url(normalized)
 
 
 def test_normalize_host_path_without_scheme() -> None:
@@ -95,6 +116,8 @@ def test_normalize_host_path_without_scheme() -> None:
 def test_normalize_host_port_passes_validation() -> None:
     cases = (
         "localhost:8080",
+        "localhost:8080/api",
+        "127.0.0.1:8080",
         "example.com:8080",
         "localhost/path",
         "api/v1",
