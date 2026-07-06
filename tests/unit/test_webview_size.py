@@ -4,7 +4,17 @@ from __future__ import annotations
 
 import tkinter as tk
 
+import pytest
+
 from tkwry import WebView
+
+
+@pytest.fixture(autouse=True)
+def _isolate_from_native_create(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Size heuristics only — never build WebKitGTK in headless Linux CI."""
+    monkeypatch.setattr("tkwry._runtime.GtkPump.attach", lambda _widget: None)
+    monkeypatch.setattr("tkwry._core.pump_events", lambda: None, raising=False)
+    monkeypatch.setattr(WebView, "_try_create", lambda self: None)
 
 
 def test_partial_explicit_width_does_not_default_height(tk_root) -> None:
