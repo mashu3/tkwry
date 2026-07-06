@@ -10,6 +10,13 @@ import pytest
 from tkwry import WebView
 
 
+@pytest.fixture(autouse=True)
+def _noop_gtk_pumps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep eval-poll unit tests off GTK/WebKitGTK in headless Linux CI."""
+    monkeypatch.setattr("tkwry._core.pump_events", lambda: None, raising=False)
+    monkeypatch.setattr("tkwry._runtime.GtkPump.attach", lambda _widget: None)
+
+
 def _make_web(tk_root):
     import tkinter as tk
 
@@ -69,8 +76,11 @@ def test_poll_events_drains_late_eval_result(
     assert web._event_poll_active is False
 
 
-def test_eval_js_with_callback_on_error(tk_root) -> None:
+def test_eval_js_with_callback_on_error(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _frame, web = _make_web(tk_root)
+    _configure_poll_test(web, monkeypatch)
     web._webview = MagicMock()
     web._webview.eval_js_with_callback.side_effect = RuntimeError("boom")
     errors: list[BaseException] = []
