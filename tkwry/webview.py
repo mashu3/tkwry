@@ -155,6 +155,7 @@ class WebView:
             tuple[DragDropEvent, list[str], tuple[int, int]]
         ] = queue.SimpleQueue()
         self._event_poll_active = False
+        self._pending_eval_callbacks = 0
         self._pending_url: str | None = url
         self._pending_html: str | None = html
         self._pending_load: _PendingLoad | None = None
@@ -303,6 +304,7 @@ class WebView:
             return
         self._destroyed = True
         self._event_poll_active = False
+        self._pending_eval_callbacks = 0
         self._ready_callbacks.clear()
         if self._webview is not None:
             self._webview.destroy()
@@ -366,23 +368,42 @@ class WebView:
         self._require_ready("eval_js")
         self._frame.after_idle(lambda: self._run_eval_js(script, on_error))
 
-    def eval_js_with_callback(self, script: str, callback: EvalCallback) -> None:
+    def eval_js_with_callback(
+        self,
+        script: str,
+        callback: EvalCallback,
+        *,
+        on_error: EvalErrorHandler | None = None,
+    ) -> None:
         """Evaluate JavaScript and invoke *callback* with the result string.
 
         Asynchronous: *callback* runs on the **Tk main thread** after the script
         completes. The result is always a ``str`` (including JSON literals).
+        If *on_error* is provided, it is called with the exception on failure;
+        otherwise the traceback is printed to stderr.
         """
         self._require_ready("eval_js_with_callback")
+        self._pending_eval_callbacks += 1
         self._ensure_event_poll()
 
         def _run() -> None:
             if self._destroyed or self._webview is None:
+                self._pending_eval_callbacks -= 1
                 return
 
             def deliver(result: str) -> None:
                 self._eval_result_queue.put((callback, result))
+                self._pending_eval_callbacks -= 1
+                self._schedule_eval_poll_wakeup()
 
-            self._webview.eval_js_with_callback(script, deliver)
+            try:
+                self._webview.eval_js_with_callback(script, deliver)
+            except Exception as exc:
+                self._pending_eval_callbacks -= 1
+                if on_error is not None:
+                    self._invoke_callback(on_error, exc)
+                else:
+                    traceback.print_exc()
 
         self._frame.after_idle(_run)
 
@@ -634,6 +655,14 @@ class WebView:
         self._event_poll_active = True
         self._frame.after(1, self._poll_events)
 
+    def _schedule_eval_poll_wakeup(self) -> None:
+        # deliver() may run on the WebKit thread; after(0) is the lightest
+        # cross-thread nudge back to the Tk loop when polling already stopped.
+        try:
+            self._frame.after(0, self._ensure_event_poll)
+        except tk.TclError:
+            pass
+
     def _poll_events(self) -> None:
         if self._destroyed:
             self._event_poll_active = False
@@ -690,11 +719,12 @@ class WebView:
     def _should_keep_polling(self) -> bool:
         if self._needs_event_poll():
             return True
-        return not (
-            self._eval_result_queue.empty()
-            and self._title_queue.empty()
-            and self._ipc_queue.empty()
-            and self._drag_drop_queue.empty()
+        return (
+            self._pending_eval_callbacks > 0
+            or not self._eval_result_queue.empty()
+            or not self._title_queue.empty()
+            or not self._ipc_queue.empty()
+            or not self._drag_drop_queue.empty()
         )
 
     def _try_create(self) -> None:
