@@ -25,6 +25,14 @@ def _make_web(tk_root):
     return frame, WebView(frame)
 
 
+def _stub_native_ready(
+    web: WebView, native: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inject a mock native view without triggering layout or WebKit create."""
+    web._webview = native
+    monkeypatch.setattr(web, "_layout_ready", lambda: True)
+
+
 def _configure_poll_test(web: WebView, monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate poll logic from GTK pumps and rescheduling timers."""
     monkeypatch.setattr("tkwry._core.pump_events", lambda: None, raising=False)
@@ -81,8 +89,9 @@ def test_eval_js_with_callback_on_error(
 ) -> None:
     _frame, web = _make_web(tk_root)
     _configure_poll_test(web, monkeypatch)
-    web._webview = MagicMock()
-    web._webview.eval_js_with_callback.side_effect = RuntimeError("boom")
+    native = MagicMock()
+    native.eval_js_with_callback.side_effect = RuntimeError("boom")
+    _stub_native_ready(web, native, monkeypatch)
     errors: list[BaseException] = []
 
     web.eval_js_with_callback("1", lambda _result: None, on_error=errors.append)
@@ -99,7 +108,7 @@ def test_eval_js_with_callback_pending_keeps_poll_until_deliver(
 ) -> None:
     _frame, web = _make_web(tk_root)
     _configure_poll_test(web, monkeypatch)
-    web._webview = MagicMock()
+    native = MagicMock()
     results: list[str] = []
 
     def native_eval(_script: str, deliver: Callable[[str], None]) -> None:
@@ -108,7 +117,8 @@ def test_eval_js_with_callback_pending_keeps_poll_until_deliver(
         assert results == []
         deliver("ok")
 
-    web._webview.eval_js_with_callback.side_effect = native_eval
+    native.eval_js_with_callback.side_effect = native_eval
+    _stub_native_ready(web, native, monkeypatch)
 
     web.eval_js_with_callback("'ok'", results.append)
     for _ in range(5):
