@@ -392,9 +392,9 @@ class WebView:
                 return
 
             def deliver(result: str) -> None:
+                # May run on the WebKit thread — queue only; never touch Tk here.
                 self._eval_result_queue.put((callback, result))
                 self._pending_eval_callbacks -= 1
-                self._schedule_eval_poll_wakeup()
 
             try:
                 self._webview.eval_js_with_callback(script, deliver)
@@ -654,14 +654,6 @@ class WebView:
             return
         self._event_poll_active = True
         self._frame.after(1, self._poll_events)
-
-    def _schedule_eval_poll_wakeup(self) -> None:
-        # deliver() may run on the WebKit thread; after(0) is the lightest
-        # cross-thread nudge back to the Tk loop when polling already stopped.
-        try:
-            self._frame.after(0, self._ensure_event_poll)
-        except tk.TclError:
-            pass
 
     def _poll_events(self) -> None:
         if self._destroyed:

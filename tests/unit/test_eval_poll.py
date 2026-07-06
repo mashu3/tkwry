@@ -64,7 +64,7 @@ def test_eval_js_with_callback_on_error(tk_root) -> None:
     assert web._pending_eval_callbacks == 0
 
 
-def test_eval_js_with_callback_restarts_poll_after_late_delivery(tk_root) -> None:
+def test_eval_js_with_callback_pending_keeps_poll_until_deliver(tk_root) -> None:
     import tkinter as tk
 
     frame = tk.Frame(tk_root)
@@ -73,7 +73,9 @@ def test_eval_js_with_callback_restarts_poll_after_late_delivery(tk_root) -> Non
     results: list[str] = []
 
     def native_eval(_script: str, deliver) -> None:
-        web._event_poll_active = False
+        web._poll_events()
+        assert web._event_poll_active is True
+        assert results == []
         deliver("ok")
 
     web._webview.eval_js_with_callback.side_effect = native_eval
