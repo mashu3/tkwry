@@ -644,14 +644,10 @@ impl WebView {
         with_webview(self, |wv| Ok(wv.is_devtools_open()))
     }
 
-    fn url(&self) -> PyResult<Option<String>> {
-        let guard = self
-            .inner
-            .lock()
-            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned"))?;
-        Ok(match guard.as_ref() {
-            Some(wv) => wv.url().ok(),
-            None => None,
+    fn url(&self) -> PyResult<String> {
+        with_webview(self, |wv| {
+            wv.url()
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
         })
     }
 
