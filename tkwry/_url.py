@@ -147,16 +147,41 @@ def _looks_like_file_path(url: str) -> bool:
     return False
 
 
+def _is_windows_drive_netloc(netloc: str) -> bool:
+    return len(netloc) == 2 and netloc[0].isalpha() and netloc[1] == ":"
+
+
+def _strip_leading_slash_from_windows_path(pathname: str) -> str:
+    if (
+        len(pathname) >= 3
+        and pathname[0] == "/"
+        and pathname[1].isalpha()
+        and pathname[2] == ":"
+    ):
+        return pathname[1:]
+    return pathname
+
+
 def _file_uri_from_path(path: str) -> str:
     expanded = os.path.expanduser(path.strip())
+    expanded = _strip_leading_slash_from_windows_path(expanded)
     return Path(expanded).resolve().as_uri()
 
 
 def _normalize_file_url(url: str) -> str:
     parsed = urlparse(url)
-    if parsed.netloc and parsed.netloc not in ("", "localhost"):
-        return url
+    if parsed.netloc:
+        if parsed.netloc in ("", "localhost"):
+            pass
+        elif _is_windows_drive_netloc(parsed.netloc):
+            pathname = f"{parsed.netloc}{parsed.path}"
+            if not pathname:
+                raise ValueError("file URL must include a path")
+            return _file_uri_from_path(pathname)
+        else:
+            return url
     pathname = url2pathname(unquote(parsed.path))
+    pathname = _strip_leading_slash_from_windows_path(pathname)
     if not pathname:
         raise ValueError("file URL must include a path")
     return _file_uri_from_path(pathname)
