@@ -67,6 +67,10 @@ fn extract_new_window_response(
     }
 }
 
+fn normalize_document_url(url: Option<String>) -> Option<String> {
+    url.filter(|url| !url.is_empty() && !url.eq_ignore_ascii_case("about:blank"))
+}
+
 fn call_sync_bool_callback(
     py: Python<'_>,
     func: &Py<PyAny>,
@@ -917,7 +921,7 @@ impl WebView {
         with_webview(self, |wv| {
             // wry may panic when no document URL exists (e.g. inline HTML on macOS).
             let url = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                wv.url().ok().filter(|url| !url.is_empty())
+                normalize_document_url(wv.url().ok())
             }))
             .ok()
             .flatten();
