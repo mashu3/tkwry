@@ -299,8 +299,7 @@ class WebView:
                 from tkwry._core import pump_events
 
                 pump_events()
-            root.after(10, lambda: None)
-            root.update()
+            time.sleep(0.01)
         return self.ready
 
     def destroy(self) -> None:
