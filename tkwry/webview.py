@@ -52,7 +52,7 @@ _PendingLoad: TypeAlias = tuple[Literal["url"], str] | tuple[Literal["html"], st
 
 
 def _validate_color_component(value: int, name: str) -> None:
-    if not isinstance(value, int):
+    if type(value) is not int:
         raise TypeError(f"{name} must be an int, got {type(value).__name__}")
     if not (0 <= value <= 255):
         raise ValueError(f"{name} must be 0-255, got {value}")

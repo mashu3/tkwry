@@ -41,6 +41,12 @@ class TestBackgroundColorValidation:
             WebView(frame, background_color=(1.0, 0, 0, 0))  # type: ignore[arg-type]
         frame.destroy()
 
+    def test_rejects_bool_component(self, tk_root) -> None:
+        frame = tk.Frame(tk_root)
+        with pytest.raises(TypeError, match="must be an int"):
+            WebView(frame, background_color=(True, 0, 0, 255))  # type: ignore[arg-type]
+        frame.destroy()
+
     def test_rejects_non_tuple(self, tk_root) -> None:
         frame = tk.Frame(tk_root)
         with pytest.raises(ValueError, match="4 ints"):
