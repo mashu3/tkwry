@@ -905,10 +905,15 @@ impl WebView {
         with_webview(self, |wv| Ok(wv.is_devtools_open()))
     }
 
-    fn url(&self) -> PyResult<String> {
+    fn url(&self) -> PyResult<Option<String>> {
         with_webview(self, |wv| {
-            wv.url()
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+            // wry may panic when no document URL exists (e.g. inline HTML on macOS).
+            let url = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                wv.url().ok().filter(|url| !url.is_empty())
+            }))
+            .ok()
+            .flatten();
+            Ok(url)
         })
     }
 

@@ -94,6 +94,8 @@ def test_webview_ready_virtual_event(tk_root) -> None:
 
     assert wait_until(tk_root, lambda: fired, steps=200)
     assert web.ready
+    assert web.native is not None
+    assert web.native.url() is None
 
     web.destroy()
     frame.destroy()
