@@ -19,6 +19,7 @@ def test_initial_size_creates_without_pack(tk_root) -> None:
     pump(tk_root, steps=5)
     assert web.native is not None
     assert not web.ready
+    assert not web.wait_until_ready(timeout=0.05)
 
     layout_bare_frame(frame, width=640, height=480)
     assert web.wait_until_ready(timeout=10.0)

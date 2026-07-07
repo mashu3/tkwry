@@ -283,7 +283,7 @@ class WebView:
     def wait_until_ready(self, timeout: float | None = 30.0) -> bool:
         """Pump the Tk loop until the webview is laid out or *timeout* elapses."""
         self._require_tk_thread()
-        if self._webview is not None and not self._destroyed:
+        if self.ready:
             return True
         if self._destroyed:
             return False
