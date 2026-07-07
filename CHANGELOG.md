@@ -4,6 +4,39 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.0.7] - 2026-07-08
+
+### Added
+
+- `examples/markdown_demo.py` — Monaco markdown editor with live preview, tabs, save, split themes, and native dark chrome
+- `wait_until_ready()` — pump the Tk loop until the host frame is laid out and the WebView is ready
+- `eval_js` / `eval_js_with_callback` — optional `on_error` handler for evaluation failures on the Tk main thread
+- URL normalization for `host:port`, `host/path` inputs misread by `urlparse`, and Windows `file://C:/...` → `file:///C:/...`
+
+### Fixed
+
+- Tk thread ownership enforced on native WebView API calls
+- Async callbacks queued on the Tk thread; synchronous handler errors reported instead of swallowed
+- Reentrant deadlocks prevented in native WebView callbacks
+- Avoid Tk `after()` from the WebKit thread when delivering eval results
+- `eval_js_with_callback` polling kept alive so late callbacks are not dropped
+- `about:blank` treated as no document URL for `load_html`
+- WebView creation size resolved per axis instead of applying 800×600 defaults
+- `<<WebViewReady>>` deferred until an explicit-size host frame is laid out
+- Skip 1×1 bounds sync until host geometry is meaningful
+- `wait_until_ready()` returns `True` only when layout is ready
+- `NativeWebView.url()` propagates errors; typed as `str | None`
+- `set_on_navigation(None)` calls `clear_on_navigation` directly
+- `background_color` rejects bool values at the Python boundary
+- GtkPump strong refs avoided in Gtk `after` callbacks
+- Removed unused `_on_page_load` from the native WebView stub and Rust API
+- Linux CI: eval-poll unit tests isolated from GTK pump and Tk timer leaks
+
+### Changed
+
+- README: git installs require a Rust source build; documents `markdown_demo` and `eval_js` `on_error`
+- Integration tests use `wait_until_ready()` instead of ad-hoc polling
+
 ## [0.0.6] - 2026-07-05
 
 ### Added
@@ -124,6 +157,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.0.7]: https://github.com/mashu3/tkwry/releases/tag/v0.0.7
 [0.0.6]: https://github.com/mashu3/tkwry/releases/tag/v0.0.6
 [0.0.5]: https://github.com/mashu3/tkwry/releases/tag/v0.0.5
 [0.0.4]: https://github.com/mashu3/tkwry/releases/tag/v0.0.4
