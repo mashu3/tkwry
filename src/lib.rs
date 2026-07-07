@@ -4,9 +4,9 @@
 mod macos_focus;
 
 use pyo3::prelude::*;
+use std::cell::Cell;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 
 fn make_rect(x: f64, y: f64, width: f64, height: f64) -> wry::Rect {
@@ -154,7 +154,8 @@ impl WebView {
     }
 
     fn enter_wry_call(&self) {
-        self.wry_call_depth.set(self.wry_call_depth.get().saturating_add(1));
+        self.wry_call_depth
+            .set(self.wry_call_depth.get().saturating_add(1));
     }
 
     fn leave_wry_call(&self) -> PyResult<()> {
@@ -360,33 +361,37 @@ impl WebView {
 
         let title_pending_clone = title_pending.clone();
         let title_handler = move |title: String| {
-            push_bounded(&title_pending_clone, title, MAX_TITLE_PENDING, "title-changed");
+            push_bounded(
+                &title_pending_clone,
+                title,
+                MAX_TITLE_PENDING,
+                "title-changed",
+            );
         };
 
         let newwin_cb_clone = newwin_cb.clone();
-        let newwin_handler = move |url: String,
-                                   _features: wry::NewWindowFeatures|
-              -> wry::NewWindowResponse {
-            Python::attach(|py| {
-                if let Some(func) = clone_py_callback(py, &newwin_cb_clone) {
-                    match func.call1(py, (url.as_str(),)) {
-                        Ok(result) => {
-                            if let Some(resp) =
-                                extract_new_window_response(&result.bind(py), "on_new_window")
-                            {
-                                return match resp {
-                                    NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
-                                    NewWindowResponse::Allow => wry::NewWindowResponse::Allow,
-                                };
+        let newwin_handler =
+            move |url: String, _features: wry::NewWindowFeatures| -> wry::NewWindowResponse {
+                Python::attach(|py| {
+                    if let Some(func) = clone_py_callback(py, &newwin_cb_clone) {
+                        match func.call1(py, (url.as_str(),)) {
+                            Ok(result) => {
+                                if let Some(resp) =
+                                    extract_new_window_response(&result.bind(py), "on_new_window")
+                                {
+                                    return match resp {
+                                        NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
+                                        NewWindowResponse::Allow => wry::NewWindowResponse::Allow,
+                                    };
+                                }
+                                return wry::NewWindowResponse::Deny;
                             }
-                            return wry::NewWindowResponse::Deny;
+                            Err(err) => report_py_error(py, err),
                         }
-                        Err(err) => report_py_error(py, err),
                     }
-                }
-                wry::NewWindowResponse::Allow
-            })
-        };
+                    wry::NewWindowResponse::Allow
+                })
+            };
 
         let drag_drop_pending_clone = drag_drop_pending.clone();
         let drag_drop_handler = move |event: wry::DragDropEvent| -> bool {
@@ -648,9 +653,7 @@ impl WebView {
         Ok(titles)
     }
 
-    fn drain_drag_drop_events(
-        &self,
-    ) -> PyResult<Vec<(DragDropEvent, Vec<String>, (i32, i32))>> {
+    fn drain_drag_drop_events(&self) -> PyResult<Vec<(DragDropEvent, Vec<String>, (i32, i32))>> {
         self.require_owner_thread()?;
         let events = self
             .drag_drop_pending
@@ -683,7 +686,12 @@ impl WebView {
 
     fn _enqueue_title_event(&self, title: String) -> PyResult<()> {
         self.require_owner_thread()?;
-        push_bounded(&self.title_pending, title, MAX_TITLE_PENDING, "title-changed");
+        push_bounded(
+            &self.title_pending,
+            title,
+            MAX_TITLE_PENDING,
+            "title-changed",
+        );
         Ok(())
     }
 
