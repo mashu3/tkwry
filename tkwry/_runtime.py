@@ -9,6 +9,25 @@ if TYPE_CHECKING:
     import tkinter as tk
 
 
+def _gtk_pump_tick(root_id: int) -> None:
+    """Run one GTK pump tick for *root_id* without holding a GtkPump reference."""
+    pump = GtkPump._by_root_id.get(root_id)
+    if pump is None or not pump._active:
+        return
+    root = pump._root
+    try:
+        if not root.winfo_exists():
+            pump.stop()
+            return
+    except Exception:
+        pump.stop()
+        return
+    from tkwry._core import pump_events
+
+    pump_events()
+    root.after(10, lambda rid=root_id: _gtk_pump_tick(rid))
+
+
 class GtkPump:
     """Pump GTK events via ``tkwry._core.pump_events`` while Tk runs."""
 
@@ -34,21 +53,18 @@ class GtkPump:
     def start(self) -> None:
         if self._active:
             return
-        from tkwry._core import ensure_gtk_init, pump_events
+        from tkwry._core import ensure_gtk_init
 
         ensure_gtk_init()
         self._active = True
         self._root.bind("<Destroy>", self._on_destroy, add="+")
-        self._root.after(0, lambda: self._pump(pump_events))
+        self._root.after(0, lambda rid=self._root_id: _gtk_pump_tick(rid))
+
+    def stop(self) -> None:
+        self._active = False
+        self._by_root_id.pop(self._root_id, None)
 
     def _on_destroy(self, event) -> None:
         if event.widget is not self._root:
             return
-        self._active = False
-        self._by_root_id.pop(self._root_id, None)
-
-    def _pump(self, pump_events) -> None:
-        if not self._active:
-            return
-        pump_events()
-        self._root.after(10, lambda: self._pump(pump_events))
+        self.stop()
