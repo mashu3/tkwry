@@ -6,6 +6,7 @@ mod macos_focus;
 use pyo3::prelude::*;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 
 fn make_rect(x: f64, y: f64, width: f64, height: f64) -> wry::Rect {
@@ -82,6 +83,12 @@ fn call_sync_bool_callback(
     }
 }
 
+fn clone_py_callback(py: Python<'_>, cb: &PyCallback) -> Option<Py<PyAny>> {
+    cb.lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|func| func.clone_ref(py)))
+}
+
 #[pyclass(eq, eq_int, frozen, skip_from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PageLoadEvent {
@@ -131,6 +138,10 @@ struct WebView {
     title_cb: PyCallback,
     newwin_cb: PyCallback,
     drag_drop_cb: PyCallback,
+    /// Nested wry calls (e.g. sync navigation hooks during ``load_url``).
+    wry_call_depth: Cell<u32>,
+    /// ``destroy()`` requested while a nested wry call is active.
+    destroy_pending: Cell<bool>,
 }
 
 impl WebView {
@@ -138,6 +149,72 @@ impl WebView {
         let current = python_thread_id()?;
         if current != self.owner_thread {
             return Err(pyo3::exceptions::PyRuntimeError::new_err(THREAD_ERROR));
+        }
+        Ok(())
+    }
+
+    fn enter_wry_call(&self) {
+        self.wry_call_depth.set(self.wry_call_depth.get().saturating_add(1));
+    }
+
+    fn leave_wry_call(&self) -> PyResult<()> {
+        let depth = self.wry_call_depth.get();
+        debug_assert!(depth > 0);
+        self.wry_call_depth.set(depth - 1);
+        if depth == 1 && self.destroy_pending.get() {
+            self.destroy_pending.set(false);
+            self.destroy_inner()?;
+        }
+        Ok(())
+    }
+
+    fn clear_callbacks_and_queues(&self) {
+        if let Ok(mut ipc) = self.ipc_cb.lock() {
+            *ipc = None;
+        }
+        if let Ok(mut nav) = self.nav_cb.lock() {
+            *nav = None;
+        }
+        if let Ok(mut title) = self.title_cb.lock() {
+            *title = None;
+        }
+        if let Ok(mut newwin) = self.newwin_cb.lock() {
+            *newwin = None;
+        }
+        if let Ok(mut drag) = self.drag_drop_cb.lock() {
+            *drag = None;
+        }
+        if let Ok(mut pending) = self.ipc_pending.lock() {
+            pending.clear();
+        }
+        if let Ok(mut pending) = self.title_pending.lock() {
+            pending.clear();
+        }
+        if let Ok(mut pending) = self.drag_drop_pending.lock() {
+            pending.clear();
+        }
+        if let Ok(mut pending) = self.page_load_pending.lock() {
+            pending.clear();
+        }
+    }
+
+    fn destroy_inner(&self) -> PyResult<()> {
+        #[cfg(target_os = "macos")]
+        {
+            self.web_wants_keyboard.store(false, Ordering::SeqCst);
+            self.mac_tk_unfocus.store(false, Ordering::SeqCst);
+            self.wakeup_write_fd.store(-1, Ordering::SeqCst);
+            if let Ok(mut guard) = self._focus_sync.lock() {
+                *guard = None;
+            }
+        }
+
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned"))?;
+        if let Some(wv) = guard.take() {
+            let _ = wv.set_visible(false);
         }
         Ok(())
     }
@@ -254,16 +331,14 @@ impl WebView {
         let nav_cb_clone = nav_cb.clone();
         let nav_handler = move |url: String| -> bool {
             Python::attach(|py| {
-                if let Ok(guard) = nav_cb_clone.lock() {
-                    if let Some(ref func) = *guard {
-                        return call_sync_bool_callback(
-                            py,
-                            func,
-                            url.as_str(),
-                            "on_navigation",
-                            false,
-                        );
-                    }
+                if let Some(func) = clone_py_callback(py, &nav_cb_clone) {
+                    return call_sync_bool_callback(
+                        py,
+                        &func,
+                        url.as_str(),
+                        "on_navigation",
+                        false,
+                    );
                 }
                 true
             })
@@ -293,22 +368,20 @@ impl WebView {
                                    _features: wry::NewWindowFeatures|
               -> wry::NewWindowResponse {
             Python::attach(|py| {
-                if let Ok(guard) = newwin_cb_clone.lock() {
-                    if let Some(ref func) = *guard {
-                        match func.call1(py, (url.as_str(),)) {
-                            Ok(result) => {
-                                if let Some(resp) =
-                                    extract_new_window_response(&result.bind(py), "on_new_window")
-                                {
-                                    return match resp {
-                                        NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
-                                        NewWindowResponse::Allow => wry::NewWindowResponse::Allow,
-                                    };
-                                }
-                                return wry::NewWindowResponse::Deny;
+                if let Some(func) = clone_py_callback(py, &newwin_cb_clone) {
+                    match func.call1(py, (url.as_str(),)) {
+                        Ok(result) => {
+                            if let Some(resp) =
+                                extract_new_window_response(&result.bind(py), "on_new_window")
+                            {
+                                return match resp {
+                                    NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
+                                    NewWindowResponse::Allow => wry::NewWindowResponse::Allow,
+                                };
                             }
-                            Err(err) => report_py_error(py, err),
+                            return wry::NewWindowResponse::Deny;
                         }
+                        Err(err) => report_py_error(py, err),
                     }
                 }
                 wry::NewWindowResponse::Allow
@@ -442,6 +515,8 @@ impl WebView {
             title_cb,
             newwin_cb,
             drag_drop_cb,
+            wry_call_depth: Cell::new(0),
+            destroy_pending: Cell::new(false),
         })
     }
 
@@ -542,17 +617,15 @@ impl WebView {
             .lock()
             .map(|mut pending| std::mem::take(&mut *pending))
             .unwrap_or_default();
-        if let Ok(guard) = self.ipc_cb.lock() {
-            if let Some(ref func) = *guard {
-                Python::attach(|py| {
-                    for msg in &messages {
-                        if let Err(err) = func.call1(py, (msg.as_str(),)) {
-                            report_py_error(py, err);
-                        }
+        Python::attach(|py| {
+            if let Some(func) = clone_py_callback(py, &self.ipc_cb) {
+                for msg in &messages {
+                    if let Err(err) = func.call1(py, (msg.as_str(),)) {
+                        report_py_error(py, err);
                     }
-                });
+                }
             }
-        }
+        });
         Ok(messages)
     }
 
@@ -563,17 +636,15 @@ impl WebView {
             .lock()
             .map(|mut pending| std::mem::take(&mut *pending))
             .unwrap_or_default();
-        if let Ok(guard) = self.title_cb.lock() {
-            if let Some(ref func) = *guard {
-                Python::attach(|py| {
-                    for title in &titles {
-                        if let Err(err) = func.call1(py, (title.as_str(),)) {
-                            report_py_error(py, err);
-                        }
+        Python::attach(|py| {
+            if let Some(func) = clone_py_callback(py, &self.title_cb) {
+                for title in &titles {
+                    if let Err(err) = func.call1(py, (title.as_str(),)) {
+                        report_py_error(py, err);
                     }
-                });
+                }
             }
-        }
+        });
         Ok(titles)
     }
 
@@ -586,17 +657,15 @@ impl WebView {
             .lock()
             .map(|mut pending| std::mem::take(&mut *pending))
             .unwrap_or_default();
-        if let Ok(guard) = self.drag_drop_cb.lock() {
-            if let Some(ref func) = *guard {
-                Python::attach(|py| {
-                    for (evt_type, paths, pos) in &events {
-                        if let Err(err) = func.call1(py, (*evt_type, paths.clone(), *pos)) {
-                            report_py_error(py, err);
-                        }
+        Python::attach(|py| {
+            if let Some(func) = clone_py_callback(py, &self.drag_drop_cb) {
+                for (evt_type, paths, pos) in &events {
+                    if let Err(err) = func.call1(py, (*evt_type, paths.clone(), *pos)) {
+                        report_py_error(py, err);
                     }
-                });
+                }
             }
-        }
+        });
         Ok(events)
     }
 
@@ -846,52 +915,12 @@ impl WebView {
     /// Release the native webview and tear down platform resources.
     fn destroy(&self) -> PyResult<()> {
         self.require_owner_thread()?;
-        #[cfg(target_os = "macos")]
-        {
-            self.web_wants_keyboard.store(false, Ordering::SeqCst);
-            self.mac_tk_unfocus.store(false, Ordering::SeqCst);
-            self.wakeup_write_fd.store(-1, Ordering::SeqCst);
-            if let Ok(mut guard) = self._focus_sync.lock() {
-                *guard = None;
-            }
+        self.clear_callbacks_and_queues();
+        if self.wry_call_depth.get() > 0 {
+            self.destroy_pending.set(true);
+            return Ok(());
         }
-
-        if let Ok(mut ipc) = self.ipc_cb.lock() {
-            *ipc = None;
-        }
-        if let Ok(mut nav) = self.nav_cb.lock() {
-            *nav = None;
-        }
-        if let Ok(mut title) = self.title_cb.lock() {
-            *title = None;
-        }
-        if let Ok(mut newwin) = self.newwin_cb.lock() {
-            *newwin = None;
-        }
-        if let Ok(mut drag) = self.drag_drop_cb.lock() {
-            *drag = None;
-        }
-        if let Ok(mut pending) = self.ipc_pending.lock() {
-            pending.clear();
-        }
-        if let Ok(mut pending) = self.title_pending.lock() {
-            pending.clear();
-        }
-        if let Ok(mut pending) = self.drag_drop_pending.lock() {
-            pending.clear();
-        }
-        if let Ok(mut pending) = self.page_load_pending.lock() {
-            pending.clear();
-        }
-
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned"))?;
-        if let Some(wv) = guard.take() {
-            let _ = wv.set_visible(false);
-        }
-        Ok(())
+        self.destroy_inner()
     }
 }
 
@@ -900,16 +929,28 @@ where
     F: FnOnce(&wry::WebView) -> PyResult<T>,
 {
     this.require_owner_thread()?;
-    let guard = this
-        .inner
-        .lock()
-        .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned"))?;
-    match guard.as_ref() {
-        Some(wv) => f(wv),
-        None => Err(pyo3::exceptions::PyRuntimeError::new_err(
-            "webview already destroyed",
-        )),
-    }
+    this.enter_wry_call();
+    let result = (|| -> PyResult<T> {
+        let wv_ptr = {
+            let guard = this
+                .inner
+                .lock()
+                .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned"))?;
+            match guard.as_ref() {
+                Some(wv) => wv as *const wry::WebView,
+                None => {
+                    return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                        "webview already destroyed",
+                    ));
+                }
+            }
+        };
+        // SAFETY: ``destroy_inner`` is deferred while ``wry_call_depth > 0``, so the
+        // native webview stays alive for the duration of nested wry calls.
+        unsafe { f(&*wv_ptr) }
+    })();
+    this.leave_wry_call()?;
+    result
 }
 
 #[pyclass(eq, eq_int, frozen, from_py_object)]

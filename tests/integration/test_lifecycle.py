@@ -300,6 +300,41 @@ def test_native_rejects_other_thread(tk_root) -> None:
     frame.destroy()
 
 
+def test_navigation_callback_can_clear_handler(tk_root) -> None:
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>nav-reentrant</p>")
+    layout_bare_frame(frame, width=400, height=300)
+    assert web.wait_until_ready(timeout=10.0)
+
+    def handler(url: str) -> bool:
+        web.set_on_navigation(None)
+        return True
+
+    web.set_on_navigation(handler)
+    assert web._native_navigation("https://example.com/") is True
+    assert web._on_navigation is None
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_navigation_callback_can_destroy_without_deadlock(tk_root) -> None:
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>nav-destroy</p>")
+    layout_bare_frame(frame, width=400, height=300)
+    assert web.wait_until_ready(timeout=10.0)
+
+    def handler(url: str) -> bool:
+        web.destroy()
+        return False
+
+    web.set_on_navigation(handler)
+    assert web._native_navigation("https://example.com/") is False
+    assert web.destroyed
+
+    frame.destroy()
+
+
 def test_eval_js_raises_after_destroy(tk_root) -> None:
     frame = bare_frame(tk_root)
     web = WebView(frame, width=400, height=300, html="<p>x</p>")
