@@ -226,7 +226,6 @@ def test_set_on_title_changed_none_clears_handler(tk_root) -> None:
     web._native_title_changed("Second")
     pump(tk_root, steps=10)
     assert received == ["First"]
-    assert web._title_queue.empty()
 
     web.destroy()
     frame.destroy()
@@ -255,7 +254,6 @@ def test_set_drag_drop_handler_none_clears_handler(tk_root) -> None:
     assert web._native_drag_drop(DragDropEvent.Drop, ["/tmp/b.txt"], (3, 4)) is True
     pump(tk_root, steps=10)
     assert len(received) == 1
-    assert web._drag_drop_queue.empty()
 
     web.destroy()
     frame.destroy()

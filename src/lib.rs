@@ -15,17 +15,72 @@ fn make_rect(x: f64, y: f64, width: f64, height: f64) -> wry::Rect {
     }
 }
 
+/// Maximum number of buffered page-load events. When no Python handler is
+/// draining the queue, older events are discarded to prevent unbounded growth.
+const MAX_PAGE_LOAD_PENDING: usize = 256;
+const MAX_IPC_PENDING: usize = 256;
+const MAX_TITLE_PENDING: usize = 256;
+const MAX_DRAG_DROP_PENDING: usize = 256;
+
+/// Maximum IPC message size (10 MiB). Messages exceeding this are dropped.
+const MAX_IPC_MESSAGE_BYTES: usize = 10 * 1024 * 1024;
+
 /// Print a Python exception (with traceback) to stderr from a Rust callback.
 fn report_py_error(py: Python<'_>, err: PyErr) {
     err.print(py);
 }
 
-/// Maximum IPC message size (10 MiB). Messages exceeding this are dropped.
-const MAX_IPC_MESSAGE_BYTES: usize = 10 * 1024 * 1024;
+fn push_bounded<T>(pending: &Arc<Mutex<Vec<T>>>, item: T, max: usize, label: &str) {
+    if let Ok(mut queue) = pending.lock() {
+        if queue.len() >= max {
+            let half = queue.len() / 2;
+            eprintln!(
+                "tkwry: discarding {half} oldest {label} event(s) (pending queue exceeded {max} event limit)"
+            );
+            queue.drain(..half);
+        }
+        queue.push(item);
+    }
+}
 
-/// Maximum number of buffered page-load events. When no Python handler is
-/// draining the queue, older events are discarded to prevent unbounded growth.
-const MAX_PAGE_LOAD_PENDING: usize = 256;
+fn extract_py_bool(result: &Bound<'_, PyAny>, context: &str) -> Option<bool> {
+    match result.extract::<bool>() {
+        Ok(value) => Some(value),
+        Err(err) => {
+            eprintln!("tkwry: {context}: callback must return bool ({err})");
+            None
+        }
+    }
+}
+
+fn extract_new_window_response(
+    result: &Bound<'_, PyAny>,
+    context: &str,
+) -> Option<NewWindowResponse> {
+    match result.extract::<NewWindowResponse>() {
+        Ok(value) => Some(value),
+        Err(err) => {
+            eprintln!("tkwry: {context}: callback must return NewWindowResponse ({err})");
+            None
+        }
+    }
+}
+
+fn call_sync_bool_callback(
+    py: Python<'_>,
+    func: &Py<PyAny>,
+    url: &str,
+    context: &str,
+    default_on_error: bool,
+) -> bool {
+    match func.call1(py, (url,)) {
+        Ok(result) => extract_py_bool(&result.bind(py), context).unwrap_or(default_on_error),
+        Err(err) => {
+            report_py_error(py, err);
+            default_on_error
+        }
+    }
+}
 
 #[pyclass(eq, eq_int, frozen, skip_from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -36,6 +91,10 @@ enum PageLoadEvent {
 
 type PyCallback = Arc<Mutex<Option<Py<PyAny>>>>;
 type PageLoadPending = Arc<Mutex<Vec<(PageLoadEvent, String)>>>;
+type IpcPending = Arc<Mutex<Vec<String>>>;
+type TitlePending = Arc<Mutex<Vec<String>>>;
+type DragDropPendingItem = (DragDropEvent, Vec<String>, (i32, i32));
+type DragDropPending = Arc<Mutex<Vec<DragDropPendingItem>>>;
 
 const THREAD_ERROR: &str = "tkwry must be called from the thread that created the Tk application (the thread that runs the Tk event loop)";
 
@@ -56,6 +115,9 @@ struct WebView {
     #[allow(clippy::arc_with_non_send_sync)]
     inner: Arc<Mutex<Option<wry::WebView>>>,
     page_load_pending: PageLoadPending,
+    ipc_pending: IpcPending,
+    title_pending: TitlePending,
+    drag_drop_pending: DragDropPending,
     #[cfg(target_os = "macos")]
     _focus_sync: Mutex<Option<macos_focus::FocusSyncGuard>>,
     #[cfg(target_os = "macos")]
@@ -171,8 +233,11 @@ impl WebView {
         let newwin_cb: PyCallback = Arc::new(Mutex::new(on_new_window));
         let drag_drop_cb: PyCallback = Arc::new(Mutex::new(drag_drop_handler));
         let page_load_pending: PageLoadPending = Arc::new(Mutex::new(Vec::new()));
+        let ipc_pending: IpcPending = Arc::new(Mutex::new(Vec::new()));
+        let title_pending: TitlePending = Arc::new(Mutex::new(Vec::new()));
+        let drag_drop_pending: DragDropPending = Arc::new(Mutex::new(Vec::new()));
 
-        let ipc_cb_clone = ipc_cb.clone();
+        let ipc_pending_clone = ipc_pending.clone();
         let ipc_handler_wry = move |req: wry::http::Request<String>| {
             let body = req.body().clone();
             if body.len() > MAX_IPC_MESSAGE_BYTES {
@@ -183,15 +248,7 @@ impl WebView {
                 );
                 return;
             }
-            Python::attach(|py| {
-                if let Ok(guard) = ipc_cb_clone.lock() {
-                    if let Some(ref func) = *guard {
-                        if let Err(err) = func.call1(py, (body,)) {
-                            report_py_error(py, err);
-                        }
-                    }
-                }
-            });
+            push_bounded(&ipc_pending_clone, body, MAX_IPC_PENDING, "IPC");
         };
 
         let nav_cb_clone = nav_cb.clone();
@@ -199,10 +256,13 @@ impl WebView {
             Python::attach(|py| {
                 if let Ok(guard) = nav_cb_clone.lock() {
                     if let Some(ref func) = *guard {
-                        match func.call1(py, (url.as_str(),)) {
-                            Ok(result) => return result.extract::<bool>(py).unwrap_or(true),
-                            Err(err) => report_py_error(py, err),
-                        }
+                        return call_sync_bool_callback(
+                            py,
+                            func,
+                            url.as_str(),
+                            "on_navigation",
+                            false,
+                        );
                     }
                 }
                 true
@@ -215,31 +275,17 @@ impl WebView {
                 wry::PageLoadEvent::Started => PageLoadEvent::Started,
                 wry::PageLoadEvent::Finished => PageLoadEvent::Finished,
             };
-            if let Ok(mut pending) = page_load_pending_clone.lock() {
-                if pending.len() >= MAX_PAGE_LOAD_PENDING {
-                    let half = pending.len() / 2;
-                    eprintln!(
-                        "tkwry: discarding {} oldest page-load event(s) (pending queue exceeded {} event limit)",
-                        half,
-                        MAX_PAGE_LOAD_PENDING
-                    );
-                    pending.drain(..half);
-                }
-                pending.push((evt, url));
-            }
+            push_bounded(
+                &page_load_pending_clone,
+                (evt, url),
+                MAX_PAGE_LOAD_PENDING,
+                "page-load",
+            );
         };
 
-        let title_cb_clone = title_cb.clone();
+        let title_pending_clone = title_pending.clone();
         let title_handler = move |title: String| {
-            Python::attach(|py| {
-                if let Ok(guard) = title_cb_clone.lock() {
-                    if let Some(ref func) = *guard {
-                        if let Err(err) = func.call1(py, (title.as_str(),)) {
-                            report_py_error(py, err);
-                        }
-                    }
-                }
-            });
+            push_bounded(&title_pending_clone, title, MAX_TITLE_PENDING, "title-changed");
         };
 
         let newwin_cb_clone = newwin_cb.clone();
@@ -251,12 +297,15 @@ impl WebView {
                     if let Some(ref func) = *guard {
                         match func.call1(py, (url.as_str(),)) {
                             Ok(result) => {
-                                if let Ok(resp) = result.extract::<NewWindowResponse>(py) {
+                                if let Some(resp) =
+                                    extract_new_window_response(&result.bind(py), "on_new_window")
+                                {
                                     return match resp {
                                         NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
                                         NewWindowResponse::Allow => wry::NewWindowResponse::Allow,
                                     };
                                 }
+                                return wry::NewWindowResponse::Deny;
                             }
                             Err(err) => report_py_error(py, err),
                         }
@@ -266,40 +315,31 @@ impl WebView {
             })
         };
 
-        let drag_drop_cb_clone = drag_drop_cb.clone();
+        let drag_drop_pending_clone = drag_drop_pending.clone();
         let drag_drop_handler = move |event: wry::DragDropEvent| -> bool {
-            Python::attach(|py| {
-                if let Ok(guard) = drag_drop_cb_clone.lock() {
-                    if let Some(ref func) = *guard {
-                        let (evt_type, paths, position) = match &event {
-                            wry::DragDropEvent::Enter { paths, position } => {
-                                (DragDropEvent::Enter, paths.clone(), *position)
-                            }
-                            wry::DragDropEvent::Over { position } => {
-                                (DragDropEvent::Over, vec![], *position)
-                            }
-                            wry::DragDropEvent::Drop { paths, position } => {
-                                (DragDropEvent::Drop, paths.clone(), *position)
-                            }
-                            wry::DragDropEvent::Leave => (DragDropEvent::Leave, vec![], (0, 0)),
-                            _ => (DragDropEvent::Unknown, vec![], (0, 0)),
-                        };
-                        let paths_str: Vec<String> = paths
-                            .iter()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .collect();
-                        let pos = (position.0, position.1);
-                        match func.call1(py, (evt_type, paths_str, pos)) {
-                            Ok(result) => return result.extract::<bool>(py).unwrap_or(false),
-                            Err(err) => {
-                                report_py_error(py, err);
-                                return false;
-                            }
-                        }
-                    }
+            let (evt_type, paths, position) = match &event {
+                wry::DragDropEvent::Enter { paths, position } => {
+                    (DragDropEvent::Enter, paths.clone(), *position)
                 }
-                false
-            })
+                wry::DragDropEvent::Over { position } => (DragDropEvent::Over, vec![], *position),
+                wry::DragDropEvent::Drop { paths, position } => {
+                    (DragDropEvent::Drop, paths.clone(), *position)
+                }
+                wry::DragDropEvent::Leave => (DragDropEvent::Leave, vec![], (0, 0)),
+                _ => (DragDropEvent::Unknown, vec![], (0, 0)),
+            };
+            let paths_str: Vec<String> = paths
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect();
+            let pos = (position.0, position.1);
+            push_bounded(
+                &drag_drop_pending_clone,
+                (evt_type, paths_str, pos),
+                MAX_DRAG_DROP_PENDING,
+                "drag-drop",
+            );
+            true
         };
 
         let mut builder = wry::WebViewBuilder::new()
@@ -386,6 +426,9 @@ impl WebView {
             owner_thread,
             inner,
             page_load_pending,
+            ipc_pending,
+            title_pending,
+            drag_drop_pending,
             #[cfg(target_os = "macos")]
             _focus_sync,
             #[cfg(target_os = "macos")]
@@ -490,6 +533,105 @@ impl WebView {
             .lock()
             .map(|mut pending| std::mem::take(&mut *pending))
             .unwrap_or_default())
+    }
+
+    fn drain_ipc_messages(&self) -> PyResult<Vec<String>> {
+        self.require_owner_thread()?;
+        let messages = self
+            .ipc_pending
+            .lock()
+            .map(|mut pending| std::mem::take(&mut *pending))
+            .unwrap_or_default();
+        if let Ok(guard) = self.ipc_cb.lock() {
+            if let Some(ref func) = *guard {
+                Python::attach(|py| {
+                    for msg in &messages {
+                        if let Err(err) = func.call1(py, (msg.as_str(),)) {
+                            report_py_error(py, err);
+                        }
+                    }
+                });
+            }
+        }
+        Ok(messages)
+    }
+
+    fn drain_title_events(&self) -> PyResult<Vec<String>> {
+        self.require_owner_thread()?;
+        let titles = self
+            .title_pending
+            .lock()
+            .map(|mut pending| std::mem::take(&mut *pending))
+            .unwrap_or_default();
+        if let Ok(guard) = self.title_cb.lock() {
+            if let Some(ref func) = *guard {
+                Python::attach(|py| {
+                    for title in &titles {
+                        if let Err(err) = func.call1(py, (title.as_str(),)) {
+                            report_py_error(py, err);
+                        }
+                    }
+                });
+            }
+        }
+        Ok(titles)
+    }
+
+    fn drain_drag_drop_events(
+        &self,
+    ) -> PyResult<Vec<(DragDropEvent, Vec<String>, (i32, i32))>> {
+        self.require_owner_thread()?;
+        let events = self
+            .drag_drop_pending
+            .lock()
+            .map(|mut pending| std::mem::take(&mut *pending))
+            .unwrap_or_default();
+        if let Ok(guard) = self.drag_drop_cb.lock() {
+            if let Some(ref func) = *guard {
+                Python::attach(|py| {
+                    for (evt_type, paths, pos) in &events {
+                        if let Err(err) = func.call1(py, (*evt_type, paths.clone(), *pos)) {
+                            report_py_error(py, err);
+                        }
+                    }
+                });
+            }
+        }
+        Ok(events)
+    }
+
+    fn _enqueue_ipc_message(&self, message: String) -> PyResult<()> {
+        self.require_owner_thread()?;
+        if message.len() > MAX_IPC_MESSAGE_BYTES {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "IPC message exceeds {} byte limit",
+                MAX_IPC_MESSAGE_BYTES
+            )));
+        }
+        push_bounded(&self.ipc_pending, message, MAX_IPC_PENDING, "IPC");
+        Ok(())
+    }
+
+    fn _enqueue_title_event(&self, title: String) -> PyResult<()> {
+        self.require_owner_thread()?;
+        push_bounded(&self.title_pending, title, MAX_TITLE_PENDING, "title-changed");
+        Ok(())
+    }
+
+    fn _enqueue_drag_drop_event(
+        &self,
+        event: DragDropEvent,
+        paths: Vec<String>,
+        position: (i32, i32),
+    ) -> PyResult<()> {
+        self.require_owner_thread()?;
+        push_bounded(
+            &self.drag_drop_pending,
+            (event, paths, position),
+            MAX_DRAG_DROP_PENDING,
+            "drag-drop",
+        );
+        Ok(())
     }
 
     fn set_on_title_changed(&self, handler: Py<PyAny>) -> PyResult<()> {
@@ -729,6 +871,18 @@ impl WebView {
         if let Ok(mut drag) = self.drag_drop_cb.lock() {
             *drag = None;
         }
+        if let Ok(mut pending) = self.ipc_pending.lock() {
+            pending.clear();
+        }
+        if let Ok(mut pending) = self.title_pending.lock() {
+            pending.clear();
+        }
+        if let Ok(mut pending) = self.drag_drop_pending.lock() {
+            pending.clear();
+        }
+        if let Ok(mut pending) = self.page_load_pending.lock() {
+            pending.clear();
+        }
 
         let mut guard = self
             .inner
@@ -765,7 +919,7 @@ enum NewWindowResponse {
     Deny,
 }
 
-#[pyclass(eq, eq_int, frozen, skip_from_py_object)]
+#[pyclass(eq, eq_int, frozen, from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DragDropEvent {
     Enter,

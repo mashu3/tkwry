@@ -147,14 +147,9 @@ class WebView:
             # Child WKWebView + focused=True fights Tk for first responder at create.
             focused = False
         self._focused = focused
-        self._ipc_queue: queue.SimpleQueue[str] = queue.SimpleQueue()
-        self._title_queue: queue.SimpleQueue[str] = queue.SimpleQueue()
         self._eval_result_queue: queue.SimpleQueue[tuple[EvalCallback, str]] = (
             queue.SimpleQueue()
         )
-        self._drag_drop_queue: queue.SimpleQueue[
-            tuple[DragDropEvent, list[str], tuple[int, int]]
-        ] = queue.SimpleQueue()
         self._event_poll_active = False
         self._pending_eval_callbacks = 0
         self._pending_url: str | None = url
@@ -447,12 +442,8 @@ class WebView:
     def set_ipc_handler(self, handler: IpcHandler | None) -> None:
         self._require_tk_thread()
         self._ipc_handler = handler
-        if self._webview is not None:
-            if handler is not None:
-                self._webview.set_ipc_handler(self._enqueue_ipc)
-            else:
-                self._webview.clear_ipc_handler()
         if handler is not None:
+            self._discard_ipc_backlog()
             self._ensure_event_poll()
 
     def set_on_navigation(self, handler: NavigationHandler | None) -> None:
@@ -488,15 +479,9 @@ class WebView:
     def set_on_title_changed(self, handler: TitleChangedHandler | None) -> None:
         self._require_tk_thread()
         self._on_title_changed = handler
-        if self._webview is not None:
-            if handler is not None:
-                self._webview.set_on_title_changed(self._native_title_changed)
-            else:
-                self._webview.clear_on_title_changed()
         if handler is not None:
+            self._discard_title_backlog()
             self._ensure_event_poll()
-        else:
-            self._drain_title_queue()
 
     def set_on_new_window(self, handler: NewWindowHandler | None) -> None:
         """Register a new-window hook (runs synchronously on the WebKit thread)."""
@@ -511,15 +496,9 @@ class WebView:
     def set_drag_drop_handler(self, handler: DragDropHandler | None) -> None:
         self._require_tk_thread()
         self._drag_drop_handler = handler
-        if self._webview is not None:
-            if handler is not None:
-                self._webview.set_drag_drop_handler(self._native_drag_drop)
-            else:
-                self._webview.clear_drag_drop_handler()
         if handler is not None:
+            self._discard_drag_drop_backlog()
             self._ensure_event_poll()
-        else:
-            self._drain_drag_drop_queue()
 
     def _schedule_try_create(self) -> None:
         if self._destroyed or self._webview is not None or self._create_pending:
@@ -609,44 +588,73 @@ class WebView:
     def _native_drag_drop(
         self, event: DragDropEvent, paths: list[str], position: tuple[int, int]
     ) -> bool:
-        # wry calls this from the WebKit thread during an active OS drag.
-        # Never touch Tk here — queue and return immediately so the drop can finish.
-        if event == DragDropEvent.Over:
-            return True
-        if self._drag_drop_handler is not None:
-            self._drag_drop_queue.put((event, paths, position))
+        native = self._webview
+        if native is not None:
+            native._enqueue_drag_drop_event(event, paths, position)
+            self._ensure_event_poll()
         return True
 
     def _native_navigation(self, url: str) -> bool:
         if self._on_navigation is None:
             return True
-        return self._on_navigation(url)
+        try:
+            result = self._on_navigation(url)
+        except Exception:
+            traceback.print_exc()
+            return False
+        if type(result) is not bool:
+            print(
+                f"tkwry: on_navigation must return bool, got {type(result).__name__}",
+                file=sys.stderr,
+            )
+            traceback.print_exc()
+            return False
+        return result
 
     def _native_title_changed(self, title: str) -> None:
-        if self._on_title_changed is not None:
-            self._title_queue.put(title)
+        native = self._webview
+        if native is not None:
+            native._enqueue_title_event(title)
+            self._ensure_event_poll()
 
     def _native_new_window(self, url: str) -> NewWindowResponse:
         if self._on_new_window is None:
             return NewWindowResponse.Allow
-        return self._on_new_window(url)
+        try:
+            result = self._on_new_window(url)
+        except Exception:
+            traceback.print_exc()
+            return NewWindowResponse.Deny
+        if not isinstance(result, NewWindowResponse):
+            print(
+                "tkwry: on_new_window must return NewWindowResponse, "
+                f"got {type(result).__name__}",
+                file=sys.stderr,
+            )
+            traceback.print_exc()
+            return NewWindowResponse.Deny
+        return result
 
     def _enqueue_ipc(self, message: str) -> None:
-        self._ipc_queue.put(message)
+        native = self._webview
+        if native is not None:
+            native._enqueue_ipc_message(message)
+            self._ensure_event_poll()
 
-    def _drain_title_queue(self) -> None:
-        while True:
-            try:
-                self._title_queue.get_nowait()
-            except queue.Empty:
-                break
+    def _discard_ipc_backlog(self) -> None:
+        native = self._webview
+        if native is not None:
+            native.drain_ipc_messages()
 
-    def _drain_drag_drop_queue(self) -> None:
-        while True:
-            try:
-                self._drag_drop_queue.get_nowait()
-            except queue.Empty:
-                break
+    def _discard_title_backlog(self) -> None:
+        native = self._webview
+        if native is not None:
+            native.drain_title_events()
+
+    def _discard_drag_drop_backlog(self) -> None:
+        native = self._webview
+        if native is not None:
+            native.drain_drag_drop_events()
 
     def _discard_page_load_backlog(self) -> None:
         native = self._webview
@@ -658,6 +666,30 @@ class WebView:
             callback(*args)
         except Exception:
             traceback.print_exc()
+
+    def _deliver_ipc_messages(self) -> None:
+        handler = self._ipc_handler
+        native = self._webview
+        if handler is None or native is None:
+            return
+        for message in native.drain_ipc_messages():
+            self._invoke_callback(handler, message)
+
+    def _deliver_title_events(self) -> None:
+        handler = self._on_title_changed
+        native = self._webview
+        if handler is None or native is None:
+            return
+        for title in native.drain_title_events():
+            self._invoke_callback(handler, title)
+
+    def _deliver_drag_drop_events(self) -> None:
+        handler = self._drag_drop_handler
+        native = self._webview
+        if handler is None or native is None:
+            return
+        for event, paths, position in native.drain_drag_drop_events():
+            self._invoke_callback(handler, event, paths, position)
 
     def _deliver_page_load_events(self) -> None:
         page_load = self._on_page_load
@@ -696,32 +728,15 @@ class WebView:
 
         handler = self._ipc_handler
         if handler is not None:
-            while True:
-                try:
-                    message = self._ipc_queue.get_nowait()
-                except queue.Empty:
-                    break
-                self._invoke_callback(handler, message)
+            self._deliver_ipc_messages()
 
         self._deliver_page_load_events()
 
-        title_handler = self._on_title_changed
-        if title_handler is not None:
-            while True:
-                try:
-                    title = self._title_queue.get_nowait()
-                except queue.Empty:
-                    break
-                self._invoke_callback(title_handler, title)
+        if self._on_title_changed is not None:
+            self._deliver_title_events()
 
-        drag_handler = self._drag_drop_handler
-        if drag_handler is not None:
-            while True:
-                try:
-                    event, paths, position = self._drag_drop_queue.get_nowait()
-                except queue.Empty:
-                    break
-                self._invoke_callback(drag_handler, event, paths, position)
+        if self._drag_drop_handler is not None:
+            self._deliver_drag_drop_events()
 
         while True:
             try:
@@ -739,13 +754,7 @@ class WebView:
     def _should_keep_polling(self) -> bool:
         if self._needs_event_poll():
             return True
-        return (
-            self._pending_eval_callbacks > 0
-            or not self._eval_result_queue.empty()
-            or not self._title_queue.empty()
-            or not self._ipc_queue.empty()
-            or not self._drag_drop_queue.empty()
-        )
+        return self._pending_eval_callbacks > 0 or not self._eval_result_queue.empty()
 
     def _try_create(self) -> None:
         if self._destroyed or self._webview is not None:
@@ -781,16 +790,10 @@ class WebView:
             kwargs["user_agent"] = self._user_agent
         if self._initialization_script is not None:
             kwargs["initialization_script"] = self._initialization_script
-        if self._ipc_handler is not None:
-            kwargs["ipc_handler"] = self._enqueue_ipc
         if self._on_navigation is not None:
             kwargs["on_navigation"] = self._native_navigation
-        if self._on_title_changed is not None:
-            kwargs["on_title_changed"] = self._native_title_changed
         if self._on_new_window is not None:
             kwargs["on_new_window"] = self._native_new_window
-        if self._drag_drop_handler is not None:
-            kwargs["drag_drop_handler"] = self._native_drag_drop
 
         if sys.platform == "linux":
             from tkwry._core import pump_events
