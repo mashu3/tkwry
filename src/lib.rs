@@ -75,7 +75,7 @@ fn call_sync_bool_callback(
     default_on_error: bool,
 ) -> bool {
     match func.call1(py, (url,)) {
-        Ok(result) => extract_py_bool(&result.bind(py), context).unwrap_or(default_on_error),
+        Ok(result) => extract_py_bool(result.bind(py), context).unwrap_or(default_on_error),
         Err(err) => {
             report_py_error(py, err);
             default_on_error
@@ -377,7 +377,7 @@ impl WebView {
                         match func.call1(py, (url.as_str(),)) {
                             Ok(result) => {
                                 if let Some(resp) =
-                                    extract_new_window_response(&result.bind(py), "on_new_window")
+                                    extract_new_window_response(result.bind(py), "on_new_window")
                                 {
                                     return match resp {
                                         NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
@@ -653,7 +653,7 @@ impl WebView {
         Ok(titles)
     }
 
-    fn drain_drag_drop_events(&self) -> PyResult<Vec<(DragDropEvent, Vec<String>, (i32, i32))>> {
+    fn drain_drag_drop_events(&self) -> PyResult<Vec<DragDropPendingItem>> {
         self.require_owner_thread()?;
         let events = self
             .drag_drop_pending
