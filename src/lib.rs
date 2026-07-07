@@ -37,8 +37,21 @@ enum PageLoadEvent {
 type PyCallback = Arc<Mutex<Option<Py<PyAny>>>>;
 type PageLoadPending = Arc<Mutex<Vec<(PageLoadEvent, String)>>>;
 
-#[pyclass]
+const THREAD_ERROR: &str = "tkwry must be called from the thread that created the Tk application (the thread that runs the Tk event loop)";
+
+fn python_thread_id() -> PyResult<u64> {
+    Python::attach(|py| {
+        py.import("threading")?
+            .getattr("get_ident")?
+            .call0()?
+            .extract()
+    })
+}
+
+#[pyclass(unsendable)]
 struct WebView {
+    /// Python ``threading.get_ident()`` for the owning Tk thread.
+    owner_thread: u64,
     /// macOS focus monitor clones this; GTK WebView is UI-thread-only.
     #[allow(clippy::arc_with_non_send_sync)]
     inner: Arc<Mutex<Option<wry::WebView>>>,
@@ -58,8 +71,15 @@ struct WebView {
     drag_drop_cb: PyCallback,
 }
 
-unsafe impl Send for WebView {}
-unsafe impl Sync for WebView {}
+impl WebView {
+    fn require_owner_thread(&self) -> PyResult<()> {
+        let current = python_thread_id()?;
+        if current != self.owner_thread {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(THREAD_ERROR));
+        }
+        Ok(())
+    }
+}
 
 #[pymethods]
 impl WebView {
@@ -67,6 +87,7 @@ impl WebView {
     #[pyo3(signature = (
         parent,
         *,
+        owner_thread = None,
         width = 800,
         height = 600,
         url = None,
@@ -86,6 +107,7 @@ impl WebView {
     #[allow(clippy::too_many_arguments)]
     fn new(
         parent: isize,
+        owner_thread: Option<u64>,
         width: u32,
         height: u32,
         url: Option<String>,
@@ -102,6 +124,11 @@ impl WebView {
         on_new_window: Option<Py<PyAny>>,
         drag_drop_handler: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
+        let owner_thread = match owner_thread {
+            Some(id) => id,
+            None => python_thread_id()?,
+        };
+
         #[cfg(target_os = "windows")]
         let window_handle = {
             use raw_window_handle::{RawWindowHandle, Win32WindowHandle};
@@ -356,6 +383,7 @@ impl WebView {
         };
 
         Ok(Self {
+            owner_thread,
             inner,
             page_load_pending,
             #[cfg(target_os = "macos")]
@@ -416,6 +444,7 @@ impl WebView {
     }
 
     fn set_ipc_handler(&self, handler: Py<PyAny>) -> PyResult<()> {
+        self.require_owner_thread()?;
         let mut guard = self
             .ipc_cb
             .lock()
@@ -425,6 +454,7 @@ impl WebView {
     }
 
     fn clear_ipc_handler(&self) -> PyResult<()> {
+        self.require_owner_thread()?;
         let mut guard = self
             .ipc_cb
             .lock()
@@ -434,6 +464,7 @@ impl WebView {
     }
 
     fn set_on_navigation(&self, handler: Py<PyAny>) -> PyResult<()> {
+        self.require_owner_thread()?;
         let mut guard = self
             .nav_cb
             .lock()
@@ -443,6 +474,7 @@ impl WebView {
     }
 
     fn clear_on_navigation(&self) -> PyResult<()> {
+        self.require_owner_thread()?;
         let mut guard = self
             .nav_cb
             .lock()
@@ -451,14 +483,17 @@ impl WebView {
         Ok(())
     }
 
-    fn drain_page_load_events(&self) -> Vec<(PageLoadEvent, String)> {
-        self.page_load_pending
+    fn drain_page_load_events(&self) -> PyResult<Vec<(PageLoadEvent, String)>> {
+        self.require_owner_thread()?;
+        Ok(self
+            .page_load_pending
             .lock()
             .map(|mut pending| std::mem::take(&mut *pending))
-            .unwrap_or_default()
+            .unwrap_or_default())
     }
 
     fn set_on_title_changed(&self, handler: Py<PyAny>) -> PyResult<()> {
+        self.require_owner_thread()?;
         let mut guard = self
             .title_cb
             .lock()
@@ -468,6 +503,7 @@ impl WebView {
     }
 
     fn clear_on_title_changed(&self) -> PyResult<()> {
+        self.require_owner_thread()?;
         let mut guard = self
             .title_cb
             .lock()
@@ -477,6 +513,7 @@ impl WebView {
     }
 
     fn set_on_new_window(&self, handler: Py<PyAny>) -> PyResult<()> {
+        self.require_owner_thread()?;
         let mut guard = self
             .newwin_cb
             .lock()
@@ -486,6 +523,7 @@ impl WebView {
     }
 
     fn clear_on_new_window(&self) -> PyResult<()> {
+        self.require_owner_thread()?;
         let mut guard = self
             .newwin_cb
             .lock()
@@ -495,6 +533,7 @@ impl WebView {
     }
 
     fn set_drag_drop_handler(&self, handler: Py<PyAny>) -> PyResult<()> {
+        self.require_owner_thread()?;
         let mut guard = self
             .drag_drop_cb
             .lock()
@@ -504,6 +543,7 @@ impl WebView {
     }
 
     fn clear_drag_drop_handler(&self) -> PyResult<()> {
+        self.require_owner_thread()?;
         let mut guard = self
             .drag_drop_cb
             .lock()
@@ -533,47 +573,54 @@ impl WebView {
         })
     }
 
-    fn set_mac_web_input_active(&self, active: bool) {
+    fn set_mac_web_input_active(&self, active: bool) -> PyResult<()> {
+        self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
         self.web_wants_keyboard.store(active, Ordering::SeqCst);
         #[cfg(not(target_os = "macos"))]
         let _ = (self, active);
+        Ok(())
     }
 
-    fn set_mac_wakeup_write_fd(&self, fd: i32) {
+    fn set_mac_wakeup_write_fd(&self, fd: i32) -> PyResult<()> {
+        self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
         self.wakeup_write_fd.store(fd, Ordering::SeqCst);
         #[cfg(not(target_os = "macos"))]
         let _ = (self, fd);
+        Ok(())
     }
 
-    fn take_mac_tk_unfocus(&self) -> bool {
+    fn take_mac_tk_unfocus(&self) -> PyResult<bool> {
+        self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
         {
-            self.mac_tk_unfocus.swap(false, Ordering::SeqCst)
+            Ok(self.mac_tk_unfocus.swap(false, Ordering::SeqCst))
         }
         #[cfg(not(target_os = "macos"))]
         {
             let _ = self;
-            false
+            Ok(false)
         }
     }
 
     /// Whether Rust has requested a Tcl unfocus drain (``mac_tk_unfocus`` flag).
-    fn mac_tk_unfocus_pending(&self) -> bool {
+    fn mac_tk_unfocus_pending(&self) -> PyResult<bool> {
+        self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
         {
-            self.mac_tk_unfocus.load(Ordering::SeqCst)
+            Ok(self.mac_tk_unfocus.load(Ordering::SeqCst))
         }
         #[cfg(not(target_os = "macos"))]
         {
             let _ = self;
-            false
+            Ok(false)
         }
     }
 
     /// Set coordination flags as the NSEvent web-click path does (tests / debugging).
-    fn mac_request_tk_unfocus(&self) {
+    fn mac_request_tk_unfocus(&self) -> PyResult<()> {
+        self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
         {
             self.web_wants_keyboard.store(true, Ordering::SeqCst);
@@ -582,31 +629,34 @@ impl WebView {
         }
         #[cfg(not(target_os = "macos"))]
         let _ = self;
+        Ok(())
     }
 
     /// Whether this webview currently owns macOS keyboard routing (``web_wants``).
-    fn mac_web_input_active(&self) -> bool {
+    fn mac_web_input_active(&self) -> PyResult<bool> {
+        self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
         {
-            self.web_wants_keyboard.load(Ordering::SeqCst)
+            Ok(self.web_wants_keyboard.load(Ordering::SeqCst))
         }
         #[cfg(not(target_os = "macos"))]
         {
             let _ = self;
-            false
+            Ok(false)
         }
     }
 
     /// Hit-test in wry top-left coordinates (same space as ``set_bounds``).
-    fn mac_hit_test_wry_point(&self, x: f64, y: f64) -> bool {
+    fn mac_hit_test_wry_point(&self, x: f64, y: f64) -> PyResult<bool> {
+        self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
         {
-            macos_focus::hit_test_wry_point(&self.inner, x, y)
+            Ok(macos_focus::hit_test_wry_point(&self.inner, x, y))
         }
         #[cfg(not(target_os = "macos"))]
         {
             let _ = (self, x, y);
-            false
+            Ok(false)
         }
     }
 
@@ -653,6 +703,7 @@ impl WebView {
 
     /// Release the native webview and tear down platform resources.
     fn destroy(&self) -> PyResult<()> {
+        self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
         {
             self.web_wants_keyboard.store(false, Ordering::SeqCst);
@@ -694,6 +745,7 @@ fn with_webview<F, T>(this: &WebView, f: F) -> PyResult<T>
 where
     F: FnOnce(&wry::WebView) -> PyResult<T>,
 {
+    this.require_owner_thread()?;
     let guard = this
         .inner
         .lock()

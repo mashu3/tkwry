@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 
 import pytest
 from support.tk import bare_frame, layout_bare_frame, pump, skip_linux_ci, wait_until
@@ -271,6 +272,33 @@ def test_double_destroy_is_safe(tk_root) -> None:
     assert web.destroyed
     assert web.native is None
 
+    frame.destroy()
+
+
+def test_native_rejects_other_thread(tk_root) -> None:
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>x</p>")
+    layout_bare_frame(frame, width=400, height=300)
+    assert web.wait_until_ready(timeout=10.0)
+
+    native = web.native
+    assert native is not None
+    errors: list[str] = []
+
+    def worker() -> None:
+        try:
+            native.eval_js("1+1")
+        except BaseException as exc:
+            errors.append(str(exc))
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+
+    assert len(errors) == 1
+    assert "thread" in errors[0].lower()
+
+    web.destroy()
     frame.destroy()
 
 

@@ -34,6 +34,7 @@ class WebView:
         cls,
         parent: int,
         *,
+        owner_thread: int | None = None,
         width: int = 800,
         height: int = 600,
         url: str | None = None,

@@ -798,7 +798,11 @@ class WebView:
             for _ in range(20):
                 pump_events()
 
-        self._webview = NativeWebView(self._embed.handle, **kwargs)
+        self._webview = NativeWebView(
+            self._embed.handle,
+            owner_thread=self._tk_thread_id,
+            **kwargs,
+        )
         self._pending_url = None
         self._pending_html = None
         self._sync_bounds()
