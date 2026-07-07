@@ -36,6 +36,7 @@ Pre-built **abi3** wheels ship for **Windows (x86_64, arm64)** and **macOS (Appl
 
 - Python 3.10+
 - Tkinter (included with most Python builds)
+- **Building from source** (git clone, `pip install git+…`, or Linux) — [Rust](https://rustup.rs) toolchain (stable); `pip` uses **maturin** as the build backend
 - **Windows (x86_64, arm64)**
   - [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) must be installed (pre-installed on many Windows 10/11 systems).
   - **Without WebView2, tkwry is not supported on Windows** — there is no fallback engine.
@@ -46,24 +47,31 @@ Pre-built **abi3** wheels ship for **Windows (x86_64, arm64)** and **macOS (Appl
 
 ## 📦 Installation
 
-Install from PyPI (Windows / macOS wheels):
+### PyPI (recommended — Windows / macOS wheels)
 
 ```bash
 pip install tkwry
 ```
 
-> **Developing or running examples from a git clone** — use an editable install so
-> Python picks up this repo (not an older copy in site-packages):
->
-> ```bash
-> pip install -e .
-> ```
+### From a git clone (source build)
 
-Or install from GitHub for the latest changes:
+Cloning the repo and installing locally compiles the Rust extension on your machine. You need a **Rust toolchain** ([rustup](https://rustup.rs)) and platform runtimes from [Requirements](#-requirements) above (WebView2 on Windows, etc.). `pip` pulls in **maturin** automatically as the build backend.
+
+```bash
+git clone https://github.com/mashu3/tkwry.git
+cd tkwry
+pip install -e .
+```
+
+Use this for development and for running the [examples](#-examples) from the tree.
+
+### Install a git revision with pip (source build)
 
 ```bash
 pip install git+https://github.com/mashu3/tkwry.git
 ```
+
+This also builds from source (sdist via git), **not** a pre-built wheel. It requires **Rust** and will fail on machines without a working toolchain — same as `pip install .` / `pip install -e .`. Prefer the PyPI wheel on Windows and macOS when you do not need bleeding-edge changes.
 
 ### Linux (source install, best-effort)
 
