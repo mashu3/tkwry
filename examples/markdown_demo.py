@@ -1233,9 +1233,7 @@ class Win32MenuBarTheme:
     def _wndproc_type(cls):
         import ctypes as ct
 
-        result_type = (
-            ct.c_longlong if ct.sizeof(ct.c_void_p) == 8 else ct.c_long
-        )
+        result_type = ct.c_longlong if ct.sizeof(ct.c_void_p) == 8 else ct.c_long
         return ct.WINFUNCTYPE(
             result_type,
             ct.c_void_p,
@@ -1442,16 +1440,16 @@ class WindowTitleBar:
     _MN_GETHMENU = 0x01E1
     _MIM_BACKGROUND = 0x00000002
     _MIM_APPLYTOSUBMENUS = 0x80000000
-    _SWP_DRAWFRAME = 0x0020
-    _SWP_NOMOVE = 0x0002
-    _SWP_NOSIZE = 0x0001
-    _SWP_NOZORDER = 0x0004
-    _SWP_NOACTIVATE = 0x0010
 
     _menu_dark = True
     _win_menu_brush = 0
     _win_popup_menus: set[int] = set()
     _windows_menu_hooks_installed = False
+
+    @staticmethod
+    def prepare_startup(*, dark: bool) -> None:
+        if sys.platform == "win32":
+            WindowTitleBar._set_preferred_app_mode(dark)
 
     @staticmethod
     def install(window: tk.Misc, menubar: tk.Menu | None) -> None:
@@ -1518,10 +1516,9 @@ class WindowTitleBar:
                         else WindowTitleBar._WIN_SASH_LIGHT
                     )
                 )
-            if window.winfo_viewable():
-                window.iconify()
-                window.update_idletasks()
-                window.deiconify()
+            import ctypes as ct
+
+            ct.windll.user32.RedrawWindow(hwnd, None, None, 0x0401)
         except (AttributeError, OSError, tk.TclError):
             return
 
@@ -1592,12 +1589,15 @@ class WindowTitleBar:
         dwm = ct.windll.dwmapi.DwmSetWindowAttribute
         size = ct.sizeof(ct.c_int)
         dark_value = ct.c_int(1 if dark else 0)
-        if dwm(
-            hwnd,
-            WindowTitleBar._DWMWA_USE_IMMERSIVE_DARK_MODE,
-            ct.byref(dark_value),
-            size,
-        ) != 0:
+        if (
+            dwm(
+                hwnd,
+                WindowTitleBar._DWMWA_USE_IMMERSIVE_DARK_MODE,
+                ct.byref(dark_value),
+                size,
+            )
+            != 0
+        ):
             dwm(
                 hwnd,
                 WindowTitleBar._DWMWA_USE_IMMERSIVE_DARK_MODE_OLD,
@@ -1654,24 +1654,17 @@ class WindowTitleBar:
             if WindowTitleBar._menu_dark
             else WindowTitleBar._WIN_MENU_BAR_LIGHT
         )
-        flags = (
-            WindowTitleBar._SWP_DRAWFRAME
-            | WindowTitleBar._SWP_NOMOVE
-            | WindowTitleBar._SWP_NOSIZE
-            | WindowTitleBar._SWP_NOZORDER
-            | WindowTitleBar._SWP_NOACTIVATE
-        )
         hwnd = ct.windll.user32.FindWindowExW(None, None, "#32768", None)
         while hwnd:
             hmenu = ct.windll.user32.SendMessageW(
                 hwnd, WindowTitleBar._MN_GETHMENU, 0, 0
             )
-            if hmenu and hmenu not in WindowTitleBar._win_popup_menus:
+            if hmenu:
+                WindowTitleBar._allow_dark_mode_for_window(
+                    hwnd, dark=WindowTitleBar._menu_dark
+                )
                 WindowTitleBar._set_menu_background(hmenu, color)
                 WindowTitleBar._win_popup_menus.add(hmenu)
-                ct.windll.user32.SetWindowPos(
-                    hwnd, None, 0, 0, 0, 0, flags
-                )
             hwnd = ct.windll.user32.FindWindowExW(None, hwnd, "#32768", None)
 
     @staticmethod
@@ -1773,6 +1766,19 @@ class WindowTitleBar:
 
 class MenuAccelerators:
     """Platform-appropriate menu accelerator labels."""
+
+    @staticmethod
+    def command_kwargs(
+        *,
+        label: str,
+        command: Callable[[], None],
+        accelerator: str | None = None,
+        **extra: object,
+    ) -> dict[str, object]:
+        kwargs: dict[str, object] = {"label": label, "command": command, **extra}
+        if accelerator is not None:
+            kwargs["accelerator"] = accelerator
+        return kwargs
 
     @staticmethod
     def edit(key: str) -> str:
@@ -1956,6 +1962,7 @@ class MarkdownEditorDemo:
         self._preview_frame: tk.Frame | None = None
 
         self.root = tk.Tk()
+        self.root.withdraw()
         self.root.title("tkwry Markdown editor demo")
         self.root.geometry("1200x760")
         self.root.minsize(800, 520)
@@ -1964,6 +1971,7 @@ class MarkdownEditorDemo:
         self._minimap_var = tk.BooleanVar(self.root, value=False)
         self._editor_dark_var = tk.BooleanVar(self.root, value=True)
         self._preview_dark_var = tk.BooleanVar(self.root, value=False)
+        WindowTitleBar.prepare_startup(dark=self._editor_dark_var.get())
         self._save_dialog_active = False
         self._editor_frame: tk.Frame | None = None
         self._menubar: tk.Menu | None = None
@@ -1980,14 +1988,10 @@ class MarkdownEditorDemo:
         self._preview_dark_var.trace_add(
             "write", lambda *_: self._apply_preview_appearance()
         )
-        self.root.after_idle(
-            lambda: WindowTitleBar.apply(
-                self.root,
-                dark=self._editor_dark_var.get(),
-                menubar=self._menubar,
-                paned=self._paned,
-            )
-        )
+        self.root.update_idletasks()
+        self._apply_editor_appearance()
+        self._apply_preview_appearance()
+        self.root.deiconify()
 
     def run(self) -> None:
         self.root.mainloop()
@@ -1997,25 +2001,33 @@ class MarkdownEditorDemo:
 
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(
-            label="New Tab",
-            command=self._new_tab,
-            accelerator=MenuAccelerators.new_tab(),
+            **MenuAccelerators.command_kwargs(
+                label="New Tab",
+                command=self._new_tab,
+                accelerator=MenuAccelerators.new_tab(),
+            )
         )
         file_menu.add_command(
-            label="Close Tab",
-            command=self._close_tab,
-            accelerator=MenuAccelerators.close_tab(),
+            **MenuAccelerators.command_kwargs(
+                label="Close Tab",
+                command=self._close_tab,
+                accelerator=MenuAccelerators.close_tab(),
+            )
         )
         file_menu.add_separator()
         file_menu.add_command(
-            label="Save",
-            command=self._save,
-            accelerator=MenuAccelerators.save(),
+            **MenuAccelerators.command_kwargs(
+                label="Save",
+                command=self._save,
+                accelerator=MenuAccelerators.save(),
+            )
         )
         file_menu.add_command(
-            label="Save As",
-            command=self._save_as,
-            accelerator=MenuAccelerators.save_as(),
+            **MenuAccelerators.command_kwargs(
+                label="Save As",
+                command=self._save_as,
+                accelerator=MenuAccelerators.save_as(),
+            )
         )
 
         edit_menu = tk.Menu(menubar, tearoff=0)
@@ -2023,44 +2035,57 @@ class MarkdownEditorDemo:
             edit_menu.configure(postcommand=MacOsEditMenu.strip_injected_items)
 
         edit_menu.add_command(
-            label="Undo",
-            command=self._undo,
-            accelerator=MenuAccelerators.undo(),
+            **MenuAccelerators.command_kwargs(
+                label="Undo",
+                command=self._undo,
+                accelerator=MenuAccelerators.undo(),
+            )
         )
         edit_menu.add_command(
-            label="Redo",
-            command=self._redo,
-            accelerator=MenuAccelerators.redo(),
+            **MenuAccelerators.command_kwargs(
+                label="Redo",
+                command=self._redo,
+                accelerator=MenuAccelerators.redo(),
+            )
         )
         edit_menu.add_separator()
         edit_menu.add_command(
-            label="Cut",
-            command=self._cut,
-            accelerator=MenuAccelerators.edit("X"),
+            **MenuAccelerators.command_kwargs(
+                label="Cut",
+                command=self._cut,
+                accelerator=MenuAccelerators.edit("X"),
+            )
         )
         edit_menu.add_command(
-            label="Copy",
-            command=self._copy,
-            accelerator=MenuAccelerators.edit("C"),
+            **MenuAccelerators.command_kwargs(
+                label="Copy",
+                command=self._copy,
+                accelerator=MenuAccelerators.edit("C"),
+            )
         )
         edit_menu.add_command(
-            label="Paste",
-            command=self._paste,
-            accelerator=MenuAccelerators.edit("V"),
+            **MenuAccelerators.command_kwargs(
+                label="Paste",
+                command=self._paste,
+                accelerator=MenuAccelerators.edit("V"),
+            )
         )
         edit_menu.add_separator()
         edit_menu.add_command(
-            label="Find",
-            command=self._find,
-            accelerator=MenuAccelerators.find(),
+            **MenuAccelerators.command_kwargs(
+                label="Find",
+                command=self._find,
+                accelerator=MenuAccelerators.find(),
+            )
         )
-        replace_kwargs: dict[str, object] = {
-            "label": "Replace",
-            "command": self._replace,
-        }
-        if sys.platform != "darwin":
-            replace_kwargs["accelerator"] = MenuAccelerators.replace()
-        edit_menu.add_command(**replace_kwargs)
+        replace_accel = None if sys.platform == "darwin" else MenuAccelerators.replace()
+        edit_menu.add_command(
+            **MenuAccelerators.command_kwargs(
+                label="Replace",
+                command=self._replace,
+                accelerator=replace_accel,
+            )
+        )
 
         view_menu = tk.Menu(menubar, tearoff=0)
         if sys.platform == "darwin":
@@ -2354,9 +2379,7 @@ class MarkdownEditorDemo:
     def _push_preview_now(self, markdown: str) -> None:
         self._last_markdown = markdown
         if self._preview_ready and self._preview_web is not None:
-            self._preview_web.eval_js(
-                f"window.setMarkdown({json.dumps(markdown)});"
-            )
+            self._preview_web.eval_js(f"window.setMarkdown({json.dumps(markdown)});")
 
     def _schedule_preview(self, markdown: str) -> None:
         self._last_markdown = markdown
