@@ -18,16 +18,37 @@ def _two_pane_row(root):
     import tkinter as tk
 
     root.geometry("820x420")
+    root.update_idletasks()
+    root.update()
     row = tk.Frame(root)
     row.pack(fill="both", expand=True, padx=4, pady=4)
+    row.columnconfigure(0, weight=1, minsize=200)
+    row.columnconfigure(1, weight=1, minsize=200)
+    row.rowconfigure(0, weight=1, minsize=200)
 
     left = tk.Frame(row, width=380, height=300, bg="#111")
     right = tk.Frame(row, width=380, height=300, bg="#222")
-    left.pack(side="left", fill="both", expand=True, padx=4)
-    right.pack(side="right", fill="both", expand=True, padx=4)
-    left.pack_propagate(False)
-    right.pack_propagate(False)
+    left.grid_propagate(False)
+    right.grid_propagate(False)
+    left.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+    right.grid(row=0, column=1, sticky="nsew", padx=4, pady=4)
     root.update_idletasks()
+    root.update()
+    # Ensure both hosts are mapped with real geometry before creating WebViews.
+    for _ in range(50):
+        if (
+            left.winfo_viewable()
+            and right.winfo_viewable()
+            and left.winfo_width() > 1
+            and right.winfo_width() > 1
+            and left.winfo_height() > 1
+            and right.winfo_height() > 1
+        ):
+            break
+        root.update_idletasks()
+        root.update()
+        root.after(20)
+        root.update()
     return row, left, right
 
 
@@ -46,7 +67,11 @@ def test_two_webviews_both_ready_and_independent_eval(tk_root) -> None:
         on_page_load=lambda evt, _url: load_events["b"].append(evt),
     )
 
-    assert wait_until(tk_root, lambda: web_a.ready and web_b.ready, steps=200)
+    assert wait_until(tk_root, lambda: web_a.ready and web_b.ready, steps=200), (
+        f"expected both panes ready; "
+        f"sizes=({left.winfo_width()}x{left.winfo_height()}, "
+        f"{right.winfo_width()}x{right.winfo_height()})"
+    )
     assert wait_until(
         tk_root,
         lambda: (
@@ -71,9 +96,14 @@ def test_two_webviews_both_ready_and_independent_eval(tk_root) -> None:
     )
 
     def both_evaluated() -> bool:
+        a = results.get("a")
+        b = results.get("b")
+        if a is None or b is None:
+            return False
         try:
-            return json.loads(results["a"]) == "A" and json.loads(results["b"]) == "B"
-        except KeyError:
+            return json.loads(a) == "A" and json.loads(b) == "B"
+        except (json.JSONDecodeError, TypeError):
+            # Interim empty/invalid deliveries must not abort wait_until.
             return False
 
     assert wait_until(tk_root, both_evaluated, steps=200), (
