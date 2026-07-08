@@ -259,19 +259,28 @@ def test_ipc_handler_exception_does_not_stop_poll(tk_root) -> None:
 def test_ipc_post_message_reaches_handler(tk_root) -> None:
     """End-to-end: JS window.ipc.postMessage -> Tk-thread handler."""
     received: list[str] = []
+    loaded: list[PageLoadEvent] = []
 
     frame = host_frame(tk_root)
     web = WebView(
         frame,
         html="<p>ipc-e2e</p>",
         ipc_handler=lambda msg: received.append(msg),
+        on_page_load=lambda evt, _url: loaded.append(evt),
     )
     assert web.wait_until_ready(timeout=10.0)
+    assert wait_until(
+        tk_root,
+        lambda: PageLoadEvent.Finished in loaded,
+        steps=400,
+    ), f"expected page load Finished before IPC, got {loaded!r}"
 
-    web.eval_js("window.ipc.postMessage('hello-from-js')")
-    assert wait_until(tk_root, lambda: "hello-from-js" in received, steps=200), (
-        f"expected JS IPC message, got {received!r}"
-    )
+    # WebView2 may need a few retries before window.ipc is callable.
+    for _ in range(10):
+        web.eval_js("window.ipc && window.ipc.postMessage('hello-from-js')")
+        if wait_until(tk_root, lambda: "hello-from-js" in received, steps=40):
+            break
+    assert "hello-from-js" in received, f"expected JS IPC message, got {received!r}"
 
     web.destroy()
     frame.destroy()
