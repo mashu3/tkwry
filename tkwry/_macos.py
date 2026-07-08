@@ -219,10 +219,38 @@ def _ensure_mac_key_guard(toplevel: tk.Misc) -> None:
         return
     toplevel._tkwry_mac_key_guard = True
     toplevel.bind_class(_MAC_KEY_GUARD_TAG, "<KeyPress>", _mac_web_key_guard)
-    toplevel.bind_all("<Button-1>", _mac_input_wakeup, add="+")
-    toplevel.bind_all("<Map>", _mac_widget_mapped, add="+")
+    # Store funcids so teardown can remove only our handlers (bind_all is global).
+    toplevel._tkwry_mac_button1_bind_id = toplevel.bind_all(
+        "<Button-1>", _mac_input_wakeup, add="+"
+    )
+    toplevel._tkwry_mac_map_bind_id = toplevel.bind_all(
+        "<Map>", _mac_widget_mapped, add="+"
+    )
     _prepend_mac_key_guard(toplevel)
     _tag_mac_text_widgets(toplevel)
+
+
+def _teardown_mac_key_guard(toplevel: tk.Misc) -> None:
+    if not getattr(toplevel, "_tkwry_mac_key_guard", False):
+        return
+    root = toplevel._root()
+    for sequence, attr in (
+        ("<Button-1>", "_tkwry_mac_button1_bind_id"),
+        ("<Map>", "_tkwry_mac_map_bind_id"),
+    ):
+        funcid = getattr(toplevel, attr, None)
+        if funcid is not None:
+            try:
+                root._unbind(("bind", "all", sequence), funcid)
+            except tk.TclError:
+                pass
+        if hasattr(toplevel, attr):
+            delattr(toplevel, attr)
+    try:
+        toplevel.unbind_class(_MAC_KEY_GUARD_TAG, "<KeyPress>")
+    except tk.TclError:
+        pass
+    toplevel._tkwry_mac_key_guard = False
 
 
 def _set_mac_webviews_input_active(
@@ -256,3 +284,7 @@ def _unregister_macos_webview(web: WebView) -> None:
             pass
         if not views:
             _teardown_mac_wakeup_pipe(toplevel)
+            _teardown_mac_key_guard(toplevel)
+            for attr in ("_tkwry_mac_webviews", "_tkwry_mac_web_input_active"):
+                if hasattr(toplevel, attr):
+                    delattr(toplevel, attr)
