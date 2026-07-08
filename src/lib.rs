@@ -36,12 +36,17 @@ fn queue_lock_poisoned() -> PyErr {
     pyo3::exceptions::PyRuntimeError::new_err("event queue lock poisoned")
 }
 
-fn push_bounded<T>(
+fn push_if_listening<T>(
+    listening: &AtomicBool,
     pending: &Arc<Mutex<Vec<T>>>,
     item: T,
     max: usize,
     label: &str,
 ) -> Result<(), ()> {
+    // Fast path: avoid taking the queue lock when clearly not listening.
+    if !listening.load(Ordering::SeqCst) {
+        return Ok(());
+    }
     let mut queue = match pending.lock() {
         Ok(queue) => queue,
         Err(_) => {
@@ -49,6 +54,11 @@ fn push_bounded<T>(
             return Err(());
         }
     };
+    // Re-check under the queue lock so disable+clear cannot interleave a push
+    // (TOCTOU: load(true) → clear → push would otherwise resurrect stale events).
+    if !listening.load(Ordering::SeqCst) {
+        return Ok(());
+    }
     if queue.len() >= max {
         let half = queue.len() / 2;
         eprintln!(
@@ -60,28 +70,17 @@ fn push_bounded<T>(
     Ok(())
 }
 
-fn push_if_listening<T>(
-    listening: &AtomicBool,
-    pending: &Arc<Mutex<Vec<T>>>,
-    item: T,
-    max: usize,
-    label: &str,
-) -> Result<(), ()> {
-    if listening.load(Ordering::SeqCst) {
-        push_bounded(pending, item, max, label)
-    } else {
-        Ok(())
-    }
-}
-
 fn set_listening_and_clear_queue<T>(
     listening: &AtomicBool,
     pending: &Arc<Mutex<Vec<T>>>,
     enabled: bool,
 ) -> PyResult<()> {
+    // Hold the queue lock across store+clear so push_if_listening cannot insert
+    // after clear while still observing a prior true load.
+    let mut queue = pending.lock().map_err(|_| queue_lock_poisoned())?;
     listening.store(enabled, Ordering::SeqCst);
     if !enabled {
-        pending.lock().map_err(|_| queue_lock_poisoned())?.clear();
+        queue.clear();
     }
     Ok(())
 }
