@@ -161,10 +161,15 @@ class WebView:
         self._initial_load_attempt = 0
 
         GtkPump.attach(frame)
-        self._frame.bind("<Configure>", self._on_configure, add="+")
-        self._frame.bind("<Map>", self._on_map, add="+")
-        self._frame.bind("<Unmap>", self._on_unmap, add="+")
-        self._frame.bind("<Destroy>", self._on_destroy, add="+")
+        self._frame_bind_ids: list[tuple[str, str]] = []
+        for sequence, handler in (
+            ("<Configure>", self._on_configure),
+            ("<Map>", self._on_map),
+            ("<Unmap>", self._on_unmap),
+            ("<Destroy>", self._on_destroy),
+        ):
+            funcid = self._frame.bind(sequence, handler, add="+")
+            self._frame_bind_ids.append((sequence, funcid))
         if sys.platform == "darwin":
             _register_macos_webview(self)
         if self._needs_event_poll():
@@ -315,11 +320,21 @@ class WebView:
         self._pending_eval_callbacks = 0
         self._ready_delivered = False
         self._ready_callbacks.clear()
+        self._unbind_frame_events()
         if self._webview is not None:
             self._webview.destroy()
             self._webview = None
         if sys.platform == "darwin":
             _unregister_macos_webview(self)
+
+    def _unbind_frame_events(self) -> None:
+        """Drop host-frame binds so ``destroy()`` does not pin this instance."""
+        for sequence, funcid in self._frame_bind_ids:
+            try:
+                self._frame.unbind(sequence, funcid)
+            except tk.TclError:
+                pass
+        self._frame_bind_ids.clear()
 
     def load_url(self, url: str) -> None:
         """Navigate to *url* (``http``/``https``/``file``; scheme optional).
@@ -994,14 +1009,16 @@ class WebView:
             self._maybe_fire_ready()
 
     def _on_map(self, event: tk.Event) -> None:
-        if event.widget is self._frame:
-            self._schedule_bounds_sync()
-            self._maybe_fire_ready()
-            self._frame.after_idle(self._run_initial_load)
+        if event.widget is not self._frame or self._destroyed:
+            return
+        self._schedule_bounds_sync()
+        self._maybe_fire_ready()
+        self._frame.after_idle(self._run_initial_load)
 
     def _on_unmap(self, event: tk.Event) -> None:
-        if event.widget is self._frame:
-            self._schedule_bounds_sync()
+        if event.widget is not self._frame or self._destroyed:
+            return
+        self._schedule_bounds_sync()
 
     def _on_destroy(self, event: tk.Event) -> None:
         if event.widget is not self._frame:

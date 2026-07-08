@@ -341,6 +341,35 @@ def test_double_destroy_is_safe(tk_root) -> None:
     frame.destroy()
 
 
+def test_destroy_unbinds_host_frame_handlers(tk_root) -> None:
+    import gc
+    import weakref
+
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>unbind</p>")
+    layout_bare_frame(frame, width=400, height=300)
+    assert web.wait_until_ready(timeout=10.0)
+
+    web_ref = weakref.ref(web)
+    assert web._frame_bind_ids
+    web.destroy()
+    assert web._frame_bind_ids == []
+    assert web.destroyed
+
+    del web
+    gc.collect()
+    pump(tk_root, steps=5)
+    gc.collect()
+    assert web_ref() is None
+
+    # Host frame kept; Configure must not resurrect a webview via stale binds.
+    frame.configure(width=420, height=320)
+    pump(tk_root, steps=5)
+    assert web_ref() is None
+
+    frame.destroy()
+
+
 def test_native_rejects_other_thread(tk_root) -> None:
     frame = bare_frame(tk_root)
     web = WebView(frame, width=400, height=300, html="<p>x</p>")
