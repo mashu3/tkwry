@@ -75,13 +75,63 @@ def test_poll_events_drains_late_eval_result(
     _frame, web = _make_web(tk_root)
     _configure_poll_test(web, monkeypatch)
     results: list[str] = []
-    web._eval_result_queue.put((results.append, "ok"))
+    web._pending_eval_callbacks = 1
+    web._eval_result_queue.put((web._eval_epoch, results.append, "ok"))
     web._event_poll_active = True
 
     web._poll_events()
 
     assert results == ["ok"]
+    assert web._pending_eval_callbacks == 0
     assert web._event_poll_active is False
+
+
+def test_poll_events_rearms_if_result_arrives_during_stop(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Clearing _event_poll_active must re-check so a concurrent put is not stranded."""
+    _frame, web = _make_web(tk_root)
+    results: list[str] = []
+    ensure_calls: list[int] = []
+    web._event_poll_active = True
+    original_ensure = web._ensure_event_poll
+
+    def tracking_ensure() -> None:
+        ensure_calls.append(1)
+        original_ensure()
+
+    monkeypatch.setattr(web, "_ensure_event_poll", tracking_ensure)
+    monkeypatch.setattr("tkwry._core.pump_events", lambda: None, raising=False)
+
+    # Skip the keep-polling reschedule so we exercise the stop + re-arm path.
+    check_count = {"n": 0}
+
+    def should_keep() -> bool:
+        check_count["n"] += 1
+        if check_count["n"] == 1:
+            # Simulate a WebKit-thread deliver between the two checks.
+            web._pending_eval_callbacks = 1
+            web._eval_result_queue.put((web._eval_epoch, results.append, "late"))
+            return False
+        return web._pending_eval_callbacks > 0 or not web._eval_result_queue.empty()
+
+    monkeypatch.setattr(web, "_should_keep_polling", should_keep)
+    original_after = web._frame.after
+
+    def after(delay, func=None, *args):
+        if func is web._poll_events:
+            return ""
+        if func is None:
+            return original_after(delay)
+        return original_after(delay, func, *args)
+
+    monkeypatch.setattr(web._frame, "after", after)
+
+    web._poll_events()
+
+    assert web._event_poll_active is True
+    assert ensure_calls == [1]
+    assert not results  # re-armed poll would drain; we suppressed after(_poll)
 
 
 def test_eval_js_with_callback_on_error(
@@ -116,6 +166,8 @@ def test_eval_js_with_callback_pending_keeps_poll_until_deliver(
         assert web._event_poll_active is True
         assert results == []
         deliver("ok")
+        # Counter stays pending until Tk drains (thread-safe vs WebKit deliver).
+        assert web._pending_eval_callbacks == 1
 
     native.eval_js_with_callback.side_effect = native_eval
     _stub_native_ready(web, native, monkeypatch)
@@ -130,3 +182,20 @@ def test_eval_js_with_callback_pending_keeps_poll_until_deliver(
 
     assert results == ["ok"]
     assert web._pending_eval_callbacks == 0
+
+
+def test_destroy_drops_queued_eval_results(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _make_web(tk_root)
+    results: list[str] = []
+    web._pending_eval_callbacks = 1
+    web._eval_result_queue.put((web._eval_epoch, results.append, "stale"))
+    epoch_before = web._eval_epoch
+
+    web.destroy()
+
+    assert web._eval_epoch == epoch_before + 1
+    assert web._pending_eval_callbacks == 0
+    assert web._eval_result_queue.empty()
+    assert results == []

@@ -150,12 +150,14 @@ class WebView:
             # Child WKWebView + focused=True fights Tk for first responder at create.
             focused = False
         self._focused = focused
-        self._eval_result_queue: queue.SimpleQueue[tuple[EvalCallback, str]] = (
+        self._eval_result_queue: queue.SimpleQueue[tuple[int, EvalCallback, str]] = (
             queue.SimpleQueue()
         )
         self._event_poll_active = False
         self._wait_until_ready_active = False
         self._pending_eval_callbacks = 0
+        # Bumped on destroy so late WebKit-thread delivers are discarded.
+        self._eval_epoch = 0
         self._pending_url: str | None = url
         self._pending_html: str | None = html
         self._pending_load: _PendingLoad | None = None
@@ -351,7 +353,9 @@ class WebView:
             return
         self._destroyed = True
         self._event_poll_active = False
+        self._eval_epoch += 1
         self._pending_eval_callbacks = 0
+        self._drain_eval_result_queue(discard=True)
         self._ready_delivered = False
         self._ready_callbacks.clear()
         self._unbind_frame_events()
@@ -447,23 +451,25 @@ class WebView:
         otherwise the traceback is printed to stderr.
         """
         self._require_ready("eval_js_with_callback")
+        epoch = self._eval_epoch
         self._pending_eval_callbacks += 1
         self._ensure_event_poll()
 
         def _run() -> None:
-            if self._destroyed or self._webview is None:
-                self._pending_eval_callbacks -= 1
+            if self._destroyed or self._webview is None or epoch != self._eval_epoch:
+                self._pending_eval_callbacks = max(0, self._pending_eval_callbacks - 1)
                 return
 
             def deliver(result: str) -> None:
-                # May run on the WebKit thread — queue only; never touch Tk here.
-                self._eval_result_queue.put((callback, result))
-                self._pending_eval_callbacks -= 1
+                # May run on the WebKit thread — queue only; never touch Tk/counter.
+                if epoch != self._eval_epoch:
+                    return
+                self._eval_result_queue.put((epoch, callback, result))
 
             try:
                 self._webview.eval_js_with_callback(script, deliver)
             except Exception as exc:
-                self._pending_eval_callbacks -= 1
+                self._pending_eval_callbacks = max(0, self._pending_eval_callbacks - 1)
                 if on_error is not None:
                     self._invoke_callback(on_error, exc)
                 else:
@@ -785,6 +791,21 @@ class WebView:
         self._event_poll_active = True
         self._frame.after(1, self._poll_events)
 
+    def _drain_eval_result_queue(self, *, discard: bool = False) -> None:
+        """Consume queued eval results on the Tk thread (or drop them on destroy)."""
+        while True:
+            try:
+                epoch, callback, result = self._eval_result_queue.get_nowait()
+            except queue.Empty:
+                break
+            if epoch != self._eval_epoch:
+                continue
+            if discard:
+                self._pending_eval_callbacks = max(0, self._pending_eval_callbacks - 1)
+                continue
+            self._pending_eval_callbacks = max(0, self._pending_eval_callbacks - 1)
+            self._invoke_callback(callback, result)
+
     def _poll_events(self) -> None:
         if self._destroyed:
             self._event_poll_active = False
@@ -808,18 +829,16 @@ class WebView:
         if self._drag_drop_handler is not None:
             self._deliver_drag_drop_events()
 
-        while True:
-            try:
-                callback, result = self._eval_result_queue.get_nowait()
-            except queue.Empty:
-                break
-            self._invoke_callback(callback, result)
+        self._drain_eval_result_queue()
 
         if self._should_keep_polling():
             delay = 1 if sys.platform == "linux" else 10
             self._frame.after(delay, self._poll_events)
         else:
+            # Clear before re-check so a concurrent ensure_event_poll can re-arm.
             self._event_poll_active = False
+            if self._should_keep_polling():
+                self._ensure_event_poll()
 
     def _should_keep_polling(self) -> bool:
         if self._needs_event_poll():
