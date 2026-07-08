@@ -382,6 +382,46 @@ def test_ready_event_does_not_fire_after_destroy(tk_root) -> None:
     frame.destroy()
 
 
+def test_late_when_ready_does_not_fire_after_destroy(tk_root) -> None:
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root, width=400, height=300)
+    frame.pack_propagate(False)
+    frame.pack()
+    tk_root.update_idletasks()
+
+    web = WebView(frame, html="<p>late-when-ready</p>")
+    assert web.wait_until_ready(timeout=10.0)
+
+    fired: list[bool] = []
+    web.when_ready(lambda: fired.append(True))
+    web.destroy()
+    pump(tk_root, steps=5)
+    assert not fired
+
+    frame.destroy()
+
+
+def test_late_ready_bind_does_not_fire_after_destroy(tk_root) -> None:
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root, width=400, height=300)
+    frame.pack_propagate(False)
+    frame.pack()
+    tk_root.update_idletasks()
+
+    web = WebView(frame, html="<p>late-bind</p>")
+    assert web.wait_until_ready(timeout=10.0)
+
+    fired: list[bool] = []
+    web.bind("<<WebViewReady>>", lambda _evt: fired.append(True))
+    web.destroy()
+    pump(tk_root, steps=5)
+    assert not fired
+
+    frame.destroy()
+
+
 def test_configure_triggers_create(tk_root) -> None:
     import tkinter as tk
 

@@ -258,6 +258,8 @@ class WebView:
             def _deliver_ready(
                 _func: Callable = func, _frame: tk.Misc = self._frame
             ) -> None:
+                if self._destroyed:
+                    return
                 evt = tk.Event()
                 evt.widget = _frame
                 _func(evt)
@@ -271,7 +273,13 @@ class WebView:
         if self._destroyed:
             return
         if self.ready:
-            self._frame.after_idle(lambda: self._invoke_callback(callback))
+
+            def _deliver() -> None:
+                if self._destroyed:
+                    return
+                self._invoke_callback(callback)
+
+            self._frame.after_idle(_deliver)
         else:
             self._ready_callbacks.append(callback)
 
@@ -571,6 +579,8 @@ class WebView:
         for callback in callbacks:
 
             def _deliver_ready(cb: Callable[[], object] = callback) -> None:
+                if self._destroyed:
+                    return
                 self._invoke_callback(cb)
 
             self._frame.after_idle(_deliver_ready)
