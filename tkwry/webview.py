@@ -618,9 +618,12 @@ class WebView:
         self, event: DragDropEvent, paths: list[str], position: tuple[int, int]
     ) -> bool:
         native = self._webview
-        if native is not None:
-            native._enqueue_drag_drop_event(event, paths, position)
-            self._ensure_event_poll()
+        if native is None or self._drag_drop_handler is None:
+            return True
+        # Python handlers are authoritative for async queues.
+        native.set_drag_drop_listening(True)
+        native._enqueue_drag_drop_event(event, paths, position)
+        self._ensure_event_poll()
         return True
 
     def _native_navigation(self, url: str) -> bool:
@@ -642,9 +645,11 @@ class WebView:
 
     def _native_title_changed(self, title: str) -> None:
         native = self._webview
-        if native is not None:
-            native._enqueue_title_event(title)
-            self._ensure_event_poll()
+        if native is None or self._on_title_changed is None:
+            return
+        native.set_title_listening(True)
+        native._enqueue_title_event(title)
+        self._ensure_event_poll()
 
     def _native_new_window(self, url: str) -> NewWindowResponse:
         if self._on_new_window is None:
@@ -666,9 +671,11 @@ class WebView:
 
     def _enqueue_ipc(self, message: str) -> None:
         native = self._webview
-        if native is not None:
-            native._enqueue_ipc_message(message)
-            self._ensure_event_poll()
+        if native is None or self._ipc_handler is None:
+            return
+        native.set_ipc_listening(True)
+        native._enqueue_ipc_message(message)
+        self._ensure_event_poll()
 
     def _sync_async_listening(self) -> None:
         native = self._webview

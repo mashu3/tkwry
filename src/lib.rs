@@ -5,9 +5,9 @@ mod macos_focus;
 
 use pyo3::prelude::*;
 use std::cell::Cell;
-use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::atomic::AtomicI32;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 fn make_rect(x: f64, y: f64, width: f64, height: f64) -> wry::Rect {
@@ -208,18 +208,10 @@ impl WebView {
         if let Ok(mut newwin) = self.newwin_cb.lock() {
             *newwin = None;
         }
-        set_listening_and_clear_queue(
-            &self.page_load_listening,
-            &self.page_load_pending,
-            false,
-        );
+        set_listening_and_clear_queue(&self.page_load_listening, &self.page_load_pending, false);
         set_listening_and_clear_queue(&self.ipc_listening, &self.ipc_pending, false);
         set_listening_and_clear_queue(&self.title_listening, &self.title_pending, false);
-        set_listening_and_clear_queue(
-            &self.drag_drop_listening,
-            &self.drag_drop_pending,
-            false,
-        );
+        set_listening_and_clear_queue(&self.drag_drop_listening, &self.drag_drop_pending, false);
     }
 
     fn destroy_inner(&self) -> PyResult<()> {
@@ -627,11 +619,7 @@ impl WebView {
 
     fn set_page_load_listening(&self, enabled: bool) -> PyResult<()> {
         self.require_owner_thread()?;
-        set_listening_and_clear_queue(
-            &self.page_load_listening,
-            &self.page_load_pending,
-            enabled,
-        );
+        set_listening_and_clear_queue(&self.page_load_listening, &self.page_load_pending, enabled);
         Ok(())
     }
 
@@ -746,11 +734,7 @@ impl WebView {
 
     fn set_drag_drop_listening(&self, enabled: bool) -> PyResult<()> {
         self.require_owner_thread()?;
-        set_listening_and_clear_queue(
-            &self.drag_drop_listening,
-            &self.drag_drop_pending,
-            enabled,
-        );
+        set_listening_and_clear_queue(&self.drag_drop_listening, &self.drag_drop_pending, enabled);
         Ok(())
     }
 

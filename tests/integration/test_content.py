@@ -307,8 +307,7 @@ def test_drag_drop_native_queues_without_blocking(tk_root) -> None:
         received.append((evt, paths, pos))
         return True
 
-    web._drag_drop_handler = handler
-    web._ensure_event_poll()
+    web.set_drag_drop_handler(handler)
 
     assert web._native_drag_drop(DragDropEvent.Enter, ["/tmp/a.txt"], (1, 2)) is True
     assert web._native_drag_drop(DragDropEvent.Over, [], (3, 4)) is True
