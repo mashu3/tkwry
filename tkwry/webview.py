@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import queue
 import sys
 import threading
@@ -153,6 +154,7 @@ class WebView:
             queue.SimpleQueue()
         )
         self._event_poll_active = False
+        self._wait_until_ready_active = False
         self._pending_eval_callbacks = 0
         self._pending_url: str | None = url
         self._pending_html: str | None = html
@@ -290,27 +292,57 @@ class WebView:
         else:
             self._ready_callbacks.append(callback)
 
-    def wait_until_ready(self, timeout: float | None = 30.0) -> bool:
-        """Pump the Tk loop until the webview is laid out or *timeout* elapses."""
+    def wait_until_ready(self, timeout: float = 30.0) -> bool:
+        """Pump a nested Tk event loop until the webview is laid out or *timeout*.
+
+        This is **not** a passive wait: it runs ``root.update()`` repeatedly and
+        therefore re-enters other Tk callbacks while waiting. Prefer
+        :meth:`when_ready` or ``bind(\"<<WebViewReady>>\")`` when you can avoid
+        nesting the event loop (especially from handlers that touch Tk state).
+
+        *timeout* must be a finite number of seconds ``> 0`` so unmapped or
+        never-laid-out hosts cannot spin forever. Returns ``True`` if ready,
+        ``False`` on timeout or if destroyed while waiting.
+
+        Raises:
+            ValueError: if *timeout* is missing, non-positive, or non-finite.
+            RuntimeError: if called while another ``wait_until_ready`` is nested
+                on this instance.
+        """
         self._require_tk_thread()
+        if type(timeout) is not int and type(timeout) is not float:
+            raise ValueError("timeout must be a finite number of seconds > 0")
+        timeout_s = float(timeout)
+        if not math.isfinite(timeout_s) or timeout_s <= 0:
+            raise ValueError("timeout must be a finite number of seconds > 0")
+
         if self.ready:
             return True
         if self._destroyed:
             return False
+        if self._wait_until_ready_active:
+            raise RuntimeError(
+                "wait_until_ready() is already running on this WebView; "
+                "nested calls are not supported (this pumps the Tk event loop)"
+            )
+
         root = self._frame.winfo_toplevel()
-        deadline = time.monotonic() + timeout if timeout is not None else None
+        deadline = time.monotonic() + timeout_s
+        self._wait_until_ready_active = True
+        try:
+            while not self.ready and not self._destroyed:
+                if time.monotonic() >= deadline:
+                    return False
+                root.update_idletasks()
+                root.update()
+                if sys.platform == "linux":
+                    from tkwry._core import pump_events
 
-        while not self.ready and not self._destroyed:
-            if deadline is not None and time.monotonic() >= deadline:
-                return False
-            root.update_idletasks()
-            root.update()
-            if sys.platform == "linux":
-                from tkwry._core import pump_events
-
-                pump_events()
-            time.sleep(0.01)
-        return self.ready
+                    pump_events()
+                time.sleep(0.01)
+            return self.ready
+        finally:
+            self._wait_until_ready_active = False
 
     def destroy(self) -> None:
         """Hide and release the native webview without destroying the host frame."""

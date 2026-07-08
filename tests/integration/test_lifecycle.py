@@ -30,6 +30,49 @@ def test_initial_size_creates_without_pack(tk_root) -> None:
     frame.destroy()
 
 
+def test_wait_until_ready_rejects_non_finite_timeout(tk_root) -> None:
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>wait</p>")
+
+    with pytest.raises(ValueError, match="finite"):
+        web.wait_until_ready(timeout=None)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="finite"):
+        web.wait_until_ready(timeout=0)
+    with pytest.raises(ValueError, match="finite"):
+        web.wait_until_ready(timeout=-1)
+    with pytest.raises(ValueError, match="finite"):
+        web.wait_until_ready(timeout=float("inf"))
+    with pytest.raises(ValueError, match="finite"):
+        web.wait_until_ready(timeout=float("nan"))
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_wait_until_ready_rejects_nested_calls(tk_root) -> None:
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>nest</p>")
+    # Keep the host unmapped so wait_until_ready must pump.
+    nested_error: list[BaseException] = []
+
+    def reenter(_evt=None) -> None:
+        try:
+            web.wait_until_ready(timeout=0.05)
+        except BaseException as exc:
+            nested_error.append(exc)
+
+    web.bind("<<WebViewReady>>", reenter, add="+")
+    # Force an idle callback that nested-calls while the outer wait pumps.
+    web._frame.after(1, reenter)
+    assert not web.wait_until_ready(timeout=0.2)
+    assert nested_error
+    assert isinstance(nested_error[0], RuntimeError)
+    assert "already running" in str(nested_error[0])
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_explicit_default_size_creates_without_pack(tk_root) -> None:
     frame = bare_frame(tk_root)
     web = WebView(frame, width=800, height=600, html="<p>default-size</p>")
