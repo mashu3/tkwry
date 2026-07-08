@@ -37,6 +37,8 @@ class GtkPump:
         self._root = root.winfo_toplevel()
         self._root_id = self._root.winfo_id()
         self._active = False
+        self._refcount = 0
+        self._destroy_bind_id: str | None = None
 
     @classmethod
     def attach(cls, widget: tk.Misc) -> None:
@@ -44,11 +46,29 @@ class GtkPump:
             return
         root = widget.winfo_toplevel()
         root_id = root.winfo_id()
-        if root_id in cls._by_root_id:
-            return
-        pump = cls(root)
-        cls._by_root_id[root_id] = pump
+        pump = cls._by_root_id.get(root_id)
+        if pump is None:
+            pump = cls(root)
+            cls._by_root_id[root_id] = pump
+        pump._refcount += 1
         pump.start()
+
+    @classmethod
+    def detach(cls, widget: tk.Misc) -> None:
+        """Drop one WebView attachment; stop pumping when none remain."""
+        if sys.platform != "linux":
+            return
+        try:
+            root = widget.winfo_toplevel()
+            root_id = root.winfo_id()
+        except Exception:
+            return
+        pump = cls._by_root_id.get(root_id)
+        if pump is None:
+            return
+        pump._refcount = max(0, pump._refcount - 1)
+        if pump._refcount == 0:
+            pump.stop()
 
     def start(self) -> None:
         if self._active:
@@ -57,11 +77,19 @@ class GtkPump:
 
         ensure_gtk_init()
         self._active = True
-        self._root.bind("<Destroy>", self._on_destroy, add="+")
+        self._destroy_bind_id = self._root.bind("<Destroy>", self._on_destroy, add="+")
         self._root.after(0, lambda rid=self._root_id: _gtk_pump_tick(rid))
 
     def stop(self) -> None:
         self._active = False
+        self._refcount = 0
+        bind_id = self._destroy_bind_id
+        self._destroy_bind_id = None
+        if bind_id is not None:
+            try:
+                self._root.unbind("<Destroy>", bind_id)
+            except Exception:
+                pass
         self._by_root_id.pop(self._root_id, None)
 
     def _on_destroy(self, event) -> None:

@@ -360,6 +360,8 @@ class WebView:
             self._webview = None
         if sys.platform == "darwin":
             _unregister_macos_webview(self)
+        elif sys.platform == "linux":
+            GtkPump.detach(self._frame)
 
     def _unbind_frame_events(self) -> None:
         """Drop host-frame binds so ``destroy()`` does not pin this instance."""
