@@ -450,8 +450,9 @@ class WebView:
     def set_ipc_handler(self, handler: IpcHandler | None) -> None:
         self._require_tk_thread()
         self._ipc_handler = handler
+        if self._webview is not None:
+            self._webview.set_ipc_listening(handler is not None)
         if handler is not None:
-            self._discard_ipc_backlog()
             self._ensure_event_poll()
 
     def set_on_navigation(self, handler: NavigationHandler | None) -> None:
@@ -467,8 +468,9 @@ class WebView:
     def set_on_page_load(self, handler: PageLoadHandler | None) -> None:
         self._require_tk_thread()
         self._on_page_load = handler
+        if self._webview is not None:
+            self._webview.set_page_load_listening(handler is not None)
         if handler is not None:
-            self._discard_page_load_backlog()
             self._ensure_event_poll()
 
     def sync_bounds(self) -> None:
@@ -487,8 +489,9 @@ class WebView:
     def set_on_title_changed(self, handler: TitleChangedHandler | None) -> None:
         self._require_tk_thread()
         self._on_title_changed = handler
+        if self._webview is not None:
+            self._webview.set_title_listening(handler is not None)
         if handler is not None:
-            self._discard_title_backlog()
             self._ensure_event_poll()
 
     def set_on_new_window(self, handler: NewWindowHandler | None) -> None:
@@ -504,8 +507,9 @@ class WebView:
     def set_drag_drop_handler(self, handler: DragDropHandler | None) -> None:
         self._require_tk_thread()
         self._drag_drop_handler = handler
+        if self._webview is not None:
+            self._webview.set_drag_drop_listening(handler is not None)
         if handler is not None:
-            self._discard_drag_drop_backlog()
             self._ensure_event_poll()
 
     def _schedule_try_create(self) -> None:
@@ -651,25 +655,14 @@ class WebView:
             native._enqueue_ipc_message(message)
             self._ensure_event_poll()
 
-    def _discard_ipc_backlog(self) -> None:
+    def _sync_async_listening(self) -> None:
         native = self._webview
-        if native is not None:
-            native.drain_ipc_messages()
-
-    def _discard_title_backlog(self) -> None:
-        native = self._webview
-        if native is not None:
-            native.drain_title_events()
-
-    def _discard_drag_drop_backlog(self) -> None:
-        native = self._webview
-        if native is not None:
-            native.drain_drag_drop_events()
-
-    def _discard_page_load_backlog(self) -> None:
-        native = self._webview
-        if native is not None:
-            native.drain_page_load_events()
+        if native is None:
+            return
+        native.set_ipc_listening(self._ipc_handler is not None)
+        native.set_page_load_listening(self._on_page_load is not None)
+        native.set_title_listening(self._on_title_changed is not None)
+        native.set_drag_drop_listening(self._drag_drop_handler is not None)
 
     def _invoke_callback(self, callback: Callable[..., object], *args: object) -> None:
         try:
@@ -816,6 +809,7 @@ class WebView:
             owner_thread=self._tk_thread_id,
             **kwargs,
         )
+        self._sync_async_listening()
         self._pending_url = None
         self._pending_html = None
         self._sync_bounds()

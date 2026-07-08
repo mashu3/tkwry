@@ -228,6 +228,8 @@ def test_set_on_title_changed_none_clears_handler(tk_root) -> None:
     web._native_title_changed("Second")
     pump(tk_root, steps=10)
     assert received == ["First"]
+    assert web.native is not None
+    assert web.native.drain_title_events() == []
 
     web.destroy()
     frame.destroy()
@@ -256,6 +258,70 @@ def test_set_drag_drop_handler_none_clears_handler(tk_root) -> None:
     assert web._native_drag_drop(DragDropEvent.Drop, ["/tmp/b.txt"], (3, 4)) is True
     pump(tk_root, steps=10)
     assert len(received) == 1
+    assert web.native is not None
+    assert web.native.drain_drag_drop_events() == []
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_set_ipc_handler_none_stops_collecting(tk_root) -> None:
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>ipc</p>")
+    layout_bare_frame(frame, width=400, height=300)
+    assert web.wait_until_ready(timeout=10.0)
+
+    received: list[str] = []
+    web.set_ipc_handler(lambda msg: received.append(msg))
+    web._enqueue_ipc("one")
+    pump(tk_root, steps=10)
+    assert received == ["one"]
+
+    web.set_ipc_handler(None)
+    web._enqueue_ipc("two")
+    pump(tk_root, steps=10)
+    assert received == ["one"]
+    assert web.native is not None
+    assert web.native.drain_ipc_messages() == []
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_set_on_page_load_none_stops_collecting(tk_root) -> None:
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>load</p>")
+    layout_bare_frame(frame, width=400, height=300)
+    assert web.wait_until_ready(timeout=10.0)
+
+    web.set_on_page_load(lambda evt, _url: None)
+    assert web.native is not None
+    web.set_on_page_load(None)
+    pump(tk_root, steps=5)
+    assert web.native.drain_page_load_events() == []
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_drain_async_events_does_not_invoke_native_callbacks(tk_root) -> None:
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>drain</p>")
+    layout_bare_frame(frame, width=400, height=300)
+    assert web.wait_until_ready(timeout=10.0)
+
+    native = web.native
+    assert native is not None
+    native.set_ipc_listening(True)
+    native.set_title_listening(True)
+
+    web._enqueue_ipc("ipc")
+    web._native_title_changed("t")
+    assert native.drain_ipc_messages() == ["ipc"]
+    assert native.drain_title_events() == ["t"]
+    # drain_* is queue-only; a second drain must be empty (no hidden re-delivery).
+    assert native.drain_ipc_messages() == []
+    assert native.drain_title_events() == []
 
     web.destroy()
     frame.destroy()

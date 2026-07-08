@@ -5,8 +5,9 @@ mod macos_focus;
 
 use pyo3::prelude::*;
 use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::AtomicI32;
 use std::sync::{Arc, Mutex};
 
 fn make_rect(x: f64, y: f64, width: f64, height: f64) -> wry::Rect {
@@ -41,6 +42,31 @@ fn push_bounded<T>(pending: &Arc<Mutex<Vec<T>>>, item: T, max: usize, label: &st
             queue.drain(..half);
         }
         queue.push(item);
+    }
+}
+
+fn push_if_listening<T>(
+    listening: &AtomicBool,
+    pending: &Arc<Mutex<Vec<T>>>,
+    item: T,
+    max: usize,
+    label: &str,
+) {
+    if listening.load(Ordering::SeqCst) {
+        push_bounded(pending, item, max, label);
+    }
+}
+
+fn set_listening_and_clear_queue<T>(
+    listening: &AtomicBool,
+    pending: &Arc<Mutex<Vec<T>>>,
+    enabled: bool,
+) {
+    listening.store(enabled, Ordering::SeqCst);
+    if !enabled {
+        if let Ok(mut queue) = pending.lock() {
+            queue.clear();
+        }
     }
 }
 
@@ -129,6 +155,11 @@ struct WebView {
     ipc_pending: IpcPending,
     title_pending: TitlePending,
     drag_drop_pending: DragDropPending,
+    /// When false, async event sources skip queueing (handler cleared).
+    page_load_listening: Arc<AtomicBool>,
+    ipc_listening: Arc<AtomicBool>,
+    title_listening: Arc<AtomicBool>,
+    drag_drop_listening: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
     _focus_sync: Mutex<Option<macos_focus::FocusSyncGuard>>,
     #[cfg(target_os = "macos")]
@@ -137,11 +168,8 @@ struct WebView {
     mac_tk_unfocus: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
     wakeup_write_fd: Arc<AtomicI32>,
-    ipc_cb: PyCallback,
     nav_cb: PyCallback,
-    title_cb: PyCallback,
     newwin_cb: PyCallback,
-    drag_drop_cb: PyCallback,
     /// Nested wry calls (e.g. sync navigation hooks during ``load_url``).
     wry_call_depth: Cell<u32>,
     /// ``destroy()`` requested while a nested wry call is active.
@@ -174,33 +202,24 @@ impl WebView {
     }
 
     fn clear_callbacks_and_queues(&self) {
-        if let Ok(mut ipc) = self.ipc_cb.lock() {
-            *ipc = None;
-        }
         if let Ok(mut nav) = self.nav_cb.lock() {
             *nav = None;
-        }
-        if let Ok(mut title) = self.title_cb.lock() {
-            *title = None;
         }
         if let Ok(mut newwin) = self.newwin_cb.lock() {
             *newwin = None;
         }
-        if let Ok(mut drag) = self.drag_drop_cb.lock() {
-            *drag = None;
-        }
-        if let Ok(mut pending) = self.ipc_pending.lock() {
-            pending.clear();
-        }
-        if let Ok(mut pending) = self.title_pending.lock() {
-            pending.clear();
-        }
-        if let Ok(mut pending) = self.drag_drop_pending.lock() {
-            pending.clear();
-        }
-        if let Ok(mut pending) = self.page_load_pending.lock() {
-            pending.clear();
-        }
+        set_listening_and_clear_queue(
+            &self.page_load_listening,
+            &self.page_load_pending,
+            false,
+        );
+        set_listening_and_clear_queue(&self.ipc_listening, &self.ipc_pending, false);
+        set_listening_and_clear_queue(&self.title_listening, &self.title_pending, false);
+        set_listening_and_clear_queue(
+            &self.drag_drop_listening,
+            &self.drag_drop_pending,
+            false,
+        );
     }
 
     fn destroy_inner(&self) -> PyResult<()> {
@@ -242,11 +261,8 @@ impl WebView {
         background_color = None,
         user_agent = None,
         initialization_script = None,
-        ipc_handler = None,
         on_navigation = None,
-        on_title_changed = None,
         on_new_window = None,
-        drag_drop_handler = None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -262,11 +278,8 @@ impl WebView {
         background_color: Option<(u8, u8, u8, u8)>,
         user_agent: Option<String>,
         initialization_script: Option<String>,
-        ipc_handler: Option<Py<PyAny>>,
         on_navigation: Option<Py<PyAny>>,
-        on_title_changed: Option<Py<PyAny>>,
         on_new_window: Option<Py<PyAny>>,
-        drag_drop_handler: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let owner_thread = match owner_thread {
             Some(id) => id,
@@ -309,17 +322,20 @@ impl WebView {
             unsafe { raw_window_handle::WindowHandle::borrow_raw(raw) }
         };
 
-        let ipc_cb: PyCallback = Arc::new(Mutex::new(ipc_handler));
         let nav_cb: PyCallback = Arc::new(Mutex::new(on_navigation));
-        let title_cb: PyCallback = Arc::new(Mutex::new(on_title_changed));
         let newwin_cb: PyCallback = Arc::new(Mutex::new(on_new_window));
-        let drag_drop_cb: PyCallback = Arc::new(Mutex::new(drag_drop_handler));
         let page_load_pending: PageLoadPending = Arc::new(Mutex::new(Vec::new()));
         let ipc_pending: IpcPending = Arc::new(Mutex::new(Vec::new()));
         let title_pending: TitlePending = Arc::new(Mutex::new(Vec::new()));
         let drag_drop_pending: DragDropPending = Arc::new(Mutex::new(Vec::new()));
+        // Async queues start disabled; Python enables them when a handler is set.
+        let page_load_listening = Arc::new(AtomicBool::new(false));
+        let ipc_listening = Arc::new(AtomicBool::new(false));
+        let title_listening = Arc::new(AtomicBool::new(false));
+        let drag_drop_listening = Arc::new(AtomicBool::new(false));
 
         let ipc_pending_clone = ipc_pending.clone();
+        let ipc_listening_clone = ipc_listening.clone();
         let ipc_handler_wry = move |req: wry::http::Request<String>| {
             let body = req.body().clone();
             if body.len() > MAX_IPC_MESSAGE_BYTES {
@@ -330,7 +346,13 @@ impl WebView {
                 );
                 return;
             }
-            push_bounded(&ipc_pending_clone, body, MAX_IPC_PENDING, "IPC");
+            push_if_listening(
+                &ipc_listening_clone,
+                &ipc_pending_clone,
+                body,
+                MAX_IPC_PENDING,
+                "IPC",
+            );
         };
 
         let nav_cb_clone = nav_cb.clone();
@@ -350,12 +372,14 @@ impl WebView {
         };
 
         let page_load_pending_clone = page_load_pending.clone();
+        let page_load_listening_clone = page_load_listening.clone();
         let pageload_handler = move |event: wry::PageLoadEvent, url: String| {
             let evt = match event {
                 wry::PageLoadEvent::Started => PageLoadEvent::Started,
                 wry::PageLoadEvent::Finished => PageLoadEvent::Finished,
             };
-            push_bounded(
+            push_if_listening(
+                &page_load_listening_clone,
                 &page_load_pending_clone,
                 (evt, url),
                 MAX_PAGE_LOAD_PENDING,
@@ -364,8 +388,10 @@ impl WebView {
         };
 
         let title_pending_clone = title_pending.clone();
+        let title_listening_clone = title_listening.clone();
         let title_handler = move |title: String| {
-            push_bounded(
+            push_if_listening(
+                &title_listening_clone,
                 &title_pending_clone,
                 title,
                 MAX_TITLE_PENDING,
@@ -398,6 +424,7 @@ impl WebView {
             };
 
         let drag_drop_pending_clone = drag_drop_pending.clone();
+        let drag_drop_listening_clone = drag_drop_listening.clone();
         let drag_drop_handler = move |event: wry::DragDropEvent| -> bool {
             let (evt_type, paths, position) = match &event {
                 wry::DragDropEvent::Enter { paths, position } => {
@@ -415,7 +442,8 @@ impl WebView {
                 .map(|p| p.to_string_lossy().to_string())
                 .collect();
             let pos = (position.0, position.1);
-            push_bounded(
+            push_if_listening(
+                &drag_drop_listening_clone,
                 &drag_drop_pending_clone,
                 (evt_type, paths_str, pos),
                 MAX_DRAG_DROP_PENDING,
@@ -511,6 +539,10 @@ impl WebView {
             ipc_pending,
             title_pending,
             drag_drop_pending,
+            page_load_listening,
+            ipc_listening,
+            title_listening,
+            drag_drop_listening,
             #[cfg(target_os = "macos")]
             _focus_sync,
             #[cfg(target_os = "macos")]
@@ -519,11 +551,8 @@ impl WebView {
             mac_tk_unfocus,
             #[cfg(target_os = "macos")]
             wakeup_write_fd,
-            ipc_cb,
             nav_cb,
-            title_cb,
             newwin_cb,
-            drag_drop_cb,
             wry_call_depth: Cell::new(0),
             destroy_pending: Cell::new(false),
         })
@@ -570,23 +599,9 @@ impl WebView {
         })
     }
 
-    fn set_ipc_handler(&self, handler: Py<PyAny>) -> PyResult<()> {
+    fn set_ipc_listening(&self, enabled: bool) -> PyResult<()> {
         self.require_owner_thread()?;
-        let mut guard = self
-            .ipc_cb
-            .lock()
-            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
-        *guard = Some(handler);
-        Ok(())
-    }
-
-    fn clear_ipc_handler(&self) -> PyResult<()> {
-        self.require_owner_thread()?;
-        let mut guard = self
-            .ipc_cb
-            .lock()
-            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
-        *guard = None;
+        set_listening_and_clear_queue(&self.ipc_listening, &self.ipc_pending, enabled);
         Ok(())
     }
 
@@ -610,6 +625,16 @@ impl WebView {
         Ok(())
     }
 
+    fn set_page_load_listening(&self, enabled: bool) -> PyResult<()> {
+        self.require_owner_thread()?;
+        set_listening_and_clear_queue(
+            &self.page_load_listening,
+            &self.page_load_pending,
+            enabled,
+        );
+        Ok(())
+    }
+
     fn drain_page_load_events(&self) -> PyResult<Vec<(PageLoadEvent, String)>> {
         self.require_owner_thread()?;
         Ok(self
@@ -621,59 +646,29 @@ impl WebView {
 
     fn drain_ipc_messages(&self) -> PyResult<Vec<String>> {
         self.require_owner_thread()?;
-        let messages = self
+        Ok(self
             .ipc_pending
             .lock()
             .map(|mut pending| std::mem::take(&mut *pending))
-            .unwrap_or_default();
-        Python::attach(|py| {
-            if let Some(func) = clone_py_callback(py, &self.ipc_cb) {
-                for msg in &messages {
-                    if let Err(err) = func.call1(py, (msg.as_str(),)) {
-                        report_py_error(py, err);
-                    }
-                }
-            }
-        });
-        Ok(messages)
+            .unwrap_or_default())
     }
 
     fn drain_title_events(&self) -> PyResult<Vec<String>> {
         self.require_owner_thread()?;
-        let titles = self
+        Ok(self
             .title_pending
             .lock()
             .map(|mut pending| std::mem::take(&mut *pending))
-            .unwrap_or_default();
-        Python::attach(|py| {
-            if let Some(func) = clone_py_callback(py, &self.title_cb) {
-                for title in &titles {
-                    if let Err(err) = func.call1(py, (title.as_str(),)) {
-                        report_py_error(py, err);
-                    }
-                }
-            }
-        });
-        Ok(titles)
+            .unwrap_or_default())
     }
 
     fn drain_drag_drop_events(&self) -> PyResult<Vec<DragDropPendingItem>> {
         self.require_owner_thread()?;
-        let events = self
+        Ok(self
             .drag_drop_pending
             .lock()
             .map(|mut pending| std::mem::take(&mut *pending))
-            .unwrap_or_default();
-        Python::attach(|py| {
-            if let Some(func) = clone_py_callback(py, &self.drag_drop_cb) {
-                for (evt_type, paths, pos) in &events {
-                    if let Err(err) = func.call1(py, (*evt_type, paths.clone(), *pos)) {
-                        report_py_error(py, err);
-                    }
-                }
-            }
-        });
-        Ok(events)
+            .unwrap_or_default())
     }
 
     fn _enqueue_ipc_message(&self, message: String) -> PyResult<()> {
@@ -684,13 +679,20 @@ impl WebView {
                 MAX_IPC_MESSAGE_BYTES
             )));
         }
-        push_bounded(&self.ipc_pending, message, MAX_IPC_PENDING, "IPC");
+        push_if_listening(
+            &self.ipc_listening,
+            &self.ipc_pending,
+            message,
+            MAX_IPC_PENDING,
+            "IPC",
+        );
         Ok(())
     }
 
     fn _enqueue_title_event(&self, title: String) -> PyResult<()> {
         self.require_owner_thread()?;
-        push_bounded(
+        push_if_listening(
+            &self.title_listening,
             &self.title_pending,
             title,
             MAX_TITLE_PENDING,
@@ -706,7 +708,8 @@ impl WebView {
         position: (i32, i32),
     ) -> PyResult<()> {
         self.require_owner_thread()?;
-        push_bounded(
+        push_if_listening(
+            &self.drag_drop_listening,
             &self.drag_drop_pending,
             (event, paths, position),
             MAX_DRAG_DROP_PENDING,
@@ -715,23 +718,9 @@ impl WebView {
         Ok(())
     }
 
-    fn set_on_title_changed(&self, handler: Py<PyAny>) -> PyResult<()> {
+    fn set_title_listening(&self, enabled: bool) -> PyResult<()> {
         self.require_owner_thread()?;
-        let mut guard = self
-            .title_cb
-            .lock()
-            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
-        *guard = Some(handler);
-        Ok(())
-    }
-
-    fn clear_on_title_changed(&self) -> PyResult<()> {
-        self.require_owner_thread()?;
-        let mut guard = self
-            .title_cb
-            .lock()
-            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
-        *guard = None;
+        set_listening_and_clear_queue(&self.title_listening, &self.title_pending, enabled);
         Ok(())
     }
 
@@ -755,23 +744,13 @@ impl WebView {
         Ok(())
     }
 
-    fn set_drag_drop_handler(&self, handler: Py<PyAny>) -> PyResult<()> {
+    fn set_drag_drop_listening(&self, enabled: bool) -> PyResult<()> {
         self.require_owner_thread()?;
-        let mut guard = self
-            .drag_drop_cb
-            .lock()
-            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
-        *guard = Some(handler);
-        Ok(())
-    }
-
-    fn clear_drag_drop_handler(&self) -> PyResult<()> {
-        self.require_owner_thread()?;
-        let mut guard = self
-            .drag_drop_cb
-            .lock()
-            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
-        *guard = None;
+        set_listening_and_clear_queue(
+            &self.drag_drop_listening,
+            &self.drag_drop_pending,
+            enabled,
+        );
         Ok(())
     }
 
