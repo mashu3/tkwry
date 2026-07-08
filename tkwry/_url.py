@@ -55,6 +55,22 @@ def _is_windows_drive_path(url: str) -> bool:
     return len(url) >= 3 and url[0].isalpha() and url[1] == ":" and url[2] in "/\\"
 
 
+def _is_network_host(host: str) -> bool:
+    """Hosts that are safe to treat as network names without a scheme.
+
+    Single-label names (``README``, ``api``) are rejected so relative paths are
+    not rewritten to ``https://…``. ``localhost`` and dotted names (DNS / IPv4)
+    remain allowed.
+    """
+    if not host or len(host) > 253 or host.startswith("."):
+        return False
+    if host == "localhost":
+        return True
+    if "." not in host:
+        return False
+    return bool(_HOSTNAME_RE.match(host))
+
+
 def _looks_like_hostname(host: str) -> bool:
     if not host or len(host) > 253:
         return False
@@ -72,12 +88,6 @@ def _looks_like_filename(name: str) -> bool:
     return ext in _FILE_EXTENSIONS
 
 
-def _path_looks_like_file(path: str) -> bool:
-    if not path:
-        return False
-    return _looks_like_filename(path.rsplit("/", 1)[-1])
-
-
 def _is_misparsed_host_port(parsed) -> bool:
     """urlparse treats ``host:port`` as ``scheme='host', path='port'``."""
     if not parsed.scheme or parsed.netloc:
@@ -89,6 +99,7 @@ def _is_misparsed_host_port(parsed) -> bool:
     port_segment = parsed.path.split("/", 1)[0]
     if not port_segment.isdigit():
         return False
+    # Port form is strong signal; allow single-label hosts here only.
     return _looks_like_hostname(parsed.scheme)
 
 
@@ -104,27 +115,23 @@ def _looks_like_url_without_scheme(url: str) -> bool:
         host = url[:colon]
         rest = url[colon + 1 :]
         port_str = rest.split("/", 1)[0]
+        # ``host:port`` is a strong URL signal (including single-label hosts).
         if port_str.isdigit() and _looks_like_hostname(host):
             return True
 
     if slash > 0:
         host = url[:slash]
         path = url[slash + 1 :]
-        if not host or not path or host.startswith("."):
+        if not host or not path:
             return False
-        if "." in host:
-            return True
-        if _looks_like_hostname(host) and not _path_looks_like_file(path):
-            return True
-        return False
+        # Require a real network host (dotted / localhost), not ``api/v1``.
+        return _is_network_host(host) or host == "localhost"
 
     if colon < 0:
         if _looks_like_filename(url):
             return False
-        if "." in url and not url.startswith("."):
-            return True
-        if _looks_like_hostname(url):
-            return True
+        # Bare names need a dot (example.com) or be localhost — not README.
+        return _is_network_host(url) or url == "localhost"
 
     return False
 
@@ -143,6 +150,9 @@ def _looks_like_file_path(url: str) -> bool:
     if "/" in url:
         return True
     if _looks_like_filename(url):
+        return True
+    # Bare relative segment without dots (e.g. README) — not a network host.
+    if ":" not in url and "." not in url:
         return True
     return False
 
@@ -175,10 +185,13 @@ def _normalize_file_url(url: str) -> str:
             pass
         elif _is_windows_drive_netloc(parsed.netloc):
             pathname = f"{parsed.netloc}{parsed.path}"
-            if not pathname:
+            if not pathname or pathname.endswith(":"):
                 raise ValueError("file URL must include a path")
             return _file_uri_from_path(pathname)
         else:
+            # UNC-style ``file://server/share`` requires a non-empty path.
+            if not parsed.path or parsed.path == "/":
+                raise ValueError("file URL must include a path")
             return url
     pathname = url2pathname(unquote(parsed.path))
     pathname = _strip_leading_slash_from_windows_path(pathname)
@@ -224,5 +237,5 @@ def _validate_url(url: str) -> None:
         raise ValueError(f"unsupported URL scheme: {parsed.scheme!r}")
     if parsed.scheme in {"http", "https"} and not parsed.netloc:
         raise ValueError("URL must include a host, e.g. https://example.com")
-    if parsed.scheme == "file" and not parsed.path and not parsed.netloc:
+    if parsed.scheme == "file" and (not parsed.path or parsed.path == "/"):
         raise ValueError("file URL must include a path")

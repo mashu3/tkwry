@@ -107,10 +107,31 @@ def test_localhost_port_recovers_from_urlparse_misparsing() -> None:
 
 def test_normalize_host_path_without_scheme() -> None:
     assert _normalize_url("localhost/path") == "https://localhost/path"
-    assert _normalize_url("myserver/api") == "https://myserver/api"
-    assert _normalize_url("api/v1") == "https://api/v1"
-    assert _normalize_url("not-a-domain/path") == "https://not-a-domain/path"
     assert _normalize_url("example.com/path") == "https://example.com/path"
+
+
+def test_relative_paths_are_not_https_urls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "README").write_text("x", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "readme").write_text("x", encoding="utf-8")
+    (tmp_path / "api").mkdir()
+    (tmp_path / "api" / "v1").write_text("x", encoding="utf-8")
+    (tmp_path / "myserver").mkdir()
+    (tmp_path / "myserver" / "api").write_text("x", encoding="utf-8")
+
+    assert _normalize_url("README") == (tmp_path / "README").resolve().as_uri()
+    assert (
+        _normalize_url("docs/readme")
+        == (tmp_path / "docs" / "readme").resolve().as_uri()
+    )
+    assert _normalize_url("api/v1") == (tmp_path / "api" / "v1").resolve().as_uri()
+    assert (
+        _normalize_url("myserver/api")
+        == (tmp_path / "myserver" / "api").resolve().as_uri()
+    )
 
 
 def test_normalize_host_port_passes_validation() -> None:
@@ -120,10 +141,20 @@ def test_normalize_host_port_passes_validation() -> None:
         "127.0.0.1:8080",
         "example.com:8080",
         "localhost/path",
-        "api/v1",
+        "example.com/path",
     )
     for url in cases:
         _validate_url(_normalize_url(url))
+
+
+def test_file_url_requires_path() -> None:
+    with pytest.raises(ValueError, match="path"):
+        _normalize_url("file://server")
+    with pytest.raises(ValueError, match="path"):
+        _validate_url("file://server")
+    # UNC-style with a share path remains allowed.
+    assert _normalize_url("file://server/share/x") == "file://server/share/x"
+    _validate_url("file://server/share/x")
 
 
 def test_normalize_relative_path_still_file_uri(
