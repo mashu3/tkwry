@@ -645,15 +645,19 @@ class WebView:
     def _fire_ready(self) -> None:
         callbacks = self._ready_callbacks
         self._ready_callbacks = []
-        self._frame.event_generate("<<WebViewReady>>", when="tail")
-        for callback in callbacks:
 
-            def _deliver_ready(cb: Callable[[], object] = callback) -> None:
+        def _deliver_ready() -> None:
+            if self._destroyed:
+                return
+            # Defer bind handlers until create/bounds/poll paths return. event_generate
+            # from idle is synchronous for bindings but no longer re-enters _try_create.
+            self._frame.event_generate("<<WebViewReady>>")
+            for callback in callbacks:
                 if self._destroyed:
                     return
-                self._invoke_callback(cb)
+                self._invoke_callback(callback)
 
-            self._frame.after_idle(_deliver_ready)
+        self._frame.after_idle(_deliver_ready)
 
     def _needs_event_poll(self) -> bool:
         return any(

@@ -258,3 +258,30 @@ def test_run_initial_load_reschedules_after_exception_until_attempts_exhausted(
     assert scheduled == []
     assert web._initial_load is None
     assert web._initial_load_attempt == 2
+
+
+def test_fire_ready_defers_webview_ready_until_idle(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>ready</p>")
+    web._webview = object()
+    fired_during_maybe_fire: list[bool] = []
+    firing = [False]
+
+    original_event_generate = web._frame.event_generate
+
+    def track_event_generate(sequence: str, **kwargs: object) -> None:
+        fired_during_maybe_fire.append(firing[0])
+        original_event_generate(sequence, **kwargs)
+
+    monkeypatch.setattr(web._frame, "event_generate", track_event_generate)
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+
+    firing[0] = True
+    web._maybe_fire_ready()
+    firing[0] = False
+
+    assert fired_during_maybe_fire == []
+    tk_root.update_idletasks()
+    assert fired_during_maybe_fire == [False]
