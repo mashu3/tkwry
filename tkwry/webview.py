@@ -391,6 +391,8 @@ class WebView:
             self._pending_url = normalized
             self._pending_html = None
             return
+        # Supersede constructor deferred load so it cannot overwrite this nav.
+        self._initial_load = None
         self._pending_load = ("url", normalized)
         self._schedule_flush_load()
 
@@ -407,6 +409,8 @@ class WebView:
             self._pending_html = html
             self._pending_url = None
             return
+        # Supersede constructor deferred load so it cannot overwrite this nav.
+        self._initial_load = None
         self._pending_load = ("html", html)
         self._schedule_flush_load()
 
@@ -952,9 +956,17 @@ class WebView:
         load = self._initial_load
         if load is None or self._destroyed or self._webview is None:
             return
+        if self._pending_load is not None:
+            # A later load_url/load_html already won; drop constructor content.
+            self._initial_load = None
+            return
         if not self._frame_ready_for_initial_load():
             return
         self._sync_bounds()
+        # Re-check after sync: load_* may have cleared or replaced this.
+        if self._initial_load is not load or self._pending_load is not None:
+            self._initial_load = None
+            return
         kind, payload = load
         try:
             if kind == "url":
@@ -978,6 +990,7 @@ class WebView:
             return
         kind, payload = self._pending_load
         self._pending_load = None
+        self._initial_load = None
         if kind == "url":
             self._webview.load_url(payload)
         else:

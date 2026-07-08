@@ -101,6 +101,29 @@ def test_load_coalesces_to_last_pending(tk_root) -> None:
     web.load_url("https://example.com/c")
 
     assert web._pending_load == ("url", "https://example.com/c")
+    assert web._initial_load is None
+
+    web.destroy()
+    frame.destroy()
+
+
+@pytest.mark.skipif(
+    sys.platform == "linux",
+    reason="WebKitGTK headless CI: deferred initial-load timing unreliable",
+)
+def test_load_after_create_cancels_deferred_initial_load(tk_root) -> None:
+    """Post-create load_* must win over the delayed constructor reload."""
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<p>A</p>")
+
+    assert wait_until(tk_root, lambda: web.native is not None)
+    web._initial_load = ("html", "<p>A</p>")  # re-arm as if delay not yet fired
+    web.load_url("https://example.com/B")
+
+    assert web._initial_load is None
+    assert web._pending_load == ("url", "https://example.com/B")
+    web._run_initial_load()  # delayed callback must be a no-op
+    assert web._initial_load is None
 
     web.destroy()
     frame.destroy()
