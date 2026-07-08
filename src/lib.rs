@@ -32,17 +32,32 @@ fn report_py_error(py: Python<'_>, err: PyErr) {
     err.print(py);
 }
 
-fn push_bounded<T>(pending: &Arc<Mutex<Vec<T>>>, item: T, max: usize, label: &str) {
-    if let Ok(mut queue) = pending.lock() {
-        if queue.len() >= max {
-            let half = queue.len() / 2;
-            eprintln!(
-                "tkwry: discarding {half} oldest {label} event(s) (pending queue exceeded {max} event limit)"
-            );
-            queue.drain(..half);
+fn queue_lock_poisoned() -> PyErr {
+    pyo3::exceptions::PyRuntimeError::new_err("event queue lock poisoned")
+}
+
+fn push_bounded<T>(
+    pending: &Arc<Mutex<Vec<T>>>,
+    item: T,
+    max: usize,
+    label: &str,
+) -> Result<(), ()> {
+    let mut queue = match pending.lock() {
+        Ok(queue) => queue,
+        Err(_) => {
+            eprintln!("tkwry: {label} event dropped (event queue lock poisoned)");
+            return Err(());
         }
-        queue.push(item);
+    };
+    if queue.len() >= max {
+        let half = queue.len() / 2;
+        eprintln!(
+            "tkwry: discarding {half} oldest {label} event(s) (pending queue exceeded {max} event limit)"
+        );
+        queue.drain(..half);
     }
+    queue.push(item);
+    Ok(())
 }
 
 fn push_if_listening<T>(
@@ -51,9 +66,11 @@ fn push_if_listening<T>(
     item: T,
     max: usize,
     label: &str,
-) {
+) -> Result<(), ()> {
     if listening.load(Ordering::SeqCst) {
-        push_bounded(pending, item, max, label);
+        push_bounded(pending, item, max, label)
+    } else {
+        Ok(())
     }
 }
 
@@ -61,13 +78,29 @@ fn set_listening_and_clear_queue<T>(
     listening: &AtomicBool,
     pending: &Arc<Mutex<Vec<T>>>,
     enabled: bool,
-) {
+) -> PyResult<()> {
     listening.store(enabled, Ordering::SeqCst);
     if !enabled {
-        if let Ok(mut queue) = pending.lock() {
-            queue.clear();
-        }
+        pending.lock().map_err(|_| queue_lock_poisoned())?.clear();
     }
+    Ok(())
+}
+
+fn drain_queue<T>(pending: &Arc<Mutex<Vec<T>>>) -> PyResult<Vec<T>> {
+    pending
+        .lock()
+        .map(|mut queue| std::mem::take(&mut *queue))
+        .map_err(|_| queue_lock_poisoned())
+}
+
+fn push_listening_py<T>(
+    listening: &AtomicBool,
+    pending: &Arc<Mutex<Vec<T>>>,
+    item: T,
+    max: usize,
+    label: &str,
+) -> PyResult<()> {
+    push_if_listening(listening, pending, item, max, label).map_err(|()| queue_lock_poisoned())
 }
 
 fn extract_py_bool(result: &Bound<'_, PyAny>, context: &str) -> Option<bool> {
@@ -208,10 +241,25 @@ impl WebView {
         if let Ok(mut newwin) = self.newwin_cb.lock() {
             *newwin = None;
         }
-        set_listening_and_clear_queue(&self.page_load_listening, &self.page_load_pending, false);
-        set_listening_and_clear_queue(&self.ipc_listening, &self.ipc_pending, false);
-        set_listening_and_clear_queue(&self.title_listening, &self.title_pending, false);
-        set_listening_and_clear_queue(&self.drag_drop_listening, &self.drag_drop_pending, false);
+        // Destroy teardown: log poison instead of failing destroy.
+        for result in [
+            set_listening_and_clear_queue(
+                &self.page_load_listening,
+                &self.page_load_pending,
+                false,
+            ),
+            set_listening_and_clear_queue(&self.ipc_listening, &self.ipc_pending, false),
+            set_listening_and_clear_queue(&self.title_listening, &self.title_pending, false),
+            set_listening_and_clear_queue(
+                &self.drag_drop_listening,
+                &self.drag_drop_pending,
+                false,
+            ),
+        ] {
+            if let Err(err) = result {
+                eprintln!("tkwry: {err}");
+            }
+        }
     }
 
     fn destroy_inner(&self) -> PyResult<()> {
@@ -338,7 +386,7 @@ impl WebView {
                 );
                 return;
             }
-            push_if_listening(
+            let _ = push_if_listening(
                 &ipc_listening_clone,
                 &ipc_pending_clone,
                 body,
@@ -370,7 +418,7 @@ impl WebView {
                 wry::PageLoadEvent::Started => PageLoadEvent::Started,
                 wry::PageLoadEvent::Finished => PageLoadEvent::Finished,
             };
-            push_if_listening(
+            let _ = push_if_listening(
                 &page_load_listening_clone,
                 &page_load_pending_clone,
                 (evt, url),
@@ -382,7 +430,7 @@ impl WebView {
         let title_pending_clone = title_pending.clone();
         let title_listening_clone = title_listening.clone();
         let title_handler = move |title: String| {
-            push_if_listening(
+            let _ = push_if_listening(
                 &title_listening_clone,
                 &title_pending_clone,
                 title,
@@ -436,7 +484,7 @@ impl WebView {
                 .map(|p| p.to_string_lossy().to_string())
                 .collect();
             let pos = (position.0, position.1);
-            push_if_listening(
+            let _ = push_if_listening(
                 &drag_drop_listening_clone,
                 &drag_drop_pending_clone,
                 (evt_type, paths_str, pos),
@@ -595,8 +643,7 @@ impl WebView {
 
     fn set_ipc_listening(&self, enabled: bool) -> PyResult<()> {
         self.require_owner_thread()?;
-        set_listening_and_clear_queue(&self.ipc_listening, &self.ipc_pending, enabled);
-        Ok(())
+        set_listening_and_clear_queue(&self.ipc_listening, &self.ipc_pending, enabled)
     }
 
     fn set_on_navigation(&self, handler: Py<PyAny>) -> PyResult<()> {
@@ -621,44 +668,27 @@ impl WebView {
 
     fn set_page_load_listening(&self, enabled: bool) -> PyResult<()> {
         self.require_owner_thread()?;
-        set_listening_and_clear_queue(&self.page_load_listening, &self.page_load_pending, enabled);
-        Ok(())
+        set_listening_and_clear_queue(&self.page_load_listening, &self.page_load_pending, enabled)
     }
 
     fn drain_page_load_events(&self) -> PyResult<Vec<(PageLoadEvent, String)>> {
         self.require_owner_thread()?;
-        Ok(self
-            .page_load_pending
-            .lock()
-            .map(|mut pending| std::mem::take(&mut *pending))
-            .unwrap_or_default())
+        drain_queue(&self.page_load_pending)
     }
 
     fn drain_ipc_messages(&self) -> PyResult<Vec<String>> {
         self.require_owner_thread()?;
-        Ok(self
-            .ipc_pending
-            .lock()
-            .map(|mut pending| std::mem::take(&mut *pending))
-            .unwrap_or_default())
+        drain_queue(&self.ipc_pending)
     }
 
     fn drain_title_events(&self) -> PyResult<Vec<String>> {
         self.require_owner_thread()?;
-        Ok(self
-            .title_pending
-            .lock()
-            .map(|mut pending| std::mem::take(&mut *pending))
-            .unwrap_or_default())
+        drain_queue(&self.title_pending)
     }
 
     fn drain_drag_drop_events(&self) -> PyResult<Vec<DragDropPendingItem>> {
         self.require_owner_thread()?;
-        Ok(self
-            .drag_drop_pending
-            .lock()
-            .map(|mut pending| std::mem::take(&mut *pending))
-            .unwrap_or_default())
+        drain_queue(&self.drag_drop_pending)
     }
 
     fn _enqueue_ipc_message(&self, message: String) -> PyResult<()> {
@@ -669,26 +699,24 @@ impl WebView {
                 MAX_IPC_MESSAGE_BYTES
             )));
         }
-        push_if_listening(
+        push_listening_py(
             &self.ipc_listening,
             &self.ipc_pending,
             message,
             MAX_IPC_PENDING,
             "IPC",
-        );
-        Ok(())
+        )
     }
 
     fn _enqueue_title_event(&self, title: String) -> PyResult<()> {
         self.require_owner_thread()?;
-        push_if_listening(
+        push_listening_py(
             &self.title_listening,
             &self.title_pending,
             title,
             MAX_TITLE_PENDING,
             "title-changed",
-        );
-        Ok(())
+        )
     }
 
     fn _enqueue_drag_drop_event(
@@ -698,20 +726,18 @@ impl WebView {
         position: (i32, i32),
     ) -> PyResult<()> {
         self.require_owner_thread()?;
-        push_if_listening(
+        push_listening_py(
             &self.drag_drop_listening,
             &self.drag_drop_pending,
             (event, paths, position),
             MAX_DRAG_DROP_PENDING,
             "drag-drop",
-        );
-        Ok(())
+        )
     }
 
     fn set_title_listening(&self, enabled: bool) -> PyResult<()> {
         self.require_owner_thread()?;
-        set_listening_and_clear_queue(&self.title_listening, &self.title_pending, enabled);
-        Ok(())
+        set_listening_and_clear_queue(&self.title_listening, &self.title_pending, enabled)
     }
 
     fn set_on_new_window(&self, handler: Py<PyAny>) -> PyResult<()> {
@@ -736,8 +762,7 @@ impl WebView {
 
     fn set_drag_drop_listening(&self, enabled: bool) -> PyResult<()> {
         self.require_owner_thread()?;
-        set_listening_and_clear_queue(&self.drag_drop_listening, &self.drag_drop_pending, enabled);
-        Ok(())
+        set_listening_and_clear_queue(&self.drag_drop_listening, &self.drag_drop_pending, enabled)
     }
 
     fn set_bounds(&self, x: f64, y: f64, width: f64, height: f64) -> PyResult<()> {
