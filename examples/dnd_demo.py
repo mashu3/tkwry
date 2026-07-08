@@ -104,22 +104,21 @@ def main() -> None:
 
     def on_drag_drop(
         event: DragDropEvent, paths: list[str], position: tuple[int, int]
-    ) -> bool:
-        # Runs on the Tk main thread (queued by WebView).
+    ) -> None:
+        # Runs on the Tk main thread (queued by WebView). Notify-only.
         if event == DragDropEvent.Enter:
             status.set(f"Over WebView: {len(paths)} file(s) @ {position}")
             web.eval_js("window.showPaths([], true)")
-            return True
+            return
         if event == DragDropEvent.Leave:
             status.set("Waiting for drop…")
             web.eval_js("window.showPaths([], false)")
-            return True
+            return
         if event == DragDropEvent.Drop:
             status.set(f"Dropped {len(paths)} file(s)")
             payload = json.dumps(paths)
             web.eval_js(f"window.showPaths({payload}, false)")
-            return True
-        return True
+            return
 
     web = WebView(
         frame,

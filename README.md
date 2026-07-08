@@ -178,7 +178,7 @@ Callback exceptions are printed to stderr and do not stop event delivery.
 
 ### Drag & drop (native OS path)
 
-File drops from Finder / Explorer are handled by the OS WebView. Your handler runs on the **Tk main thread** (tkwry queues events from WebKit automatically).
+File drops from Finder / Explorer are handled by the OS WebView. Your handler runs on the **Tk main thread** (tkwry queues events from WebKit automatically). The handler is **notify-only** (`-> None`); drops are always accepted and cannot be denied from Python.
 
 ```python
 from tkwry import DragDropEvent

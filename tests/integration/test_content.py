@@ -254,6 +254,31 @@ def test_ipc_handler_exception_does_not_stop_poll(tk_root) -> None:
 
 @pytest.mark.skipif(
     sys.platform == "linux",
+    reason="WebKitGTK headless CI: IPC event poll unreliable",
+)
+def test_ipc_post_message_reaches_handler(tk_root) -> None:
+    """End-to-end: JS window.ipc.postMessage -> Tk-thread handler."""
+    received: list[str] = []
+
+    frame = host_frame(tk_root)
+    web = WebView(
+        frame,
+        html="<p>ipc-e2e</p>",
+        ipc_handler=lambda msg: received.append(msg),
+    )
+    assert web.wait_until_ready(timeout=10.0)
+
+    web.eval_js("window.ipc.postMessage('hello-from-js')")
+    assert wait_until(tk_root, lambda: "hello-from-js" in received, steps=200), (
+        f"expected JS IPC message, got {received!r}"
+    )
+
+    web.destroy()
+    frame.destroy()
+
+
+@pytest.mark.skipif(
+    sys.platform == "linux",
     reason="WebKitGTK headless CI: title-changed callback timing unreliable",
 )
 def test_title_changed_delivers_on_document_title_set(tk_root) -> None:
@@ -295,7 +320,11 @@ def test_title_changed_delivers_on_document_title_set(tk_root) -> None:
     reason="WebKitGTK headless CI: drag-drop event poll unreliable",
 )
 def test_drag_drop_native_queues_without_blocking(tk_root) -> None:
-    """Queue Enter/Drop on the Tk thread without registering OS drag with wry."""
+    """Queue Enter/Drop on the Tk thread (same queue OS drops use).
+
+    Full Finder/Explorer drops cannot be synthesized reliably in CI; this
+    covers enqueue -> poll -> Python handler on that path.
+    """
     received: list[tuple] = []
 
     frame = host_frame(tk_root)
@@ -303,15 +332,14 @@ def test_drag_drop_native_queues_without_blocking(tk_root) -> None:
 
     assert wait_until(tk_root, lambda: web.native is not None)
 
-    def handler(evt, paths, pos):
+    def handler(evt, paths, pos) -> None:
         received.append((evt, paths, pos))
-        return True
 
     web.set_drag_drop_handler(handler)
 
-    assert web._native_drag_drop(DragDropEvent.Enter, ["/tmp/a.txt"], (1, 2)) is True
-    assert web._native_drag_drop(DragDropEvent.Over, [], (3, 4)) is True
-    assert web._native_drag_drop(DragDropEvent.Drop, ["/tmp/a.txt"], (5, 6)) is True
+    web._native_drag_drop(DragDropEvent.Enter, ["/tmp/a.txt"], (1, 2))
+    web._native_drag_drop(DragDropEvent.Over, [], (3, 4))
+    web._native_drag_drop(DragDropEvent.Drop, ["/tmp/a.txt"], (5, 6))
 
     pump(tk_root, steps=30)
     assert wait_until(tk_root, lambda: len(received) >= 2, steps=100), (

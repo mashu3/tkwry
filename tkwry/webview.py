@@ -45,7 +45,7 @@ NavigationHandler: TypeAlias = Callable[[str], bool]
 PageLoadHandler: TypeAlias = Callable[[PageLoadEvent, str], None]
 TitleChangedHandler: TypeAlias = Callable[[str], None]
 NewWindowHandler: TypeAlias = Callable[[str], NewWindowResponse]
-DragDropHandler: TypeAlias = Callable[[DragDropEvent, list[str], tuple[int, int]], bool]
+DragDropHandler: TypeAlias = Callable[[DragDropEvent, list[str], tuple[int, int]], None]
 EvalCallback: TypeAlias = Callable[[str], None]
 EvalErrorHandler: TypeAlias = Callable[[Exception], None]
 _PendingLoad: TypeAlias = tuple[Literal["url"], str] | tuple[Literal["html"], str]
@@ -71,7 +71,9 @@ class WebView:
     The host *frame* must be laid out with a real size (``pack`` / ``grid`` /
     ``place``) before the native webview is created. IPC, page-load,
     title-changed, eval callbacks, and drag-and-drop handlers run on the
-    **Tk main thread** via an internal queue.
+    **Tk main thread** via an internal queue. Drag-and-drop is notify-only
+    (``-> None``); OS drops are always accepted and cannot be denied from
+    Python.
 
     **Navigation hooks** (``on_navigation``, ``on_new_window``) are invoked
     **synchronously on the WebKit thread** — wry needs an immediate return
@@ -520,6 +522,11 @@ class WebView:
                 self._webview.clear_on_new_window()
 
     def set_drag_drop_handler(self, handler: DragDropHandler | None) -> None:
+        """Register a notify-only drop handler (runs on the Tk main thread).
+
+        Events are queued from the WebKit thread; the handler cannot accept or
+        deny the OS drop. Clearing with ``None`` stops native collection.
+        """
         self._require_tk_thread()
         self._drag_drop_handler = handler
         if self._webview is not None:
@@ -616,15 +623,15 @@ class WebView:
 
     def _native_drag_drop(
         self, event: DragDropEvent, paths: list[str], position: tuple[int, int]
-    ) -> bool:
+    ) -> None:
+        """Inject a drag-drop event into the same queue OS drops use (tests)."""
         native = self._webview
         if native is None or self._drag_drop_handler is None:
-            return True
+            return
         # Python handlers are authoritative for async queues.
         native.set_drag_drop_listening(True)
         native._enqueue_drag_drop_event(event, paths, position)
         self._ensure_event_poll()
-        return True
 
     def _native_navigation(self, url: str) -> bool:
         if self._on_navigation is None:

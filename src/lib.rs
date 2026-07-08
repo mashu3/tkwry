@@ -417,6 +417,8 @@ impl WebView {
 
         let drag_drop_pending_clone = drag_drop_pending.clone();
         let drag_drop_listening_clone = drag_drop_listening.clone();
+        // Always accept the OS drop. Python receives notify-only events on the
+        // Tk thread, so a bool return from the handler cannot gate this path.
         let drag_drop_handler = move |event: wry::DragDropEvent| -> bool {
             let (evt_type, paths, position) = match &event {
                 wry::DragDropEvent::Enter { paths, position } => {

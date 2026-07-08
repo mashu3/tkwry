@@ -245,17 +245,16 @@ def test_set_drag_drop_handler_none_clears_handler(tk_root) -> None:
 
     received: list[tuple] = []
 
-    def handler(evt, paths, pos):
+    def handler(evt, paths, pos) -> None:
         received.append((evt, paths, pos))
-        return True
 
     web.set_drag_drop_handler(handler)
-    assert web._native_drag_drop(DragDropEvent.Drop, ["/tmp/a.txt"], (1, 2)) is True
+    web._native_drag_drop(DragDropEvent.Drop, ["/tmp/a.txt"], (1, 2))
     pump(tk_root, steps=10)
     assert len(received) == 1
 
     web.set_drag_drop_handler(None)
-    assert web._native_drag_drop(DragDropEvent.Drop, ["/tmp/b.txt"], (3, 4)) is True
+    web._native_drag_drop(DragDropEvent.Drop, ["/tmp/b.txt"], (3, 4))
     pump(tk_root, steps=10)
     assert len(received) == 1
     assert web.native is not None
