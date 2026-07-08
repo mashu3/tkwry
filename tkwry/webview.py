@@ -971,6 +971,10 @@ class WebView:
             delay = 150 if sys.platform == "linux" else 100
             toplevel.after(delay, self._run_initial_load)
 
+    def _maybe_reschedule_initial_load(self) -> None:
+        if self._initial_load is not None and not self._destroyed:
+            self._schedule_initial_load()
+
     def _run_initial_load(self) -> None:
         load = self._initial_load
         if load is None or self._destroyed or self._webview is None:
@@ -980,6 +984,7 @@ class WebView:
             self._initial_load = None
             return
         if not self._frame_ready_for_initial_load():
+            self._maybe_reschedule_initial_load()
             return
         self._sync_bounds()
         # Re-check after sync: load_* may have cleared or replaced this.
@@ -995,6 +1000,7 @@ class WebView:
         except Exception:
             traceback.print_exc()
             self._bump_initial_load_attempt()
+            self._maybe_reschedule_initial_load()
             return
         self._sync_bounds()
         gtk_rounds = 64 if sys.platform == "linux" else 32

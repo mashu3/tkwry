@@ -195,3 +195,66 @@ def test_sync_bounds_skips_1x1_without_explicit_size(tk_root, monkeypatch) -> No
 
     assert web._sync_bounds() is False
     assert bounds == []
+
+
+def test_run_initial_load_reschedules_when_frame_not_ready(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>retry</p>")
+    web._webview = object()
+    web._initial_load = ("html", "<p>retry</p>")
+    scheduled: list[int] = []
+    monkeypatch.setattr(
+        web, "_frame_ready_for_initial_load", lambda: False, raising=False
+    )
+    monkeypatch.setattr(
+        web,
+        "_schedule_initial_load",
+        lambda: scheduled.append(1),
+        raising=False,
+    )
+
+    web._run_initial_load()
+
+    assert scheduled == [1]
+    assert web._initial_load == ("html", "<p>retry</p>")
+
+
+def test_run_initial_load_reschedules_after_exception_until_attempts_exhausted(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import MagicMock
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>retry</p>")
+    native = MagicMock()
+    native.load_html.side_effect = RuntimeError("boom")
+    web._webview = native
+    web._initial_load = ("html", "<p>retry</p>")
+    web._initial_load_attempt = 0
+    scheduled: list[int] = []
+    monkeypatch.setattr(web._frame, "after_idle", lambda _fn: None)
+    monkeypatch.setattr(
+        web, "_frame_ready_for_initial_load", lambda: True, raising=False
+    )
+    monkeypatch.setattr(
+        web,
+        "_schedule_initial_load",
+        lambda: scheduled.append(1),
+        raising=False,
+    )
+    monkeypatch.setattr(web, "_sync_bounds", lambda: None, raising=False)
+    monkeypatch.setattr(web, "_service_linux_events", lambda **_k: None, raising=False)
+    monkeypatch.setattr(web, "_initial_load_attempts", lambda: 2, raising=False)
+
+    web._run_initial_load()
+    assert scheduled == [1]
+    assert web._initial_load == ("html", "<p>retry</p>")
+    assert web._initial_load_attempt == 1
+
+    scheduled.clear()
+    web._run_initial_load()
+    assert scheduled == []
+    assert web._initial_load is None
+    assert web._initial_load_attempt == 2
