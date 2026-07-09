@@ -703,7 +703,6 @@ class WebView:
                 f"tkwry: on_navigation must return bool, got {type(result).__name__}",
                 file=sys.stderr,
             )
-            traceback.print_exc()
             return False
         return result
 
@@ -729,7 +728,6 @@ class WebView:
                 f"got {type(result).__name__}",
                 file=sys.stderr,
             )
-            traceback.print_exc()
             return NewWindowResponse.Deny
         return result
 
