@@ -5,9 +5,10 @@ mod macos_focus;
 
 use pyo3::prelude::*;
 use std::cell::Cell;
+use std::collections::HashMap;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::AtomicI32;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 fn make_rect(x: f64, y: f64, width: f64, height: f64) -> wry::Rect {
@@ -23,6 +24,7 @@ const MAX_PAGE_LOAD_PENDING: usize = 256;
 const MAX_IPC_PENDING: usize = 256;
 const MAX_TITLE_PENDING: usize = 256;
 const MAX_DRAG_DROP_PENDING: usize = 256;
+const MAX_EVAL_PENDING: usize = 256;
 
 /// Maximum IPC message size (10 MiB). Messages exceeding this are dropped.
 const MAX_IPC_MESSAGE_BYTES: usize = 10 * 1024 * 1024;
@@ -39,6 +41,7 @@ fn queue_lock_poisoned() -> PyErr {
 fn push_if_listening<T>(
     listening: &AtomicBool,
     pending: &Arc<Mutex<Vec<T>>>,
+    dropped: &AtomicU64,
     item: T,
     max: usize,
     label: &str,
@@ -60,14 +63,37 @@ fn push_if_listening<T>(
         return Ok(());
     }
     if queue.len() >= max {
-        let half = queue.len() / 2;
+        dropped.fetch_add(1, Ordering::SeqCst);
         eprintln!(
-            "tkwry: discarding {half} oldest {label} event(s) (pending queue exceeded {max} event limit)"
+            "tkwry: dropping newest {label} event (pending queue full at {max} events)"
         );
-        queue.drain(..half);
+        return Ok(());
     }
     queue.push(item);
     Ok(())
+}
+
+fn push_eval_result(
+    pending: &Arc<Mutex<Vec<(u64, String)>>>,
+    dropped: &AtomicU64,
+    token: u64,
+    result: String,
+) {
+    let mut queue = match pending.lock() {
+        Ok(queue) => queue,
+        Err(_) => {
+            eprintln!("tkwry: eval result dropped (event queue lock poisoned)");
+            return;
+        }
+    };
+    if queue.len() >= MAX_EVAL_PENDING {
+        dropped.fetch_add(1, Ordering::SeqCst);
+        eprintln!(
+            "tkwry: dropping eval result (pending queue full at {MAX_EVAL_PENDING} events)"
+        );
+        return;
+    }
+    queue.push((token, result));
 }
 
 fn set_listening_and_clear_queue<T>(
@@ -95,11 +121,13 @@ fn drain_queue<T>(pending: &Arc<Mutex<Vec<T>>>) -> PyResult<Vec<T>> {
 fn push_listening_py<T>(
     listening: &AtomicBool,
     pending: &Arc<Mutex<Vec<T>>>,
+    dropped: &AtomicU64,
     item: T,
     max: usize,
     label: &str,
 ) -> PyResult<()> {
-    push_if_listening(listening, pending, item, max, label).map_err(|()| queue_lock_poisoned())
+    push_if_listening(listening, pending, dropped, item, max, label)
+        .map_err(|()| queue_lock_poisoned())
 }
 
 fn extract_py_bool(result: &Bound<'_, PyAny>, context: &str) -> Option<bool> {
@@ -164,6 +192,8 @@ type IpcPending = Arc<Mutex<Vec<String>>>;
 type TitlePending = Arc<Mutex<Vec<String>>>;
 type DragDropPendingItem = (DragDropEvent, Vec<String>, (i32, i32));
 type DragDropPending = Arc<Mutex<Vec<DragDropPendingItem>>>;
+type EvalCallbackMap = Arc<Mutex<HashMap<u64, Py<PyAny>>>>;
+type EvalResultPending = Arc<Mutex<Vec<(u64, String)>>>;
 
 const THREAD_ERROR: &str = "tkwry must be called from the thread that created the Tk application (the thread that runs the Tk event loop)";
 
@@ -187,11 +217,19 @@ struct WebView {
     ipc_pending: IpcPending,
     title_pending: TitlePending,
     drag_drop_pending: DragDropPending,
+    eval_callbacks: EvalCallbackMap,
+    eval_result_pending: EvalResultPending,
+    eval_next_token: AtomicU64,
     /// When false, async event sources skip queueing (handler cleared).
     page_load_listening: Arc<AtomicBool>,
     ipc_listening: Arc<AtomicBool>,
     title_listening: Arc<AtomicBool>,
     drag_drop_listening: Arc<AtomicBool>,
+    ipc_overflow_dropped: Arc<AtomicU64>,
+    page_load_overflow_dropped: Arc<AtomicU64>,
+    title_overflow_dropped: Arc<AtomicU64>,
+    drag_drop_overflow_dropped: Arc<AtomicU64>,
+    eval_overflow_dropped: Arc<AtomicU64>,
     #[cfg(target_os = "macos")]
     _focus_sync: Mutex<Option<macos_focus::FocusSyncGuard>>,
     #[cfg(target_os = "macos")]
@@ -239,6 +277,12 @@ impl WebView {
         }
         if let Ok(mut newwin) = self.newwin_cb.lock() {
             *newwin = None;
+        }
+        if let Ok(mut eval_callbacks) = self.eval_callbacks.lock() {
+            eval_callbacks.clear();
+        }
+        if let Ok(mut eval_results) = self.eval_result_pending.lock() {
+            eval_results.clear();
         }
         // Destroy teardown: log poison instead of failing destroy.
         for result in [
@@ -367,14 +411,22 @@ impl WebView {
         let ipc_pending: IpcPending = Arc::new(Mutex::new(Vec::new()));
         let title_pending: TitlePending = Arc::new(Mutex::new(Vec::new()));
         let drag_drop_pending: DragDropPending = Arc::new(Mutex::new(Vec::new()));
+        let eval_callbacks: EvalCallbackMap = Arc::new(Mutex::new(HashMap::new()));
+        let eval_result_pending: EvalResultPending = Arc::new(Mutex::new(Vec::new()));
         // Async queues start disabled; Python enables them when a handler is set.
         let page_load_listening = Arc::new(AtomicBool::new(false));
         let ipc_listening = Arc::new(AtomicBool::new(false));
         let title_listening = Arc::new(AtomicBool::new(false));
         let drag_drop_listening = Arc::new(AtomicBool::new(false));
+        let ipc_overflow_dropped = Arc::new(AtomicU64::new(0));
+        let page_load_overflow_dropped = Arc::new(AtomicU64::new(0));
+        let title_overflow_dropped = Arc::new(AtomicU64::new(0));
+        let drag_drop_overflow_dropped = Arc::new(AtomicU64::new(0));
+        let eval_overflow_dropped = Arc::new(AtomicU64::new(0));
 
         let ipc_pending_clone = ipc_pending.clone();
         let ipc_listening_clone = ipc_listening.clone();
+        let ipc_overflow_clone = ipc_overflow_dropped.clone();
         let ipc_handler_wry = move |req: wry::http::Request<String>| {
             let body = req.body().clone();
             if body.len() > MAX_IPC_MESSAGE_BYTES {
@@ -388,6 +440,7 @@ impl WebView {
             let _ = push_if_listening(
                 &ipc_listening_clone,
                 &ipc_pending_clone,
+                &ipc_overflow_clone,
                 body,
                 MAX_IPC_PENDING,
                 "IPC",
@@ -412,6 +465,7 @@ impl WebView {
 
         let page_load_pending_clone = page_load_pending.clone();
         let page_load_listening_clone = page_load_listening.clone();
+        let page_load_overflow_clone = page_load_overflow_dropped.clone();
         let pageload_handler = move |event: wry::PageLoadEvent, url: String| {
             let evt = match event {
                 wry::PageLoadEvent::Started => PageLoadEvent::Started,
@@ -420,6 +474,7 @@ impl WebView {
             let _ = push_if_listening(
                 &page_load_listening_clone,
                 &page_load_pending_clone,
+                &page_load_overflow_clone,
                 (evt, url),
                 MAX_PAGE_LOAD_PENDING,
                 "page-load",
@@ -428,10 +483,12 @@ impl WebView {
 
         let title_pending_clone = title_pending.clone();
         let title_listening_clone = title_listening.clone();
+        let title_overflow_clone = title_overflow_dropped.clone();
         let title_handler = move |title: String| {
             let _ = push_if_listening(
                 &title_listening_clone,
                 &title_pending_clone,
+                &title_overflow_clone,
                 title,
                 MAX_TITLE_PENDING,
                 "title-changed",
@@ -464,6 +521,7 @@ impl WebView {
 
         let drag_drop_pending_clone = drag_drop_pending.clone();
         let drag_drop_listening_clone = drag_drop_listening.clone();
+        let drag_drop_overflow_clone = drag_drop_overflow_dropped.clone();
         // Always accept the OS drop. Python receives notify-only events on the
         // Tk thread, so a bool return from the handler cannot gate this path.
         let drag_drop_handler = move |event: wry::DragDropEvent| -> bool {
@@ -486,6 +544,7 @@ impl WebView {
             let _ = push_if_listening(
                 &drag_drop_listening_clone,
                 &drag_drop_pending_clone,
+                &drag_drop_overflow_clone,
                 (evt_type, paths_str, pos),
                 MAX_DRAG_DROP_PENDING,
                 "drag-drop",
@@ -580,10 +639,18 @@ impl WebView {
             ipc_pending,
             title_pending,
             drag_drop_pending,
+            eval_callbacks,
+            eval_result_pending,
+            eval_next_token: AtomicU64::new(1),
             page_load_listening,
             ipc_listening,
             title_listening,
             drag_drop_listening,
+            ipc_overflow_dropped,
+            page_load_overflow_dropped,
+            title_overflow_dropped,
+            drag_drop_overflow_dropped,
+            eval_overflow_dropped,
             #[cfg(target_os = "macos")]
             _focus_sync,
             #[cfg(target_os = "macos")]
@@ -627,17 +694,59 @@ impl WebView {
         })
     }
 
-    fn eval_js_with_callback(&self, script: &str, callback: Py<PyAny>) -> PyResult<()> {
-        with_webview(self, |wv| {
+    fn eval_js_with_callback(&self, script: &str, callback: Py<PyAny>) -> PyResult<u64> {
+        self.require_owner_thread()?;
+        let token = self.eval_next_token.fetch_add(1, Ordering::SeqCst);
+        {
+            let mut callbacks = self
+                .eval_callbacks
+                .lock()
+                .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+            callbacks.insert(token, callback);
+        }
+        let pending = self.eval_result_pending.clone();
+        let dropped = self.eval_overflow_dropped.clone();
+        let eval_result = with_webview(self, |wv| {
             wv.evaluate_script_with_callback(script, move |result: String| {
-                Python::attach(|py| {
-                    if let Err(err) = callback.call1(py, (result,)) {
-                        report_py_error(py, err);
-                    }
-                });
+                push_eval_result(&pending, &dropped, token, result);
             })
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
-        })
+        });
+        if eval_result.is_err() {
+            if let Ok(mut callbacks) = self.eval_callbacks.lock() {
+                callbacks.remove(&token);
+            }
+        }
+        eval_result?;
+        Ok(token)
+    }
+
+    fn drain_eval_callbacks(&self) -> PyResult<Vec<(u64, Py<PyAny>, String)>> {
+        self.require_owner_thread()?;
+        let items = drain_queue(&self.eval_result_pending)?;
+        let mut callbacks = self
+            .eval_callbacks
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+        Ok(items
+            .into_iter()
+            .filter_map(|(token, result)| {
+                callbacks
+                    .remove(&token)
+                    .map(|callback| (token, callback, result))
+            })
+            .collect())
+    }
+
+    fn take_queue_drop_counts(&self) -> PyResult<(u64, u64, u64, u64, u64)> {
+        self.require_owner_thread()?;
+        Ok((
+            self.ipc_overflow_dropped.swap(0, Ordering::SeqCst),
+            self.page_load_overflow_dropped.swap(0, Ordering::SeqCst),
+            self.title_overflow_dropped.swap(0, Ordering::SeqCst),
+            self.drag_drop_overflow_dropped.swap(0, Ordering::SeqCst),
+            self.eval_overflow_dropped.swap(0, Ordering::SeqCst),
+        ))
     }
 
     fn set_ipc_listening(&self, enabled: bool) -> PyResult<()> {
@@ -701,6 +810,7 @@ impl WebView {
         push_listening_py(
             &self.ipc_listening,
             &self.ipc_pending,
+            &self.ipc_overflow_dropped,
             message,
             MAX_IPC_PENDING,
             "IPC",
@@ -712,6 +822,7 @@ impl WebView {
         push_listening_py(
             &self.title_listening,
             &self.title_pending,
+            &self.title_overflow_dropped,
             title,
             MAX_TITLE_PENDING,
             "title-changed",
@@ -728,6 +839,7 @@ impl WebView {
         push_listening_py(
             &self.drag_drop_listening,
             &self.drag_drop_pending,
+            &self.drag_drop_overflow_dropped,
             (event, paths, position),
             MAX_DRAG_DROP_PENDING,
             "drag-drop",
@@ -908,13 +1020,18 @@ impl WebView {
 
     fn url(&self) -> PyResult<Option<String>> {
         with_webview(self, |wv| {
-            // wry may panic when no document URL exists (e.g. inline HTML on macOS).
-            let url = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                normalize_document_url(wv.url().ok())
-            }))
-            .ok()
-            .flatten();
-            Ok(url)
+            let raw = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| wv.url())) {
+                Ok(result) => result,
+                Err(_) => {
+                    return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                        "webview url() panicked",
+                    ));
+                }
+            };
+            match raw {
+                Ok(url) => Ok(normalize_document_url(Some(url))),
+                Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(err.to_string())),
+            }
         })
     }
 

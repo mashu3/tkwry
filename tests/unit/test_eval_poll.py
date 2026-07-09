@@ -69,6 +69,26 @@ def test_poll_events_keeps_polling_until_eval_delivers(
     assert web._event_poll_active is True
 
 
+def test_poll_events_drains_native_eval_callbacks(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _make_web(tk_root)
+    _configure_poll_test(web, monkeypatch)
+    native = MagicMock()
+    web._webview = native
+    results: list[str] = []
+    py_token = web._register_pending_eval(results.append, None)
+    web._native_eval_wait[1] = (web._eval_epoch, py_token, results.append, None)
+    native.drain_eval_callbacks.return_value = [(1, results.append, "ok")]
+    web._event_poll_active = True
+
+    web._poll_events()
+
+    assert results == ["ok"]
+    assert web._pending_eval_callbacks == 0
+    assert web._event_poll_active is False
+
+
 def test_poll_events_drains_late_eval_result(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -163,15 +183,24 @@ def test_eval_js_with_callback_pending_keeps_poll_until_deliver(
     native = MagicMock()
     results: list[str] = []
 
-    def native_eval(_script: str, deliver: Callable[[str], None]) -> None:
-        web._poll_events()
-        assert web._event_poll_active is True
-        assert results == []
-        deliver("ok")
-        # Counter stays pending until Tk drains (thread-safe vs WebKit deliver).
-        assert web._pending_eval_callbacks == 1
+    poll_calls = {"n": 0}
+
+    def native_eval(_script: str, callback: Callable[[str], None]) -> int:
+        poll_calls["n"] += 1
+        if poll_calls["n"] == 1:
+            web._poll_events()
+            assert web._event_poll_active is True
+            assert results == []
+            assert web._pending_eval_callbacks == 1
+        return 1
+
+    def drain_eval() -> list[tuple[int, Callable[[str], None], str]]:
+        if poll_calls["n"] >= 1 and results == []:
+            return [(1, results.append, "ok")]
+        return []
 
     native.eval_js_with_callback.side_effect = native_eval
+    native.drain_eval_callbacks.side_effect = drain_eval
     _stub_native_ready(web, native, monkeypatch)
 
     web.eval_js_with_callback("'ok'", results.append)

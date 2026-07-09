@@ -52,6 +52,7 @@ EvalErrorHandler: TypeAlias = Callable[[Exception], None]
 _PendingLoad: TypeAlias = tuple[Literal["url"], str] | tuple[Literal["html"], str]
 _EvalQueueItem: TypeAlias = tuple[int, int, EvalCallback, str]
 _PendingEval: TypeAlias = tuple[float, EvalCallback, EvalErrorHandler | None]
+_NativeEvalWait: TypeAlias = tuple[int, int, EvalCallback, EvalErrorHandler | None]
 _EVAL_CALLBACK_TIMEOUT_S = 30.0
 _MIN_LAYOUT_DIMENSION = 2
 _CREATE_MAX_ATTEMPTS = 30
@@ -183,6 +184,7 @@ class WebView:
         self._pending_eval_callbacks = 0
         self._eval_token_seq = 0
         self._pending_eval_tokens: dict[int, _PendingEval] = {}
+        self._native_eval_wait: dict[int, _NativeEvalWait] = {}
         # Bumped on destroy so late WebKit-thread delivers are discarded.
         self._eval_epoch = 0
         if url is not None and html is not None:
@@ -414,6 +416,7 @@ class WebView:
         self._eval_epoch += 1
         self._pending_eval_callbacks = 0
         self._pending_eval_tokens.clear()
+        self._native_eval_wait.clear()
         self._drain_eval_result_queue(discard=True)
         self._ready_delivered = False
         self._ready_callbacks.clear()
@@ -531,20 +534,21 @@ class WebView:
                 self._release_pending_eval(token)
                 return
 
-            def deliver(result: str) -> None:
-                # May run on the WebKit thread — queue only; never touch Tk/counter.
-                if epoch != self._eval_epoch:
-                    return
-                self._eval_result_queue.put((epoch, token, callback, result))
-
             try:
-                self._webview.eval_js_with_callback(script, deliver)
+                native_token = self._webview.eval_js_with_callback(script, callback)
             except Exception as exc:
                 self._release_pending_eval(token)
                 if on_error is not None:
                     self._invoke_callback(on_error, exc)
                 else:
                     traceback.print_exc()
+                return
+            self._native_eval_wait[native_token] = (
+                epoch,
+                token,
+                callback,
+                on_error,
+            )
 
         self._frame.after_idle(_run)
 
@@ -959,6 +963,21 @@ class WebView:
                 continue
             self._invoke_callback(callback, result)
 
+    def _drain_native_eval_callbacks(self) -> None:
+        native = self._webview
+        if native is None:
+            return
+        for native_token, callback, result in native.drain_eval_callbacks():
+            wait = self._native_eval_wait.pop(native_token, None)
+            if wait is None:
+                self._invoke_callback(callback, result)
+                continue
+            wait_epoch, py_token, expected_cb, _on_error = wait
+            self._release_pending_eval(py_token)
+            if wait_epoch != self._eval_epoch:
+                continue
+            self._invoke_callback(expected_cb, result)
+
     def _poll_events(self) -> None:
         if self._destroyed:
             self._event_poll_active = False
@@ -983,6 +1002,7 @@ class WebView:
             self._deliver_drag_drop_events()
 
         self._expire_pending_evals()
+        self._drain_native_eval_callbacks()
         self._drain_eval_result_queue()
 
         if self._should_keep_polling():
