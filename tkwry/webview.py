@@ -61,6 +61,14 @@ def _validate_color_component(value: int, name: str) -> None:
         raise ValueError(f"{name} must be 0-255, got {value}")
 
 
+def _validate_dimension(value: int, name: str) -> int:
+    if type(value) is not int:
+        raise TypeError(f"{name} must be an int, got {type(value).__name__}")
+    if value <= 0:
+        raise ValueError(f"{name} must be > 0, got {value}")
+    return value
+
+
 def _validate_background_color(color: tuple[int, int, int, int]) -> None:
     if not isinstance(color, tuple) or len(color) != 4:
         raise ValueError("background_color must be a (r, g, b, a) tuple of 4 ints")
@@ -130,8 +138,12 @@ class WebView:
         self._frame = frame
         self._tk_thread_id = threading.get_ident()
         self._early_create = width is not None or height is not None
-        self._init_width = max(width, 1) if width is not None else None
-        self._init_height = max(height, 1) if height is not None else None
+        self._init_width = (
+            _validate_dimension(width, "width") if width is not None else None
+        )
+        self._init_height = (
+            _validate_dimension(height, "height") if height is not None else None
+        )
         self._destroyed = False
         self._ready_delivered = False
         self._ready_callbacks: list[Callable[[], None]] = []
@@ -540,6 +552,8 @@ class WebView:
 
     def set_ipc_handler(self, handler: IpcHandler | None) -> None:
         self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
         self._ipc_handler = handler
         if self._webview is not None:
             self._webview.set_ipc_listening(handler is not None)
@@ -549,6 +563,8 @@ class WebView:
     def set_on_navigation(self, handler: NavigationHandler | None) -> None:
         """Register a navigation hook (runs synchronously on the WebKit thread)."""
         self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
         self._on_navigation = handler
         if self._webview is not None:
             if handler is not None:
@@ -558,6 +574,8 @@ class WebView:
 
     def set_on_page_load(self, handler: PageLoadHandler | None) -> None:
         self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
         self._on_page_load = handler
         if self._webview is not None:
             self._webview.set_page_load_listening(handler is not None)
@@ -579,6 +597,8 @@ class WebView:
 
     def set_on_title_changed(self, handler: TitleChangedHandler | None) -> None:
         self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
         self._on_title_changed = handler
         if self._webview is not None:
             self._webview.set_title_listening(handler is not None)
@@ -588,6 +608,8 @@ class WebView:
     def set_on_new_window(self, handler: NewWindowHandler | None) -> None:
         """Register a new-window hook (runs synchronously on the WebKit thread)."""
         self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
         self._on_new_window = handler
         if self._webview is not None:
             if handler is not None:
@@ -602,6 +624,8 @@ class WebView:
         deny the OS drop. Clearing with ``None`` stops native collection.
         """
         self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
         self._drag_drop_handler = handler
         if self._webview is not None:
             self._webview.set_drag_drop_listening(handler is not None)
@@ -945,11 +969,16 @@ class WebView:
             for _ in range(20):
                 pump_events()
 
-        self._webview = NativeWebView(
-            self._embed.handle,
-            owner_thread=self._tk_thread_id,
-            **kwargs,
-        )
+        try:
+            self._webview = NativeWebView(
+                self._embed.handle,
+                owner_thread=self._tk_thread_id,
+                **kwargs,
+            )
+        except Exception:
+            traceback.print_exc()
+            self._schedule_try_create()
+            return
         self._sync_async_listening()
         self._pending_url = None
         self._pending_html = None
@@ -1084,8 +1113,6 @@ class WebView:
         if self._destroyed or self._webview is None or self._pending_load is None:
             return
         kind, payload = self._pending_load
-        self._pending_load = None
-        self._initial_load = None
         try:
             if kind == "url":
                 self._webview.load_url(payload)
@@ -1094,6 +1121,8 @@ class WebView:
         except Exception:
             traceback.print_exc()
             return
+        self._pending_load = None
+        self._initial_load = None
         self._sync_bounds()
         self._service_linux_events()
         if self._on_page_load is not None:

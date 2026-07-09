@@ -7,6 +7,7 @@ import tkinter as tk
 import pytest
 
 from tkwry import WebView
+from tkwry.exceptions import WebViewDestroyedError
 
 
 class TestBackgroundColorValidation:
@@ -66,4 +67,28 @@ class TestConstructorUrlValidation:
         web = WebView(frame, url="example.com")
         assert web._pending_url == "https://example.com"
         web.destroy()
+        frame.destroy()
+
+
+class TestConstructorDimensionValidation:
+    def test_rejects_negative_width(self, tk_root) -> None:
+        frame = tk.Frame(tk_root)
+        with pytest.raises(ValueError, match="width must be > 0"):
+            WebView(frame, width=-10, height=300)
+        frame.destroy()
+
+    def test_rejects_zero_height(self, tk_root) -> None:
+        frame = tk.Frame(tk_root)
+        with pytest.raises(ValueError, match="height must be > 0"):
+            WebView(frame, width=300, height=0)
+        frame.destroy()
+
+
+class TestDestroyedSetterValidation:
+    def test_set_ipc_handler_raises_after_destroy(self, tk_root) -> None:
+        frame = tk.Frame(tk_root)
+        web = WebView(frame)
+        web.destroy()
+        with pytest.raises(WebViewDestroyedError):
+            web.set_ipc_handler(lambda _msg: None)
         frame.destroy()

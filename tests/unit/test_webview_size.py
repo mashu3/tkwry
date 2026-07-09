@@ -8,6 +8,8 @@ import pytest
 
 from tkwry import WebView
 
+_real_try_create = WebView._try_create
+
 
 @pytest.fixture(autouse=True)
 def _isolate_from_native_create(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -426,3 +428,47 @@ def test_reload_cancels_deferred_initial_load(
     assert web._initial_load is None
     web._run_initial_load()
     native.load_html.assert_not_called()
+
+
+def test_try_create_retries_after_native_failure(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root, width=400, height=300)
+    frame.pack_propagate(False)
+    frame.pack()
+    tk_root.update_idletasks()
+    monkeypatch.setattr(frame, "after_idle", lambda _fn: None)
+    web = WebView(frame, width=400, height=300)
+    scheduled: list[int] = []
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("native create failed")
+
+    monkeypatch.setattr("tkwry.webview.NativeWebView", boom)
+    monkeypatch.setattr(WebView, "_try_create", _real_try_create)
+    monkeypatch.setattr(web, "_schedule_try_create", lambda: scheduled.append(1))
+    scheduled.clear()
+
+    web._try_create()
+
+    assert web._webview is None
+    assert scheduled == [1]
+
+
+def test_flush_load_keeps_pending_on_failure(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import MagicMock
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+    native = MagicMock()
+    native.load_url.side_effect = RuntimeError("boom")
+    web._webview = native
+    web._pending_load = ("url", "https://example.com")
+    monkeypatch.setattr(web, "_sync_bounds", lambda: None, raising=False)
+    monkeypatch.setattr(web, "_service_linux_events", lambda **_k: None, raising=False)
+
+    web._flush_load()
+
+    assert web._pending_load == ("url", "https://example.com")
