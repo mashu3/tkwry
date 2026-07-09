@@ -52,3 +52,18 @@ class TestBackgroundColorValidation:
         with pytest.raises(ValueError, match="4 ints"):
             WebView(frame, background_color=[0, 0, 0, 0])  # type: ignore[arg-type]
         frame.destroy()
+
+
+class TestConstructorUrlValidation:
+    def test_rejects_invalid_url_at_construction(self, tk_root) -> None:
+        frame = tk.Frame(tk_root)
+        with pytest.raises(ValueError, match="scheme"):
+            WebView(frame, url="javascript:alert(1)")
+        frame.destroy()
+
+    def test_normalizes_constructor_url(self, tk_root) -> None:
+        frame = tk.Frame(tk_root)
+        web = WebView(frame, url="example.com")
+        assert web._pending_url == "https://example.com"
+        web.destroy()
+        frame.destroy()

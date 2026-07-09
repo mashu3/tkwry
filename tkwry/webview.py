@@ -160,8 +160,11 @@ class WebView:
         self._pending_eval_tokens: dict[int, float] = {}
         # Bumped on destroy so late WebKit-thread delivers are discarded.
         self._eval_epoch = 0
-        self._pending_url: str | None = url
-        self._pending_html: str | None = html
+        if url is not None:
+            url = _normalize_url(url)
+            _validate_url(url)
+        self._pending_url = url
+        self._pending_html = html
         self._pending_load: _PendingLoad | None = None
         self._flush_load_scheduled = False
         self._bounds_sync_scheduled = False
@@ -906,10 +909,6 @@ class WebView:
         width, height = size
 
         url = self._pending_url
-        if url:
-            url = _normalize_url(url)
-            _validate_url(url)
-
         html = self._pending_html
         initial_load: _PendingLoad | None = None
         if html is not None:
