@@ -22,10 +22,12 @@ def _gtk_pump_tick(root_id: int) -> None:
     except Exception:
         pump.stop()
         return
+    pump._clear_tick_after_id()
     from tkwry._core import pump_events
 
     pump_events()
-    root.after(10, lambda rid=root_id: _gtk_pump_tick(rid))
+    if pump._active:
+        pump._schedule_tick(10)
 
 
 class GtkPump:
@@ -39,6 +41,26 @@ class GtkPump:
         self._active = False
         self._refcount = 0
         self._destroy_bind_id: str | None = None
+        self._tick_after_id: str | None = None
+
+    def _schedule_tick(self, delay_ms: int) -> None:
+        self._cancel_tick()
+        self._tick_after_id = self._root.after(
+            delay_ms, lambda rid=self._root_id: _gtk_pump_tick(rid)
+        )
+
+    def _cancel_tick(self) -> None:
+        after_id = self._tick_after_id
+        self._tick_after_id = None
+        if after_id is None:
+            return
+        try:
+            self._root.after_cancel(after_id)
+        except Exception:
+            pass
+
+    def _clear_tick_after_id(self) -> None:
+        self._tick_after_id = None
 
     @classmethod
     def attach(cls, widget: tk.Misc) -> None:
@@ -78,10 +100,11 @@ class GtkPump:
         ensure_gtk_init()
         self._active = True
         self._destroy_bind_id = self._root.bind("<Destroy>", self._on_destroy, add="+")
-        self._root.after(0, lambda rid=self._root_id: _gtk_pump_tick(rid))
+        self._schedule_tick(0)
 
     def stop(self) -> None:
         self._active = False
+        self._cancel_tick()
         self._refcount = 0
         bind_id = self._destroy_bind_id
         self._destroy_bind_id = None

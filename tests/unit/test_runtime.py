@@ -83,7 +83,71 @@ def test_gtk_pump_schedules_next_tick_with_root_id_only(
     assert len(scheduled) == 1
     callback = scheduled[0]
     assert getattr(callback, "__defaults__", ()) == (pump._root_id,)
+    assert pump._tick_after_id == "after-id"
     pump.stop()
+    assert pump._tick_after_id is None
+
+
+def test_gtk_pump_stop_cancels_pending_tick(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cancelled: list[str] = []
+    monkeypatch.setattr(
+        "tkwry._core.pump_events",
+        lambda: None,
+        raising=False,
+    )
+
+    pump = GtkPump(tk_root)
+    GtkPump._by_root_id[pump._root_id] = pump
+    pump._active = True
+    pump._tick_after_id = "pending-id"
+    monkeypatch.setattr(
+        pump._root,
+        "after_cancel",
+        lambda after_id: cancelled.append(after_id),
+    )
+
+    pump.stop()
+
+    assert cancelled == ["pending-id"]
+    assert pump._tick_after_id is None
+
+
+def test_gtk_pump_stale_tick_does_not_drive_reattached_pump(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[int] = []
+    monkeypatch.setattr(
+        "tkwry._core.pump_events",
+        lambda: calls.append(1),
+        raising=False,
+    )
+
+    pump1 = GtkPump(tk_root)
+    GtkPump._by_root_id[pump1._root_id] = pump1
+    pump1._active = True
+    cancelled: list[str] = []
+    monkeypatch.setattr(pump1._root, "after", lambda *_a, **_k: "tick-id")
+    monkeypatch.setattr(
+        pump1._root,
+        "after_cancel",
+        lambda after_id: cancelled.append(after_id),
+    )
+    pump1._schedule_tick(10)
+
+    pump1.stop()
+    assert cancelled == ["tick-id"]
+
+    pump2 = GtkPump(tk_root)
+    GtkPump._by_root_id[pump2._root_id] = pump2
+    pump2._active = True
+
+    calls.clear()
+    _gtk_pump_tick(pump2._root_id)
+
+    assert calls == [1]
+    pump2.stop()
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
