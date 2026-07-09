@@ -37,6 +37,12 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
     "NSRunLoop",
     "NSNotification",
     "NSOperation",
+    "NSString",
+    "NSURL",
+] }
+objc2-web-kit = { version = "0.3", default-features = false, features = [
+    "WKWebView",
+    "objc2-app-kit",
 ] }
 
 [profile.release]

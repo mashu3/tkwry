@@ -1,6 +1,8 @@
 //! wry bindings for embedding a WebView into a Tkinter host window.
 
 #[cfg(target_os = "macos")]
+mod macos_document_url;
+#[cfg(target_os = "macos")]
 mod macos_focus;
 
 use pyo3::prelude::*;
@@ -226,6 +228,8 @@ struct WebView {
     title_overflow_dropped: Arc<AtomicU64>,
     drag_drop_overflow_dropped: Arc<AtomicU64>,
     eval_overflow_dropped: Arc<AtomicU64>,
+    #[cfg(target_os = "macos")]
+    parent_ns_view: std::ptr::NonNull<objc2_app_kit::NSView>,
     #[cfg(target_os = "macos")]
     _focus_sync: Mutex<Option<macos_focus::FocusSyncGuard>>,
     #[cfg(target_os = "macos")]
@@ -648,6 +652,8 @@ impl WebView {
             drag_drop_overflow_dropped,
             eval_overflow_dropped,
             #[cfg(target_os = "macos")]
+            parent_ns_view,
+            #[cfg(target_os = "macos")]
             _focus_sync,
             #[cfg(target_os = "macos")]
             web_wants_keyboard,
@@ -1015,19 +1021,19 @@ impl WebView {
     }
 
     fn url(&self) -> PyResult<Option<String>> {
-        with_webview(self, |wv| {
-            let raw = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| wv.url())) {
-                Ok(result) => result,
-                Err(_) => {
-                    return Err(pyo3::exceptions::PyRuntimeError::new_err(
-                        "webview url() panicked",
-                    ));
+        #[cfg(target_os = "macos")]
+        {
+            return with_webview(self, |wv| {
+                match macos_document_url::read_document_url(wv, self.parent_ns_view) {
+                    Ok(url) => Ok(normalize_document_url(url)),
+                    Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(err)),
                 }
-            };
-            match raw {
-                Ok(url) => Ok(normalize_document_url(Some(url))),
-                Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(err.to_string())),
-            }
+            });
+        }
+        #[cfg(not(target_os = "macos"))]
+        with_webview(self, |wv| match wv.url() {
+            Ok(url) => Ok(normalize_document_url(Some(url))),
+            Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(err.to_string())),
         })
     }
 
