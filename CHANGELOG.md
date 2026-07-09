@@ -4,6 +4,31 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.0.8] - 2026-07-10
+
+### Fixed
+
+- macOS `url()` reads the document URL from `WKWebView` directly so inline HTML / missing `NSURL` no longer panics in wry 0.55
+- URL normalization extended: bracket IPv6 hosts, resolve Windows drive roots and IDN paths; reject bare paths as `https` and pathless `file://` URLs
+- Constructor `url=` validated at WebView construction time
+- Deferred initial load canceled on `reload()`, rescheduled when the frame is not ready, and prevented from overwriting later `load_url` / `load_html`
+- Ready state reset when the host frame is unmapped; deferred ready callbacks skipped after destroy
+- `<<WebViewReady>>` delivered on idle; late bind delivery routed through `_invoke_callback` with a guard when the probe event is missed
+- `eval_js_with_callback` polling made race-safe across threads; stale polls expire after timeout
+- Event queue rejects pushes when full; lock poison surfaced; TOCTOU closed so disabled events cannot requeue; async events delivered only from Python
+- Teardown hardened: `destroy_pending` retained until native teardown completes; native reference cleared on failed `destroy()`; host-frame Tk handlers unbound; GtkPump stopped when the last Linux WebView is destroyed; macOS `bind_all` / `bind_class` hooks torn down with the last WebView; interp thread map released on Tk destroy
+- GtkPump tracks attachments per widget, cancels pending ticks when pumping stops, and avoids clearing refcount
+- macOS Tk dylib handles cached per Tcl library path; key guard reliably unbound; drawable offsets probed from natives
+- `DragDropHandler` is notify-only
+- Navigation handler type errors no longer print a spurious traceback
+- Multi-WebView eval wait hardened against empty interim JS results
+- WebView create, load lifecycle, setters, and dimension validation hardened against teardown races
+
+### Changed
+
+- `wait_until_ready()` requires a finite timeout; reentrancy documented
+- Regression tests for `<<WebViewReady>>` delivery ordering and JS IPC end-to-end
+
 ## [0.0.7] - 2026-07-08
 
 ### Added
@@ -157,6 +182,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.0.8]: https://github.com/mashu3/tkwry/releases/tag/v0.0.8
 [0.0.7]: https://github.com/mashu3/tkwry/releases/tag/v0.0.7
 [0.0.6]: https://github.com/mashu3/tkwry/releases/tag/v0.0.6
 [0.0.5]: https://github.com/mashu3/tkwry/releases/tag/v0.0.5
