@@ -271,9 +271,18 @@ class WebView:
             ) -> None:
                 if self._destroyed:
                     return
-                evt = tk.Event()
-                evt.widget = _frame
-                _func(evt)
+                captured: list[tk.Event] = []
+                probe = "<<WebViewReady-Synthetic>>"
+
+                def _capture(evt: tk.Event) -> None:
+                    captured.append(evt)
+
+                bind_id = _frame.bind(probe, _capture)
+                try:
+                    _frame.event_generate(probe)
+                finally:
+                    _frame.unbind(probe, bind_id)
+                self._invoke_callback(_func, captured[0])
 
             self._frame.after_idle(_deliver_ready)
         return result
