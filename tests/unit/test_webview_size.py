@@ -285,3 +285,46 @@ def test_fire_ready_defers_webview_ready_until_idle(
     assert fired_during_maybe_fire == []
     tk_root.update_idletasks()
     assert fired_during_maybe_fire == [False]
+
+
+def test_fire_ready_delivers_bind_before_when_ready_callbacks(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>ready</p>")
+    web._webview = object()
+    order: list[str] = []
+    web.bind("<<WebViewReady>>", lambda _evt: order.append("bind"))
+    web.when_ready(lambda: order.append("when_ready_1"))
+    web.when_ready(lambda: order.append("when_ready_2"))
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+
+    web._maybe_fire_ready()
+    tk_root.update_idletasks()
+
+    assert order == ["bind", "when_ready_1", "when_ready_2"]
+
+
+def test_fire_ready_skips_delivery_if_destroyed_before_idle(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>ready</p>")
+
+    class _Native:
+        def destroy(self) -> None:
+            return None
+
+    web._webview = _Native()
+    bind_fired: list[bool] = []
+    when_ready_fired: list[bool] = []
+    web.bind("<<WebViewReady>>", lambda _evt: bind_fired.append(True))
+    web.when_ready(lambda: when_ready_fired.append(True))
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+
+    web._maybe_fire_ready()
+    web.destroy()
+    tk_root.update_idletasks()
+
+    assert bind_fired == []
+    assert when_ready_fired == []
