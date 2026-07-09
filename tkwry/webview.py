@@ -647,16 +647,19 @@ class WebView:
                 return False
             if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
                 return False
-            if sys.platform != "linux" and not self._frame.winfo_viewable():
+            if not self._frame.winfo_viewable():
                 return False
             return True
         except tk.TclError:
             return False
 
     def _maybe_fire_ready(self) -> None:
-        if self._ready_delivered or self._destroyed or self._webview is None:
+        if self._destroyed or self._webview is None:
             return
         if not self._layout_ready():
+            self._ready_delivered = False
+            return
+        if self._ready_delivered:
             return
         self._ready_delivered = True
         self._fire_ready()

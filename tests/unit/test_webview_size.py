@@ -330,6 +330,48 @@ def test_fire_ready_skips_delivery_if_destroyed_before_idle(
     assert when_ready_fired == []
 
 
+def test_layout_ready_false_when_not_viewable(tk_root, monkeypatch) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    web._webview = object()
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 400)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 300)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
+
+    assert web._layout_ready() is False
+    assert web.ready is False
+
+
+def test_maybe_fire_ready_refires_after_unmap_remap(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+    web._webview = object()
+    viewable = [True]
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 400)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 300)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: viewable[0])
+    fired: list[int] = []
+    monkeypatch.setattr(web, "_fire_ready", lambda: fired.append(1), raising=False)
+
+    web._maybe_fire_ready()
+    assert fired == [1]
+    assert web._ready_delivered
+
+    viewable[0] = False
+    web._maybe_fire_ready()
+    assert not web._ready_delivered
+    assert fired == [1]
+
+    viewable[0] = True
+    web._maybe_fire_ready()
+    assert fired == [1, 1]
+    assert web._ready_delivered
+
+
 def test_destroy_clears_native_when_native_destroy_fails(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)
