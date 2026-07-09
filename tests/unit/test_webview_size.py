@@ -7,6 +7,8 @@ import tkinter as tk
 import pytest
 
 from tkwry import WebView
+from tkwry.exceptions import WebViewDestroyedError
+from tkwry.webview import _CREATE_MAX_ATTEMPTS, _FLUSH_LOAD_MAX_ATTEMPTS
 
 _real_try_create = WebView._try_create
 
@@ -33,6 +35,13 @@ def test_partial_explicit_height_does_not_default_width(tk_root) -> None:
 
     assert web._init_width is None
     assert web._init_height == 240
+
+
+def test_creation_size_rejects_unit_explicit_width(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    with pytest.raises(ValueError, match="width must be >="):
+        WebView(frame, width=1, height=200)
+    frame.destroy()
 
 
 def test_creation_size_waits_for_missing_frame_height(tk_root, monkeypatch) -> None:
@@ -345,7 +354,7 @@ def test_layout_ready_false_when_not_viewable(tk_root, monkeypatch) -> None:
     assert web.ready is False
 
 
-def test_maybe_fire_ready_refires_after_unmap_remap(
+def test_maybe_fire_ready_fires_once_after_unmap_remap(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     frame = tk.Frame(tk_root)
@@ -365,12 +374,12 @@ def test_maybe_fire_ready_refires_after_unmap_remap(
 
     viewable[0] = False
     web._maybe_fire_ready()
-    assert not web._ready_delivered
+    assert web._ready_delivered
     assert fired == [1]
 
     viewable[0] = True
     web._maybe_fire_ready()
-    assert fired == [1, 1]
+    assert fired == [1]
     assert web._ready_delivered
 
 
@@ -403,7 +412,30 @@ def test_destroy_clears_native_when_native_destroy_fails(tk_root) -> None:
     web.destroy()
 
     assert web.destroyed is True
-    assert web.native is None
+    with pytest.raises(WebViewDestroyedError):
+        _ = web.native
+
+
+def test_reload_clears_pending_flush_load(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import MagicMock
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+    native = MagicMock()
+    web._webview = native
+    web._pending_load = ("url", "https://example.com/stale")
+    web._flush_load_scheduled = True
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+    monkeypatch.setattr(web, "_service_linux_events", lambda **_k: None, raising=False)
+
+    web.reload()
+
+    assert web._pending_load is None
+    native.load_url.assert_not_called()
+    web._flush_load()
+    native.load_url.assert_not_called()
 
 
 def test_reload_cancels_deferred_initial_load(
@@ -430,6 +462,34 @@ def test_reload_cancels_deferred_initial_load(
     native.load_html.assert_not_called()
 
 
+def test_try_create_stops_after_max_attempts(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root, width=400, height=300)
+    frame.pack_propagate(False)
+    frame.pack()
+    tk_root.update_idletasks()
+    monkeypatch.setattr(frame, "after_idle", lambda _fn: None)
+    web = WebView(frame, width=400, height=300)
+    scheduled: list[int] = []
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("native create failed")
+
+    monkeypatch.setattr("tkwry.webview.NativeWebView", boom)
+    monkeypatch.setattr(WebView, "_try_create", _real_try_create)
+    monkeypatch.setattr(
+        web, "_schedule_try_create", lambda **_k: scheduled.append(1), raising=False
+    )
+    web._create_attempt = _CREATE_MAX_ATTEMPTS - 1
+
+    web._try_create()
+
+    assert web._webview is None
+    assert scheduled == []
+    assert web._create_attempt == _CREATE_MAX_ATTEMPTS
+
+
 def test_try_create_retries_after_native_failure(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -446,7 +506,7 @@ def test_try_create_retries_after_native_failure(
 
     monkeypatch.setattr("tkwry.webview.NativeWebView", boom)
     monkeypatch.setattr(WebView, "_try_create", _real_try_create)
-    monkeypatch.setattr(web, "_schedule_try_create", lambda: scheduled.append(1))
+    monkeypatch.setattr(web, "_schedule_try_create", lambda **_k: scheduled.append(1))
     scheduled.clear()
 
     web._try_create()
@@ -455,7 +515,7 @@ def test_try_create_retries_after_native_failure(
     assert scheduled == [1]
 
 
-def test_flush_load_keeps_pending_on_failure(
+def test_flush_load_retries_then_clears_pending_on_failure(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from unittest.mock import MagicMock
@@ -466,9 +526,19 @@ def test_flush_load_keeps_pending_on_failure(
     native.load_url.side_effect = RuntimeError("boom")
     web._webview = native
     web._pending_load = ("url", "https://example.com")
+    scheduled: list[int] = []
+    monkeypatch.setattr(
+        web, "_schedule_flush_load", lambda **_k: scheduled.append(1), raising=False
+    )
     monkeypatch.setattr(web, "_sync_bounds", lambda: None, raising=False)
     monkeypatch.setattr(web, "_service_linux_events", lambda **_k: None, raising=False)
 
     web._flush_load()
-
     assert web._pending_load == ("url", "https://example.com")
+    assert scheduled == [1]
+    assert web._flush_load_attempt == 1
+
+    web._flush_load_attempt = _FLUSH_LOAD_MAX_ATTEMPTS - 1
+    web._flush_load()
+    assert web._pending_load is None
+    assert web._flush_load_attempt == 0

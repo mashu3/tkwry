@@ -75,7 +75,7 @@ def test_poll_events_drains_late_eval_result(
     _frame, web = _make_web(tk_root)
     _configure_poll_test(web, monkeypatch)
     results: list[str] = []
-    token = web._register_pending_eval()
+    token = web._register_pending_eval(results.append, None)
     web._eval_result_queue.put((web._eval_epoch, token, results.append, "ok"))
     web._event_poll_active = True
 
@@ -112,7 +112,7 @@ def test_poll_events_rearms_if_result_arrives_during_stop(
             # Simulate a WebKit-thread deliver between the two checks.
             web._pending_eval_callbacks = 1
             web._pending_eval_tokens.clear()
-            token = web._register_pending_eval()
+            token = web._register_pending_eval(results.append, None)
             web._eval_result_queue.put((web._eval_epoch, token, results.append, "late"))
             return False
         return web._pending_eval_callbacks > 0 or not web._eval_result_queue.empty()
@@ -191,7 +191,7 @@ def test_destroy_drops_queued_eval_results(
 ) -> None:
     _frame, web = _make_web(tk_root)
     results: list[str] = []
-    token = web._register_pending_eval()
+    token = web._register_pending_eval(results.append, None)
     web._eval_result_queue.put((web._eval_epoch, token, results.append, "stale"))
     epoch_before = web._eval_epoch
 
@@ -209,12 +209,31 @@ def test_poll_events_expires_stale_eval_callbacks(
 ) -> None:
     _frame, web = _make_web(tk_root)
     _configure_poll_test(web, monkeypatch)
-    token = web._register_pending_eval()
-    web._pending_eval_tokens[token] = 0.0
+    results: list[str] = []
+    token = web._register_pending_eval(results.append, None)
+    web._pending_eval_tokens[token] = (0.0, results.append, None)
     web._event_poll_active = True
 
     web._poll_events()
 
+    assert results == [""]
     assert web._pending_eval_callbacks == 0
     assert not web._pending_eval_tokens
     assert web._event_poll_active is False
+
+
+def test_poll_events_expires_stale_eval_callbacks_with_on_error(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _make_web(tk_root)
+    _configure_poll_test(web, monkeypatch)
+    errors: list[BaseException] = []
+    token = web._register_pending_eval(lambda _r: None, errors.append)
+    web._pending_eval_tokens[token] = (0.0, lambda _r: None, errors.append)
+    web._event_poll_active = True
+
+    web._poll_events()
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], TimeoutError)
+    assert web._pending_eval_callbacks == 0

@@ -379,7 +379,8 @@ def test_double_destroy_is_safe(tk_root) -> None:
     web.destroy()
     web.destroy()
     assert web.destroyed
-    assert web.native is None
+    with pytest.raises(WebViewDestroyedError):
+        _ = web.native
 
     frame.destroy()
 

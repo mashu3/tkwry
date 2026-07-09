@@ -14,6 +14,7 @@ import pytest
 from support.tk import host_frame, pump, wait_until
 
 from tkwry import DragDropEvent, PageLoadEvent, WebView
+from tkwry.exceptions import WebViewDestroyedError
 
 
 def test_create_with_html_and_destroy(tk_root) -> None:
@@ -24,7 +25,8 @@ def test_create_with_html_and_destroy(tk_root) -> None:
     assert web.native is not None
 
     web.destroy()
-    assert web.native is None
+    with pytest.raises(WebViewDestroyedError):
+        _ = web.native
 
     frame.destroy()
 

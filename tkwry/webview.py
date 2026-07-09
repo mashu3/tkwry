@@ -51,7 +51,11 @@ EvalCallback: TypeAlias = Callable[[str], None]
 EvalErrorHandler: TypeAlias = Callable[[Exception], None]
 _PendingLoad: TypeAlias = tuple[Literal["url"], str] | tuple[Literal["html"], str]
 _EvalQueueItem: TypeAlias = tuple[int, int, EvalCallback, str]
+_PendingEval: TypeAlias = tuple[float, EvalCallback, EvalErrorHandler | None]
 _EVAL_CALLBACK_TIMEOUT_S = 30.0
+_MIN_LAYOUT_DIMENSION = 2
+_CREATE_MAX_ATTEMPTS = 30
+_FLUSH_LOAD_MAX_ATTEMPTS = 3
 
 
 def _validate_color_component(value: int, name: str) -> None:
@@ -64,8 +68,8 @@ def _validate_color_component(value: int, name: str) -> None:
 def _validate_dimension(value: int, name: str) -> int:
     if type(value) is not int:
         raise TypeError(f"{name} must be an int, got {type(value).__name__}")
-    if value <= 0:
-        raise ValueError(f"{name} must be > 0, got {value}")
+    if value < _MIN_LAYOUT_DIMENSION:
+        raise ValueError(f"{name} must be >= {_MIN_LAYOUT_DIMENSION}, got {value}")
     return value
 
 
@@ -95,7 +99,12 @@ class WebView:
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
     Before the native view exists, the last pending load is applied at creation
-    (``load_html`` overrides a pending URL).
+    (``load_html`` overrides a pending URL). If both ``url`` and ``html`` are
+    passed to the constructor, ``html`` wins and a warning is printed to stderr.
+
+    **Ready** (``<<WebViewReady>>`` / :meth:`when_ready`): fires once per
+    instance when the native view first becomes laid out; unmap/remap does not
+    re-fire the event.
 
     **Page load** (``on_page_load``): fires ``Started`` and ``Finished`` for
     every navigation. Events that occurred while no handler was registered are
@@ -106,6 +115,8 @@ class WebView:
     asynchronous; the callback receives the result string on the Tk main thread.
 
     Call :meth:`destroy` or destroy the host frame to release the native view.
+    After :meth:`destroy`, the instance cannot be reused; create a new
+    ``WebView`` on the same or another frame instead.
 
     All public methods must run on the **Tk thread** (the thread that created
     the host frame's Tcl interpreter and runs the event loop). Calls from other
@@ -148,6 +159,8 @@ class WebView:
         self._ready_delivered = False
         self._ready_callbacks: list[Callable[[], None]] = []
         self._create_pending = False
+        self._create_attempt = 0
+        self._flush_load_attempt = 0
         self._embed = tk_embed_parent(frame)
         self._webview: NativeWebView | None = None
         self._ipc_handler = ipc_handler
@@ -172,6 +185,11 @@ class WebView:
         self._pending_eval_tokens: dict[int, float] = {}
         # Bumped on destroy so late WebKit-thread delivers are discarded.
         self._eval_epoch = 0
+        if url is not None and html is not None:
+            print(
+                "tkwry: html= takes precedence over url= when both are given",
+                file=sys.stderr,
+            )
         if url is not None:
             url = _normalize_url(url)
             _validate_url(url)
@@ -223,6 +241,7 @@ class WebView:
         self._maybe_fire_ready()
 
     def __repr__(self) -> str:
+        self._require_tk_thread()
         if self._destroyed:
             state = "destroyed"
             url = None
@@ -265,6 +284,8 @@ class WebView:
     def native(self) -> NativeWebView | None:
         """Underlying :class:`tkwry._core.WebView`, or ``None`` if not created."""
         self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
         return self._webview
 
     @property
@@ -314,7 +335,7 @@ class WebView:
         """Schedule *callback* once the native view exists and the host is laid out."""
         self._require_tk_thread()
         if self._destroyed:
-            return
+            raise WebViewDestroyedError("WebView.destroy() was called")
         if self.ready:
 
             def _deliver() -> None:
@@ -379,7 +400,11 @@ class WebView:
             self._wait_until_ready_active = False
 
     def destroy(self) -> None:
-        """Hide and release the native webview without destroying the host frame."""
+        """Hide and release the native webview without destroying the host frame.
+
+        The instance cannot be reused after this call; create a new ``WebView``
+        if you need another embedded view.
+        """
         self._require_tk_thread()
         if self._destroyed:
             return
@@ -462,6 +487,9 @@ class WebView:
         # Supersede constructor deferred load so it cannot overwrite this reload.
         self._initial_load = None
         self._cancel_initial_load_timer()
+        # Drop any idle-coalesced load_url/load_html so it cannot overwrite reload.
+        self._pending_load = None
+        self._flush_load_attempt = 0
         native.reload()
         if self._on_page_load is not None:
             self._ensure_event_poll()
@@ -489,12 +517,13 @@ class WebView:
 
         Asynchronous: *callback* runs on the **Tk main thread** after the script
         completes. The result is always a ``str`` (including JSON literals).
-        If *on_error* is provided, it is called with the exception on failure;
-        otherwise the traceback is printed to stderr.
+        If *on_error* is provided, it is called with the exception on failure
+        or on timeout (30s); otherwise the traceback is printed to stderr and
+        *callback* receives ``""`` on timeout.
         """
         self._require_ready("eval_js_with_callback")
         epoch = self._eval_epoch
-        token = self._register_pending_eval()
+        token = self._register_pending_eval(callback, on_error)
         self._ensure_event_poll()
 
         def _run() -> None:
@@ -539,7 +568,31 @@ class WebView:
         native = self._require_ready("set_background_color")
         for val, name in ((r, "r"), (g, "g"), (b, "b"), (a, "a")):
             _validate_color_component(val, name)
+        self._background_color = (r, g, b, a)
         native.set_background_color(r, g, b, a)
+
+    def set_user_agent(self, user_agent: str | None) -> None:
+        """Set the user agent applied when the native view is first created."""
+        self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
+        if self._webview is not None:
+            raise ValueError(
+                "user_agent cannot be changed after the native WebView is created"
+            )
+        self._user_agent = user_agent
+
+    def set_initialization_script(self, script: str | None) -> None:
+        """Set the initialization script applied when the native view is created."""
+        self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
+        if self._webview is not None:
+            raise ValueError(
+                "initialization_script cannot be changed after the native "
+                "WebView is created"
+            )
+        self._initialization_script = script
 
     def open_devtools(self) -> None:
         self._require_ready("open_devtools").open_devtools()
@@ -632,11 +685,14 @@ class WebView:
         if handler is not None:
             self._ensure_event_poll()
 
-    def _schedule_try_create(self) -> None:
+    def _schedule_try_create(self, *, delay_ms: int | None = None) -> None:
         if self._destroyed or self._webview is not None or self._create_pending:
             return
         self._create_pending = True
-        self._frame.after_idle(self._run_try_create)
+        if delay_ms is None:
+            self._frame.after_idle(self._run_try_create)
+        else:
+            self._frame.after(delay_ms, self._run_try_create)
 
     def _run_try_create(self) -> None:
         self._create_pending = False
@@ -671,6 +727,8 @@ class WebView:
         height = frame_h if frame_h > 1 else self._init_height
         if width is None or height is None:
             return None
+        if width <= 1 or height <= 1:
+            return None
         return width, height
 
     def _layout_ready(self) -> bool:
@@ -692,7 +750,6 @@ class WebView:
         if self._destroyed or self._webview is None:
             return
         if not self._layout_ready():
-            self._ready_delivered = False
             return
         if self._ready_delivered:
             return
@@ -844,10 +901,18 @@ class WebView:
             pump_events()
         self._deliver_page_load_events()
 
-    def _register_pending_eval(self) -> int:
+    def _register_pending_eval(
+        self,
+        callback: EvalCallback,
+        on_error: EvalErrorHandler | None,
+    ) -> int:
         token = self._eval_token_seq
         self._eval_token_seq += 1
-        self._pending_eval_tokens[token] = time.monotonic() + _EVAL_CALLBACK_TIMEOUT_S
+        self._pending_eval_tokens[token] = (
+            time.monotonic() + _EVAL_CALLBACK_TIMEOUT_S,
+            callback,
+            on_error,
+        )
         self._pending_eval_callbacks += 1
         return token
 
@@ -861,14 +926,20 @@ class WebView:
         if not self._pending_eval_tokens:
             return
         now = time.monotonic()
-        for token, deadline in list(self._pending_eval_tokens.items()):
+        for token, (deadline, callback, on_error) in list(
+            self._pending_eval_tokens.items()
+        ):
             if now >= deadline:
-                print(
-                    "tkwry: eval_js_with_callback timed out "
-                    f"after {_EVAL_CALLBACK_TIMEOUT_S:g}s",
-                    file=sys.stderr,
-                )
                 self._release_pending_eval(token)
+                exc = TimeoutError(
+                    f"eval_js_with_callback timed out after "
+                    f"{_EVAL_CALLBACK_TIMEOUT_S:g}s"
+                )
+                if on_error is not None:
+                    self._invoke_callback(on_error, exc)
+                else:
+                    print(f"tkwry: {exc}", file=sys.stderr)
+                    self._invoke_callback(callback, "")
 
     def _ensure_event_poll(self) -> None:
         if self._event_poll_active or self._destroyed:
@@ -977,8 +1048,18 @@ class WebView:
             )
         except Exception:
             traceback.print_exc()
-            self._schedule_try_create()
+            self._create_attempt += 1
+            if self._create_attempt >= _CREATE_MAX_ATTEMPTS:
+                print(
+                    f"tkwry: failed to create native WebView after "
+                    f"{_CREATE_MAX_ATTEMPTS} attempts; giving up",
+                    file=sys.stderr,
+                )
+                return
+            delay = min(5000, 50 * (2 ** min(self._create_attempt - 1, 6)))
+            self._schedule_try_create(delay_ms=delay)
             return
+        self._create_attempt = 0
         self._sync_async_listening()
         self._pending_url = None
         self._pending_html = None
@@ -1033,11 +1114,14 @@ class WebView:
         if self._initial_load_attempt >= self._initial_load_attempts():
             self._initial_load = None
 
-    def _schedule_flush_load(self) -> None:
+    def _schedule_flush_load(self, *, delay_ms: int | None = None) -> None:
         if self._flush_load_scheduled:
             return
         self._flush_load_scheduled = True
-        self._frame.after_idle(self._flush_load)
+        if delay_ms is None:
+            self._frame.after_idle(self._flush_load)
+        else:
+            self._frame.after(delay_ms, self._flush_load)
 
     def _initial_load_attempts(self) -> int:
         """Headless Linux and macOS may need a second navigation after compositing."""
@@ -1120,8 +1204,23 @@ class WebView:
                 self._webview.load_html(payload)
         except Exception:
             traceback.print_exc()
+            self._flush_load_attempt += 1
+            if (
+                self._flush_load_attempt < _FLUSH_LOAD_MAX_ATTEMPTS
+                and self._pending_load is not None
+            ):
+                self._schedule_flush_load(delay_ms=150)
+                return
+            print(
+                "tkwry: load failed after "
+                f"{self._flush_load_attempt} attempt(s); giving up",
+                file=sys.stderr,
+            )
+            self._pending_load = None
+            self._flush_load_attempt = 0
             return
         self._pending_load = None
+        self._flush_load_attempt = 0
         self._initial_load = None
         self._sync_bounds()
         self._service_linux_events()

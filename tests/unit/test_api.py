@@ -42,6 +42,8 @@ WEBVIEW_METHODS = (
     "focus",
     "focus_parent",
     "set_background_color",
+    "set_user_agent",
+    "set_initialization_script",
     "open_devtools",
     "close_devtools",
     "is_devtools_open",

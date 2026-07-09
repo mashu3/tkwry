@@ -73,14 +73,20 @@ class TestConstructorUrlValidation:
 class TestConstructorDimensionValidation:
     def test_rejects_negative_width(self, tk_root) -> None:
         frame = tk.Frame(tk_root)
-        with pytest.raises(ValueError, match="width must be > 0"):
+        with pytest.raises(ValueError, match="width must be >="):
             WebView(frame, width=-10, height=300)
         frame.destroy()
 
     def test_rejects_zero_height(self, tk_root) -> None:
         frame = tk.Frame(tk_root)
-        with pytest.raises(ValueError, match="height must be > 0"):
+        with pytest.raises(ValueError, match="height must be >="):
             WebView(frame, width=300, height=0)
+        frame.destroy()
+
+    def test_rejects_unit_dimension(self, tk_root) -> None:
+        frame = tk.Frame(tk_root)
+        with pytest.raises(ValueError, match="width must be >="):
+            WebView(frame, width=1, height=300)
         frame.destroy()
 
 
