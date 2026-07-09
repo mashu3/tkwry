@@ -343,3 +343,27 @@ def test_destroy_clears_native_when_native_destroy_fails(tk_root) -> None:
 
     assert web.destroyed is True
     assert web.native is None
+
+
+def test_reload_cancels_deferred_initial_load(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import MagicMock
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>A</p>")
+    native = MagicMock()
+    web._webview = native
+    web._initial_load = ("html", "<p>A</p>")
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+    monkeypatch.setattr(
+        web, "_frame_ready_for_initial_load", lambda: True, raising=False
+    )
+    monkeypatch.setattr(web, "_sync_bounds", lambda: None, raising=False)
+    monkeypatch.setattr(web, "_service_linux_events", lambda **_k: None, raising=False)
+
+    web.reload()
+
+    assert web._initial_load is None
+    web._run_initial_load()
+    native.load_html.assert_not_called()

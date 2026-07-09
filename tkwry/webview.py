@@ -436,6 +436,9 @@ class WebView:
 
     def reload(self) -> None:
         native = self._require_ready("reload")
+        # Supersede constructor deferred load so it cannot overwrite this reload.
+        self._initial_load = None
+        self._cancel_initial_load_timer()
         native.reload()
         if self._on_page_load is not None:
             self._ensure_event_poll()
