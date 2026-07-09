@@ -182,7 +182,7 @@ class WebView:
         self._wait_until_ready_active = False
         self._pending_eval_callbacks = 0
         self._eval_token_seq = 0
-        self._pending_eval_tokens: dict[int, float] = {}
+        self._pending_eval_tokens: dict[int, _PendingEval] = {}
         # Bumped on destroy so late WebKit-thread delivers are discarded.
         self._eval_epoch = 0
         if url is not None and html is not None:
