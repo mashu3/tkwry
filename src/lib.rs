@@ -64,9 +64,7 @@ fn push_if_listening<T>(
     }
     if queue.len() >= max {
         dropped.fetch_add(1, Ordering::SeqCst);
-        eprintln!(
-            "tkwry: dropping newest {label} event (pending queue full at {max} events)"
-        );
+        eprintln!("tkwry: dropping newest {label} event (pending queue full at {max} events)");
         return Ok(());
     }
     queue.push(item);
@@ -88,9 +86,7 @@ fn push_eval_result(
     };
     if queue.len() >= MAX_EVAL_PENDING {
         dropped.fetch_add(1, Ordering::SeqCst);
-        eprintln!(
-            "tkwry: dropping eval result (pending queue full at {MAX_EVAL_PENDING} events)"
-        );
+        eprintln!("tkwry: dropping eval result (pending queue full at {MAX_EVAL_PENDING} events)");
         return;
     }
     queue.push((token, result));
