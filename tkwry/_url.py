@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlparse, urlunparse
 from urllib.request import url2pathname
 
 _SUPPORTED_SCHEMES = frozenset({"http", "https", "file"})
@@ -49,6 +50,103 @@ _HOSTNAME_RE = re.compile(
     r"^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*"
     r"[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$"
 )
+_WINDOWS_DRIVE_ONLY_RE = re.compile(r"^[A-Za-z]:$")
+
+
+def _contains_non_ascii(value: str) -> bool:
+    return not value.isascii()
+
+
+def _is_ipv6_literal(host: str) -> bool:
+    try:
+        ipaddress.IPv6Address(host)
+    except ValueError:
+        return False
+    return True
+
+
+def _split_ipv6_host_port(url: str) -> tuple[str, str, str] | None:
+    """Parse ``[ipv6]:port``, ``ipv6:port``, or bare ``ipv6`` without a scheme."""
+    if url.startswith("["):
+        end = url.find("]")
+        if end < 0:
+            return None
+        addr = url[1:end]
+        if not _is_ipv6_literal(addr):
+            return None
+        rest = url[end + 1 :]
+        if rest.startswith(":"):
+            port, _, path = rest[1:].partition("/")
+            if port and not port.isdigit():
+                return None
+            path_suffix = f"/{path}" if path else ""
+            return f"[{addr}]", port, path_suffix
+        if rest.startswith("/") or not rest:
+            return f"[{addr}]", "", rest
+        return None
+
+    if url.count(":") < 2:
+        return None
+
+    slash_pos = url.find("/")
+    authority = url if slash_pos < 0 else url[:slash_pos]
+    path_suffix = url[slash_pos:] if slash_pos >= 0 else ""
+
+    last_colon = authority.rfind(":")
+    maybe_port = authority[last_colon + 1 :]
+    maybe_host = authority[:last_colon]
+    if maybe_port.isdigit() and _is_ipv6_literal(maybe_host):
+        return f"[{maybe_host}]", maybe_port, path_suffix
+    if _is_ipv6_literal(authority):
+        return f"[{authority}]", "", path_suffix
+    return None
+
+
+def _https_url_from_ipv6_parts(host: str, port: str, path: str) -> str:
+    if port:
+        return f"https://{host}:{port}{path}"
+    return f"https://{host}{path}"
+
+
+def _fix_https_ipv6_netloc(url: str) -> str:
+    """Bracket unescaped IPv6 literals in ``http``/``https`` authorities."""
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return url
+    netloc = parsed.netloc
+    if netloc.startswith("["):
+        return url
+
+    host = netloc
+    port = ""
+    if netloc.count(":") >= 2:
+        host, sep, port = netloc.rpartition(":")
+        if not sep or not port.isdigit() or not _is_ipv6_literal(host):
+            host = netloc
+            port = ""
+    if not _is_ipv6_literal(host):
+        return url
+
+    new_netloc = f"[{host}]:{port}" if port else f"[{host}]"
+    return urlunparse(parsed._replace(netloc=new_netloc))
+
+
+def _looks_like_idn_hostname(host: str) -> bool:
+    if not host or len(host) > 253 or host.startswith("."):
+        return False
+    if host == "localhost":
+        return True
+    if "." not in host:
+        return False
+    if _HOSTNAME_RE.match(host):
+        return True
+    if not _contains_non_ascii(host):
+        return False
+    try:
+        host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return False
+    return True
 
 
 def _is_windows_drive_path(url: str) -> bool:
@@ -68,7 +166,7 @@ def _is_network_host(host: str) -> bool:
         return True
     if "." not in host:
         return False
-    return bool(_HOSTNAME_RE.match(host))
+    return _looks_like_hostname(host)
 
 
 def _looks_like_hostname(host: str) -> bool:
@@ -76,7 +174,9 @@ def _looks_like_hostname(host: str) -> bool:
         return False
     if host == "localhost":
         return True
-    return bool(_HOSTNAME_RE.match(host))
+    if _HOSTNAME_RE.match(host):
+        return True
+    return _looks_like_idn_hostname(host)
 
 
 def _looks_like_filename(name: str) -> bool:
@@ -108,6 +208,9 @@ def _looks_like_url_without_scheme(url: str) -> bool:
     if "://" in url or " " in url:
         return False
 
+    if _split_ipv6_host_port(url) is not None:
+        return True
+
     colon = url.find(":")
     slash = url.find("/")
 
@@ -130,6 +233,8 @@ def _looks_like_url_without_scheme(url: str) -> bool:
     if colon < 0:
         if _looks_like_filename(url):
             return False
+        if _contains_non_ascii(url):
+            return _looks_like_idn_hostname(url)
         # Bare names need a dot (example.com) or be localhost — not README.
         return _is_network_host(url) or url == "localhost"
 
@@ -150,6 +255,8 @@ def _looks_like_file_path(url: str) -> bool:
     if "/" in url:
         return True
     if _looks_like_filename(url):
+        return True
+    if _contains_non_ascii(url):
         return True
     # Bare relative segment without dots (e.g. README) — not a network host.
     if ":" not in url and "." not in url:
@@ -172,9 +279,23 @@ def _strip_leading_slash_from_windows_path(pathname: str) -> str:
     return pathname
 
 
+def _windows_drive_root_path(pathname: str) -> str:
+    if _WINDOWS_DRIVE_ONLY_RE.fullmatch(pathname):
+        return f"{pathname}\\"
+    if (
+        len(pathname) == 3
+        and pathname[0].isalpha()
+        and pathname[1] == ":"
+        and pathname[2] == "/"
+    ):
+        return f"{pathname[0]}:\\"
+    return pathname
+
+
 def _file_uri_from_path(path: str) -> str:
     expanded = os.path.expanduser(path.strip())
     expanded = _strip_leading_slash_from_windows_path(expanded)
+    expanded = _windows_drive_root_path(expanded)
     return Path(expanded).resolve().as_uri()
 
 
@@ -185,6 +306,7 @@ def _normalize_file_url(url: str) -> str:
             pass
         elif _is_windows_drive_netloc(parsed.netloc):
             pathname = f"{parsed.netloc}{parsed.path}"
+            pathname = _windows_drive_root_path(pathname)
             if not pathname or pathname.endswith(":"):
                 raise ValueError("file URL must include a path")
             return _file_uri_from_path(pathname)
@@ -195,6 +317,7 @@ def _normalize_file_url(url: str) -> str:
             return url
     pathname = url2pathname(unquote(parsed.path))
     pathname = _strip_leading_slash_from_windows_path(pathname)
+    pathname = _windows_drive_root_path(pathname)
     if not pathname:
         raise ValueError("file URL must include a path")
     return _file_uri_from_path(pathname)
@@ -218,13 +341,19 @@ def _normalize_url(url: str) -> str:
         parsed = urlparse(cleaned)
     if parsed.scheme == "file":
         return _normalize_file_url(cleaned)
+    if parsed.scheme in {"http", "https"}:
+        return _fix_https_ipv6_netloc(cleaned)
     if not parsed.scheme:
         if " " in cleaned:
             raise ValueError("URL must not contain spaces")
+        ipv6 = _split_ipv6_host_port(cleaned)
+        if ipv6 is not None:
+            host, port, path = ipv6
+            return _https_url_from_ipv6_parts(host, port, path)
         if _looks_like_file_path(cleaned):
             return _file_uri_from_path(cleaned)
         cleaned = f"https://{cleaned}"
-    return cleaned
+    return _fix_https_ipv6_netloc(cleaned)
 
 
 def _validate_url(url: str) -> None:

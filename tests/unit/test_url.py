@@ -179,6 +179,50 @@ def test_normalize_bare_filename_to_file_uri(
     assert _normalize_url("index.html") == page.resolve().as_uri()
 
 
+def test_normalize_ipv6_host_port_without_scheme() -> None:
+    assert _normalize_url("::1:8080") == "https://[::1]:8080"
+    assert _normalize_url("[::1]:8080") == "https://[::1]:8080"
+    assert _normalize_url("::1") == "https://[::1]"
+    assert _normalize_url("[::1]/path") == "https://[::1]/path"
+    assert _normalize_url("::1:8080/api") == "https://[::1]:8080/api"
+
+
+def test_normalize_ipv6_https_authority() -> None:
+    assert _normalize_url("https://::1:8080") == "https://[::1]:8080"
+    assert _normalize_url("https://::1") == "https://[::1]"
+
+
+def test_normalize_idn_hostname_without_scheme() -> None:
+    assert _normalize_url("例子.test") == "https://例子.test"
+    assert _normalize_url("例子.test/path") == "https://例子.test/path"
+
+
+def test_normalize_unicode_filename_to_file_uri(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    page = tmp_path / "ページ.html"
+    page.write_text("<p>local</p>", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert _normalize_url("ページ.html") == page.resolve().as_uri()
+
+
+def test_normalize_windows_drive_root_file_uri(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[str] = []
+
+    def fake_file_uri(path: str) -> str:
+        seen.append(path)
+        return "file:///C:/"
+
+    monkeypatch.setattr("tkwry._url._file_uri_from_path", fake_file_uri)
+
+    assert _normalize_url("file:///C:") == "file:///C:/"
+    assert _normalize_url("file:///C:/") == "file:///C:/"
+    assert seen == ["C:\\", "C:\\"]
+
+
 def test_normalize_windows_drive_path(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
 
