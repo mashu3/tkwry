@@ -93,8 +93,7 @@ def test_mac_nsview_lookup_uses_existing_widget_tcl(
         return root
 
     monkeypatch.setattr(tk, "Tk", tracking_tk)
-    _parent._mac_tk_dylib_key = None
-    _parent._mac_tk_dylib_handle = None
+    _parent._mac_tk_dylib_cache.clear()
 
     frame = tk.Frame(tk_root, width=200, height=150)
     frame.pack_propagate(False)
@@ -104,3 +103,32 @@ def test_mac_nsview_lookup_uses_existing_widget_tcl(
     embed = tk_embed_parent(frame)
     assert embed.handle != 0
     assert created == []
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only dylib cache")
+def test_mac_tk_dylib_cached_per_tcl_library(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tkwry import _parent
+
+    loaded: list[str] = []
+
+    def fake_cdll(path: str) -> object:
+        loaded.append(path)
+        return object()
+
+    monkeypatch.setattr(_parent, "CDLL", fake_cdll)
+    monkeypatch.setattr(
+        _parent,
+        "_mac_libtk_path",
+        lambda tcl_lib: f"/fake/{tcl_lib}/libtk.dylib",
+    )
+    _parent._mac_tk_dylib_cache.clear()
+
+    dylib_a = _parent._mac_tk_dylib("tcl-a")
+    dylib_b = _parent._mac_tk_dylib("tcl-b")
+    dylib_a_again = _parent._mac_tk_dylib("tcl-a")
+
+    assert dylib_a is not dylib_b
+    assert dylib_a is dylib_a_again
+    assert loaded == ["/fake/tcl-a/libtk.dylib", "/fake/tcl-b/libtk.dylib"]

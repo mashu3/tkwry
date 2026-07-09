@@ -169,18 +169,16 @@ def _mac_drawable(widget: tk.Misc, dylib: CDLL) -> int:
     return full
 
 
-_mac_tk_dylib_key: str | None = None
-_mac_tk_dylib_handle: CDLL | None = None
+_mac_tk_dylib_cache: dict[str, CDLL] = {}
 
 
 def _mac_tk_dylib(tcl_lib: str) -> CDLL:
     """Load and return the Tk shared library next to *tcl_lib*."""
-    global _mac_tk_dylib_key, _mac_tk_dylib_handle
-    if _mac_tk_dylib_key != tcl_lib:
-        _mac_tk_dylib_key = tcl_lib
-        _mac_tk_dylib_handle = CDLL(_mac_libtk_path(tcl_lib))
-    assert _mac_tk_dylib_handle is not None
-    return _mac_tk_dylib_handle
+    dylib = _mac_tk_dylib_cache.get(tcl_lib)
+    if dylib is None:
+        dylib = CDLL(_mac_libtk_path(tcl_lib))
+        _mac_tk_dylib_cache[tcl_lib] = dylib
+    return dylib
 
 
 def _mac_nsview_lookup(dylib: CDLL):
