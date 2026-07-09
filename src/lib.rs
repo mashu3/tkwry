@@ -227,8 +227,8 @@ impl WebView {
         debug_assert!(depth > 0);
         self.wry_call_depth.set(depth - 1);
         if depth == 1 && self.destroy_pending.get() {
-            self.destroy_pending.set(false);
             self.destroy_inner()?;
+            self.destroy_pending.set(false);
         }
         Ok(())
     }
