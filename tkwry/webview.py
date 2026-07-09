@@ -165,6 +165,7 @@ class WebView:
         self._bounds_sync_scheduled = False
         self._initial_load: _PendingLoad | None = None
         self._initial_load_attempt = 0
+        self._initial_load_after_id: str | None = None
 
         GtkPump.attach(frame)
         self._frame_bind_ids: list[tuple[str, str]] = []
@@ -362,6 +363,7 @@ class WebView:
             return
         self._destroyed = True
         self._event_poll_active = False
+        self._cancel_initial_load_timer()
         self._eval_epoch += 1
         self._pending_eval_callbacks = 0
         self._drain_eval_result_queue(discard=True)
@@ -972,21 +974,36 @@ class WebView:
             return 2
         return 1
 
+    def _cancel_initial_load_timer(self) -> None:
+        after_id = self._initial_load_after_id
+        if after_id is None:
+            return
+        self._initial_load_after_id = None
+        try:
+            self._frame.winfo_toplevel().after_cancel(after_id)
+        except tk.TclError:
+            pass
+
     def _schedule_initial_load(self) -> None:
         if self._initial_load is None:
             return
-        toplevel = self._frame.winfo_toplevel()
-        if sys.platform == "darwin":
-            toplevel.after(200, self._run_initial_load)
-        else:
-            delay = 150 if sys.platform == "linux" else 100
-            toplevel.after(delay, self._run_initial_load)
+        self._cancel_initial_load_timer()
+        try:
+            toplevel = self._frame.winfo_toplevel()
+            if sys.platform == "darwin":
+                delay = 200
+            else:
+                delay = 150 if sys.platform == "linux" else 100
+            self._initial_load_after_id = toplevel.after(delay, self._run_initial_load)
+        except tk.TclError:
+            self._initial_load_after_id = None
 
     def _maybe_reschedule_initial_load(self) -> None:
         if self._initial_load is not None and not self._destroyed:
             self._schedule_initial_load()
 
     def _run_initial_load(self) -> None:
+        self._initial_load_after_id = None
         load = self._initial_load
         if load is None or self._destroyed or self._webview is None:
             return
@@ -1027,10 +1044,14 @@ class WebView:
         kind, payload = self._pending_load
         self._pending_load = None
         self._initial_load = None
-        if kind == "url":
-            self._webview.load_url(payload)
-        else:
-            self._webview.load_html(payload)
+        try:
+            if kind == "url":
+                self._webview.load_url(payload)
+            else:
+                self._webview.load_html(payload)
+        except Exception:
+            traceback.print_exc()
+            return
         self._sync_bounds()
         self._service_linux_events()
         if self._on_page_load is not None:
@@ -1080,11 +1101,17 @@ class WebView:
         if self._webview is None:
             return False
         if not self._frame_should_show():
-            self._webview.set_visible(False)
+            try:
+                self._webview.set_visible(False)
+            except Exception:
+                return False
             return False
         size = self._bounds_size()
         if size is None:
-            self._webview.set_visible(False)
+            try:
+                self._webview.set_visible(False)
+            except Exception:
+                return False
             return False
         width, height = size
         try:
@@ -1092,8 +1119,11 @@ class WebView:
             x, y = tk_embed_origin(self._frame, root_relative=self._embed.root_relative)
         except tk.TclError:
             return False
-        self._webview.set_bounds(x, y, width, height)
-        self._webview.set_visible(True)
+        try:
+            self._webview.set_bounds(x, y, width, height)
+            self._webview.set_visible(True)
+        except Exception:
+            return False
         return True
 
     def _on_configure(self, event: tk.Event) -> None:
