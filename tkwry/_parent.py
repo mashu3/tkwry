@@ -6,7 +6,7 @@ import os
 import sys
 import threading
 import weakref
-from ctypes import CDLL, c_char_p, c_void_p
+from ctypes import CDLL, c_char_p, c_void_p, sizeof
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 # Tcl interpreter id / widget id -> owning thread id (bound only on the Tk thread).
 _interp_threads: dict[int, int] = {}
 _widget_threads: dict[int, int] = {}
+_interp_refcounts: dict[int, int] = {}
+_interp_root_hooks: set[int] = set()
 
 _THREAD_ERROR = (
     "tkwry must be called from the thread that created the Tk "
@@ -43,6 +45,45 @@ def check_tk_thread_id(owner: int) -> None:
         raise RuntimeError(_THREAD_ERROR)
 
 
+def _main_tk_root(widget: tk.Misc) -> tk.Misc:
+    """Return the application root ``Tk`` widget (not a ``Toplevel``)."""
+    current: tk.Misc = widget
+    while current.master not in (None, ""):
+        current = current.master
+    return current
+
+
+def _clear_interp_thread(interp: int) -> None:
+    _interp_threads.pop(interp, None)
+    _interp_refcounts.pop(interp, None)
+    _interp_root_hooks.discard(interp)
+
+
+def _ensure_interp_root_destroy_hook(widget: tk.Misc, interp: int) -> None:
+    if interp in _interp_root_hooks:
+        return
+    root = _main_tk_root(widget)
+    _interp_root_hooks.add(interp)
+
+    def _on_root_destroy(event: object) -> None:
+        if getattr(event, "widget", None) is not root:
+            return
+        _clear_interp_thread(interp)
+
+    root.bind("<Destroy>", _on_root_destroy, add="+")
+
+
+def _release_widget_thread(key: int, interp: int) -> None:
+    _widget_threads.pop(key, None)
+    if interp not in _interp_refcounts:
+        return
+    remaining = _interp_refcounts[interp] - 1
+    if remaining <= 0:
+        _clear_interp_thread(interp)
+    else:
+        _interp_refcounts[interp] = remaining
+
+
 def _bind_tk_thread(widget: tk.Misc, key: int) -> int:
     """Record the owning thread for *widget* (must run on the Tk thread)."""
     interp = id(widget.tk)
@@ -50,8 +91,10 @@ def _bind_tk_thread(widget: tk.Misc, key: int) -> int:
     if owner is None:
         owner = threading.get_ident()
         _interp_threads[interp] = owner
+        _ensure_interp_root_destroy_hook(widget, interp)
     _widget_threads[key] = owner
-    weakref.finalize(widget, _widget_threads.pop, key, None)
+    _interp_refcounts[interp] = _interp_refcounts.get(interp, 0) + 1
+    weakref.finalize(widget, _release_widget_thread, key, interp)
     return owner
 
 
@@ -125,10 +168,33 @@ def _mac_tk_version(widget: tk.Misc) -> tuple[int, ...]:
 
 
 # Offset of the ``window`` (Drawable) field inside the TkWindow struct.
-# Stable across Tk 8.5–9.x on 64-bit platforms:
-#   Display*, TkDisplay*, int screenNum (+ 4 pad), Visual*, int depth (+ 4 pad)
-#   = 8 + 8 + 8 + 8 + 8 = 40.
-_TK_WINDOW_DRAWABLE_OFFSET = 40
+# Layout through ``depth`` is five pointer-sized slots on common Tk builds:
+#   Display*, TkDisplay*, screenNum (+pad on 64-bit), Visual*, depth (+pad).
+def _tk_window_drawable_offsets() -> tuple[int, ...]:
+    ptr_size = sizeof(c_void_p)
+    primary = 5 * ptr_size
+    candidates = [primary]
+    if ptr_size >= 8:
+        candidates.extend((primary + ptr_size, primary - ptr_size))
+    else:
+        candidates.extend((primary + 4, primary - 4))
+    return tuple(offset for offset in candidates if offset > 0)
+
+
+def _mac_drawable_from_tk_window(tk_win: int, wid: int) -> int:
+    """Read the Drawable field, probing nearby offsets when layout differs."""
+    low32 = wid & 0xFFFFFFFF
+    for offset in _tk_window_drawable_offsets():
+        full = c_void_p.from_address(tk_win + offset).value
+        if full is None or full == 0:
+            continue
+        if (full & 0xFFFFFFFF) == low32:
+            return full
+    raise RuntimeError(
+        "Drawable sanity check failed for TkWindow struct "
+        f"(tried offsets {_tk_window_drawable_offsets()!r}, "
+        f"winfo_id returned {wid:#x})"
+    )
 
 
 def _mac_drawable(widget: tk.Misc, dylib: CDLL) -> int:
@@ -158,15 +224,7 @@ def _mac_drawable(widget: tk.Misc, dylib: CDLL) -> int:
     if not tk_win:
         raise RuntimeError(f"Tk_NameToWindow failed for {widget!r}")
 
-    full = c_void_p.from_address(tk_win + _TK_WINDOW_DRAWABLE_OFFSET).value
-    if full is None or full == 0:
-        raise RuntimeError("Drawable is NULL in TkWindow struct")
-    if (full & 0xFFFFFFFF) != (wid & 0xFFFFFFFF):
-        raise RuntimeError(
-            f"Drawable sanity check failed: struct has {full:#x}, "
-            f"winfo_id returned {wid:#x}"
-        )
-    return full
+    return _mac_drawable_from_tk_window(tk_win, wid)
 
 
 _mac_tk_dylib_cache: dict[str, CDLL] = {}

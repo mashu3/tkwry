@@ -7,12 +7,26 @@ import threading
 
 import pytest
 
+from tkwry import _parent
 from tkwry._parent import (
     EmbedParent,
     require_tk_thread,
     tk_embed_origin,
     tk_embed_parent,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_parent_thread_maps() -> None:
+    _parent._interp_threads.clear()
+    _parent._widget_threads.clear()
+    _parent._interp_refcounts.clear()
+    _parent._interp_root_hooks.clear()
+    yield
+    _parent._interp_threads.clear()
+    _parent._widget_threads.clear()
+    _parent._interp_refcounts.clear()
+    _parent._interp_root_hooks.clear()
 
 
 def test_embed_origin_not_root_relative(tk_root) -> None:
@@ -132,3 +146,49 @@ def test_mac_tk_dylib_cached_per_tcl_library(
     assert dylib_a is not dylib_b
     assert dylib_a is dylib_a_again
     assert loaded == ["/fake/tcl-a/libtk.dylib", "/fake/tcl-b/libtk.dylib"]
+
+
+def test_interp_threads_cleaned_when_tk_root_destroyed(tk_root) -> None:
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root)
+    require_tk_thread(frame)
+    interp = id(tk_root.tk)
+    assert interp in _parent._interp_threads
+
+    tk_root.destroy()
+
+    assert interp not in _parent._interp_threads
+    assert interp not in _parent._interp_refcounts
+
+
+def test_tk_window_drawable_offsets_scale_with_pointer_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_parent, "sizeof", lambda _type: 8)
+    assert _parent._tk_window_drawable_offsets() == (40, 48, 32)
+
+    monkeypatch.setattr(_parent, "sizeof", lambda _type: 4)
+    assert _parent._tk_window_drawable_offsets() == (20, 24, 16)
+
+
+def test_mac_drawable_from_tk_window_probes_offsets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ctypes import c_void_p
+
+    wid = 0x0000_00AB
+    full = 0xFFFF_FF00_0000_00AB
+    calls: list[int] = []
+
+    def fake_from_address(addr: int) -> c_void_p:
+        calls.append(addr)
+        offset = addr - 1000
+        value = full if offset == 24 else 0
+        return c_void_p(value)
+
+    monkeypatch.setattr(_parent, "sizeof", lambda _type: 4)
+    monkeypatch.setattr(_parent.c_void_p, "from_address", fake_from_address)
+
+    assert _parent._mac_drawable_from_tk_window(1000, wid) == full
+    assert calls == [1020, 1024]
