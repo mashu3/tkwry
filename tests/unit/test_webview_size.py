@@ -372,6 +372,23 @@ def test_maybe_fire_ready_refires_after_unmap_remap(
     assert web._ready_delivered
 
 
+def test_bind_after_ready_falls_back_when_probe_misses(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+    web._webview = object()
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+    monkeypatch.setattr(web._frame, "event_generate", lambda *_a, **_k: None)
+
+    events: list[tk.Event] = []
+    web.bind("<<WebViewReady>>", lambda evt: events.append(evt))
+    tk_root.update_idletasks()
+
+    assert len(events) == 1
+    assert events[0].widget is frame
+
+
 def test_destroy_clears_native_when_native_destroy_fails(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)

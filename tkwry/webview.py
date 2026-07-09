@@ -288,7 +288,12 @@ class WebView:
                     _frame.event_generate(probe)
                 finally:
                     _frame.unbind(probe, bind_id)
-                self._invoke_callback(_func, captured[0])
+                if captured:
+                    evt = captured[0]
+                else:
+                    evt = tk.Event()
+                    evt.widget = _frame
+                self._invoke_callback(_func, evt)
 
             self._frame.after_idle(_deliver_ready)
         return result
