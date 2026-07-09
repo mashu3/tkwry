@@ -47,11 +47,57 @@ def _mac_webviews(toplevel: tk.Misc) -> list[WebView]:
     return [w for w in registered if not w.destroyed and w.native is not None]
 
 
+def _mac_bind_root(widget: tk.Misc) -> tk.Misc:
+    """Return the ``Tk`` instance used for global ``bind`` / ``unbind`` calls."""
+    try:
+        return widget._root()
+    except (AttributeError, tk.TclError):
+        pass
+    current: tk.Misc = widget
+    while True:
+        try:
+            if current.winfo_class() == "Tk":
+                return current
+            master = current.master
+        except tk.TclError:
+            break
+        if master in (None, ""):
+            break
+        current = master
+    return widget
+
+
+def _unbind_mac_global(
+    bind_root: tk.Misc,
+    toplevel: tk.Misc,
+    sequence: str,
+    funcid: str | None,
+) -> None:
+    if funcid is None:
+        return
+    seen: set[int] = set()
+    for candidate in (bind_root, toplevel):
+        if id(candidate) in seen:
+            continue
+        seen.add(id(candidate))
+        try:
+            candidate._unbind(("bind", "all", sequence), funcid)
+            return
+        except tk.TclError:
+            pass
+    try:
+        fallback = toplevel._root()
+    except (AttributeError, tk.TclError):
+        return
+    if id(fallback) in seen:
+        return
+    try:
+        fallback._unbind(("bind", "all", sequence), funcid)
+    except tk.TclError:
+        pass
+
+
 def _mac_web_input_active(toplevel: tk.Misc) -> bool:
-    return bool(getattr(toplevel, "_tkwry_mac_web_input_active", False))
-
-
-def _sync_mac_web_input_cache(toplevel: tk.Misc) -> None:
     active = False
     for web in _mac_webviews(toplevel):
         native = web.native
@@ -59,6 +105,11 @@ def _sync_mac_web_input_cache(toplevel: tk.Misc) -> None:
             active = True
             break
     toplevel._tkwry_mac_web_input_active = active
+    return active
+
+
+def _sync_mac_web_input_cache(toplevel: tk.Misc) -> None:
+    _mac_web_input_active(toplevel)
 
 
 def _drain_mac_tk_unfocus(toplevel: tk.Misc) -> bool:
@@ -155,14 +206,9 @@ def _mac_input_wakeup(event: tk.Event) -> None:
 def _mac_web_key_guard(event: tk.Event) -> str | None:
     toplevel = event.widget.winfo_toplevel()
     if _mac_web_input_active(toplevel):
+        if _mac_unfocus_pending(toplevel):
+            toplevel.after(0, _mac_service_wakeup, toplevel)
         return "break"
-    for web in _mac_webviews(toplevel):
-        native = web.native
-        if native is not None and native.mac_web_input_active():
-            toplevel._tkwry_mac_web_input_active = True
-            if _mac_unfocus_pending(toplevel):
-                toplevel.after(0, _mac_service_wakeup, toplevel)
-            return "break"
     return None
 
 
@@ -217,13 +263,15 @@ def _tag_mac_text_widgets(root: tk.Misc) -> None:
 def _ensure_mac_key_guard(toplevel: tk.Misc) -> None:
     if getattr(toplevel, "_tkwry_mac_key_guard", False):
         return
+    bind_root = _mac_bind_root(toplevel)
     toplevel._tkwry_mac_key_guard = True
+    toplevel._tkwry_mac_bind_root = bind_root
     toplevel.bind_class(_MAC_KEY_GUARD_TAG, "<KeyPress>", _mac_web_key_guard)
     # Store funcids so teardown can remove only our handlers (bind_all is global).
-    toplevel._tkwry_mac_button1_bind_id = toplevel.bind_all(
+    toplevel._tkwry_mac_button1_bind_id = bind_root.bind_all(
         "<Button-1>", _mac_input_wakeup, add="+"
     )
-    toplevel._tkwry_mac_map_bind_id = toplevel.bind_all(
+    toplevel._tkwry_mac_map_bind_id = bind_root.bind_all(
         "<Map>", _mac_widget_mapped, add="+"
     )
     _prepend_mac_key_guard(toplevel)
@@ -233,17 +281,15 @@ def _ensure_mac_key_guard(toplevel: tk.Misc) -> None:
 def _teardown_mac_key_guard(toplevel: tk.Misc) -> None:
     if not getattr(toplevel, "_tkwry_mac_key_guard", False):
         return
-    root = toplevel._root()
+    bind_root = getattr(toplevel, "_tkwry_mac_bind_root", None) or _mac_bind_root(
+        toplevel
+    )
     for sequence, attr in (
         ("<Button-1>", "_tkwry_mac_button1_bind_id"),
         ("<Map>", "_tkwry_mac_map_bind_id"),
     ):
         funcid = getattr(toplevel, attr, None)
-        if funcid is not None:
-            try:
-                root._unbind(("bind", "all", sequence), funcid)
-            except tk.TclError:
-                pass
+        _unbind_mac_global(bind_root, toplevel, sequence, funcid)
         if hasattr(toplevel, attr):
             delattr(toplevel, attr)
     try:
@@ -251,6 +297,8 @@ def _teardown_mac_key_guard(toplevel: tk.Misc) -> None:
     except tk.TclError:
         pass
     toplevel._tkwry_mac_key_guard = False
+    if hasattr(toplevel, "_tkwry_mac_bind_root"):
+        delattr(toplevel, "_tkwry_mac_bind_root")
 
 
 def _set_mac_webviews_input_active(
@@ -260,7 +308,7 @@ def _set_mac_webviews_input_active(
         native = web.native
         if native is not None:
             native.set_mac_web_input_active(web is active_web)
-    toplevel._tkwry_mac_web_input_active = active_web is not None
+    _sync_mac_web_input_cache(toplevel)
 
 
 def _register_macos_webview(web: WebView) -> None:
