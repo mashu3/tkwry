@@ -12,8 +12,10 @@ from tkwry._runtime import GtkPump, _gtk_pump_tick
 @pytest.fixture(autouse=True)
 def _clear_gtk_pumps() -> None:
     GtkPump._by_root_id.clear()
+    GtkPump._widget_attachments.clear()
     yield
     GtkPump._by_root_id.clear()
+    GtkPump._widget_attachments.clear()
 
 
 def test_gtk_pump_tick_skips_when_stopped(
@@ -81,8 +83,7 @@ def test_gtk_pump_schedules_next_tick_with_root_id_only(
     _gtk_pump_tick(pump._root_id)
 
     assert len(scheduled) == 1
-    callback = scheduled[0]
-    assert getattr(callback, "__defaults__", ()) == (pump._root_id,)
+    scheduled[0]()
     assert pump._tick_after_id == "after-id"
     pump.stop()
     assert pump._tick_after_id is None
@@ -172,3 +173,51 @@ def test_gtk_pump_attach_detach_stops_when_last_webview_gone(
     GtkPump.detach(tk_root)
     assert root_id not in GtkPump._by_root_id
     assert not pump._active
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
+def test_gtk_pump_detach_after_frame_destroy_stops_pump(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
+    monkeypatch.setattr(tk_root, "after", lambda *_a, **_k: "after-id")
+
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    tk_root.update_idletasks()
+
+    GtkPump.attach(frame)
+    root_id = tk_root.winfo_id()
+    pump = GtkPump._by_root_id[root_id]
+    assert pump._refcount == 1
+
+    frame.destroy()
+    tk_root.update_idletasks()
+
+    GtkPump.detach(frame)
+
+    assert root_id not in GtkPump._by_root_id
+    assert not pump._active
+    assert id(frame) not in GtkPump._widget_attachments
+
+
+def test_gtk_pump_stop_does_not_zero_refcount(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "tkwry._core.pump_events",
+        lambda: None,
+        raising=False,
+    )
+
+    pump = GtkPump(tk_root)
+    GtkPump._by_root_id[pump._root_id] = pump
+    pump._active = True
+    pump._refcount = 2
+
+    pump.stop()
+
+    assert pump._refcount == 2
+    assert pump._root_id not in GtkPump._by_root_id

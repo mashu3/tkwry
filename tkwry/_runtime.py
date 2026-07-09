@@ -34,6 +34,8 @@ class GtkPump:
     """Pump GTK events via ``tkwry._core.pump_events`` while Tk runs."""
 
     _by_root_id: dict[int, GtkPump] = {}
+    # widget id -> (root_id, attach count for that widget)
+    _widget_attachments: dict[int, tuple[int, int]] = {}
 
     def __init__(self, root: tk.Misc) -> None:
         self._root = root.winfo_toplevel()
@@ -45,9 +47,12 @@ class GtkPump:
 
     def _schedule_tick(self, delay_ms: int) -> None:
         self._cancel_tick()
-        self._tick_after_id = self._root.after(
-            delay_ms, lambda rid=self._root_id: _gtk_pump_tick(rid)
-        )
+        root_id = self._root_id
+
+        def _tick() -> None:
+            _gtk_pump_tick(root_id)
+
+        self._tick_after_id = self._root.after(delay_ms, _tick)
 
     def _cancel_tick(self) -> None:
         after_id = self._tick_after_id
@@ -63,15 +68,56 @@ class GtkPump:
         self._tick_after_id = None
 
     @classmethod
+    def _resolve_root_id(cls, widget: tk.Misc) -> int | None:
+        try:
+            return widget.winfo_toplevel().winfo_id()
+        except Exception:
+            entry = cls._widget_attachments.get(id(widget))
+            if entry is None:
+                return None
+            return entry[0]
+
+    @classmethod
+    def _record_widget_attach(cls, widget: tk.Misc, root_id: int) -> None:
+        widget_id = id(widget)
+        root_id_for_widget, count = cls._widget_attachments.get(widget_id, (root_id, 0))
+        cls._widget_attachments[widget_id] = (root_id_for_widget, count + 1)
+
+    @classmethod
+    def _release_widget_attach(cls, widget: tk.Misc) -> int | None:
+        widget_id = id(widget)
+        entry = cls._widget_attachments.get(widget_id)
+        if entry is None:
+            return None
+        root_id, count = entry
+        if count <= 1:
+            del cls._widget_attachments[widget_id]
+        else:
+            cls._widget_attachments[widget_id] = (root_id, count - 1)
+        return root_id
+
+    @classmethod
+    def _purge_widget_attachments(cls, root_id: int) -> None:
+        stale = [
+            widget_id
+            for widget_id, (attached_root_id, _) in cls._widget_attachments.items()
+            if attached_root_id == root_id
+        ]
+        for widget_id in stale:
+            del cls._widget_attachments[widget_id]
+
+    @classmethod
     def attach(cls, widget: tk.Misc) -> None:
         if sys.platform != "linux":
             return
-        root = widget.winfo_toplevel()
-        root_id = root.winfo_id()
+        root_id = cls._resolve_root_id(widget)
+        if root_id is None:
+            return
         pump = cls._by_root_id.get(root_id)
         if pump is None:
-            pump = cls(root)
+            pump = cls(widget)
             cls._by_root_id[root_id] = pump
+        cls._record_widget_attach(widget, root_id)
         pump._refcount += 1
         pump.start()
 
@@ -80,10 +126,8 @@ class GtkPump:
         """Drop one WebView attachment; stop pumping when none remain."""
         if sys.platform != "linux":
             return
-        try:
-            root = widget.winfo_toplevel()
-            root_id = root.winfo_id()
-        except Exception:
+        root_id = cls._release_widget_attach(widget)
+        if root_id is None:
             return
         pump = cls._by_root_id.get(root_id)
         if pump is None:
@@ -105,7 +149,6 @@ class GtkPump:
     def stop(self) -> None:
         self._active = False
         self._cancel_tick()
-        self._refcount = 0
         bind_id = self._destroy_bind_id
         self._destroy_bind_id = None
         if bind_id is not None:
@@ -113,6 +156,7 @@ class GtkPump:
                 self._root.unbind("<Destroy>", bind_id)
             except Exception:
                 pass
+        self._purge_widget_attachments(self._root_id)
         self._by_root_id.pop(self._root_id, None)
 
     def _on_destroy(self, event) -> None:
