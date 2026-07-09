@@ -371,8 +371,13 @@ class WebView:
         self._ready_callbacks.clear()
         self._unbind_frame_events()
         if self._webview is not None:
-            self._webview.destroy()
-            self._webview = None
+            native = self._webview
+            try:
+                native.destroy()
+            except Exception:
+                traceback.print_exc()
+            finally:
+                self._webview = None
         if sys.platform == "darwin":
             _unregister_macos_webview(self)
         elif sys.platform == "linux":

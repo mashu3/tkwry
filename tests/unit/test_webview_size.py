@@ -328,3 +328,18 @@ def test_fire_ready_skips_delivery_if_destroyed_before_idle(
 
     assert bind_fired == []
     assert when_ready_fired == []
+
+
+def test_destroy_clears_native_when_native_destroy_fails(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+
+    class _Native:
+        def destroy(self) -> None:
+            raise RuntimeError("lock poison")
+
+    web._webview = _Native()
+    web.destroy()
+
+    assert web.destroyed is True
+    assert web.native is None
