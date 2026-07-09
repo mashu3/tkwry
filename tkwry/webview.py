@@ -50,6 +50,8 @@ DragDropHandler: TypeAlias = Callable[[DragDropEvent, list[str], tuple[int, int]
 EvalCallback: TypeAlias = Callable[[str], None]
 EvalErrorHandler: TypeAlias = Callable[[Exception], None]
 _PendingLoad: TypeAlias = tuple[Literal["url"], str] | tuple[Literal["html"], str]
+_EvalQueueItem: TypeAlias = tuple[int, int, EvalCallback, str]
+_EVAL_CALLBACK_TIMEOUT_S = 30.0
 
 
 def _validate_color_component(value: int, name: str) -> None:
@@ -150,12 +152,12 @@ class WebView:
             # Child WKWebView + focused=True fights Tk for first responder at create.
             focused = False
         self._focused = focused
-        self._eval_result_queue: queue.SimpleQueue[tuple[int, EvalCallback, str]] = (
-            queue.SimpleQueue()
-        )
+        self._eval_result_queue: queue.SimpleQueue[_EvalQueueItem] = queue.SimpleQueue()
         self._event_poll_active = False
         self._wait_until_ready_active = False
         self._pending_eval_callbacks = 0
+        self._eval_token_seq = 0
+        self._pending_eval_tokens: dict[int, float] = {}
         # Bumped on destroy so late WebKit-thread delivers are discarded.
         self._eval_epoch = 0
         self._pending_url: str | None = url
@@ -366,6 +368,7 @@ class WebView:
         self._cancel_initial_load_timer()
         self._eval_epoch += 1
         self._pending_eval_callbacks = 0
+        self._pending_eval_tokens.clear()
         self._drain_eval_result_queue(discard=True)
         self._ready_delivered = False
         self._ready_callbacks.clear()
@@ -471,24 +474,24 @@ class WebView:
         """
         self._require_ready("eval_js_with_callback")
         epoch = self._eval_epoch
-        self._pending_eval_callbacks += 1
+        token = self._register_pending_eval()
         self._ensure_event_poll()
 
         def _run() -> None:
             if self._destroyed or self._webview is None or epoch != self._eval_epoch:
-                self._pending_eval_callbacks = max(0, self._pending_eval_callbacks - 1)
+                self._release_pending_eval(token)
                 return
 
             def deliver(result: str) -> None:
                 # May run on the WebKit thread — queue only; never touch Tk/counter.
                 if epoch != self._eval_epoch:
                     return
-                self._eval_result_queue.put((epoch, callback, result))
+                self._eval_result_queue.put((epoch, token, callback, result))
 
             try:
                 self._webview.eval_js_with_callback(script, deliver)
             except Exception as exc:
-                self._pending_eval_callbacks = max(0, self._pending_eval_callbacks - 1)
+                self._release_pending_eval(token)
                 if on_error is not None:
                     self._invoke_callback(on_error, exc)
                 else:
@@ -809,6 +812,32 @@ class WebView:
             pump_events()
         self._deliver_page_load_events()
 
+    def _register_pending_eval(self) -> int:
+        token = self._eval_token_seq
+        self._eval_token_seq += 1
+        self._pending_eval_tokens[token] = time.monotonic() + _EVAL_CALLBACK_TIMEOUT_S
+        self._pending_eval_callbacks += 1
+        return token
+
+    def _release_pending_eval(self, token: int) -> None:
+        if token not in self._pending_eval_tokens:
+            return
+        del self._pending_eval_tokens[token]
+        self._pending_eval_callbacks = max(0, self._pending_eval_callbacks - 1)
+
+    def _expire_pending_evals(self) -> None:
+        if not self._pending_eval_tokens:
+            return
+        now = time.monotonic()
+        for token, deadline in list(self._pending_eval_tokens.items()):
+            if now >= deadline:
+                print(
+                    "tkwry: eval_js_with_callback timed out "
+                    f"after {_EVAL_CALLBACK_TIMEOUT_S:g}s",
+                    file=sys.stderr,
+                )
+                self._release_pending_eval(token)
+
     def _ensure_event_poll(self) -> None:
         if self._event_poll_active or self._destroyed:
             return
@@ -819,15 +848,12 @@ class WebView:
         """Consume queued eval results on the Tk thread (or drop them on destroy)."""
         while True:
             try:
-                epoch, callback, result = self._eval_result_queue.get_nowait()
+                epoch, token, callback, result = self._eval_result_queue.get_nowait()
             except queue.Empty:
                 break
-            if epoch != self._eval_epoch:
+            self._release_pending_eval(token)
+            if discard or epoch != self._eval_epoch:
                 continue
-            if discard:
-                self._pending_eval_callbacks = max(0, self._pending_eval_callbacks - 1)
-                continue
-            self._pending_eval_callbacks = max(0, self._pending_eval_callbacks - 1)
             self._invoke_callback(callback, result)
 
     def _poll_events(self) -> None:
@@ -853,6 +879,7 @@ class WebView:
         if self._drag_drop_handler is not None:
             self._deliver_drag_drop_events()
 
+        self._expire_pending_evals()
         self._drain_eval_result_queue()
 
         if self._should_keep_polling():
