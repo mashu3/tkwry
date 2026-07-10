@@ -267,7 +267,7 @@ class WebView:
         self._initial_load_attempt = 0
         self._initial_load_after_id: str | None = None
 
-        GtkPump.attach(frame)
+        GtkPump.ensure_attached(frame)
         self._frame_bind_ids: list[tuple[str, str]] = []
         for sequence, handler in (
             ("<Configure>", self._on_configure),
@@ -1182,10 +1182,7 @@ class WebView:
     def _should_keep_polling(self) -> bool:
         if self._needs_event_poll():
             return True
-        return (
-            self._pending_eval_callbacks > 0
-            or bool(self._native_eval_wait)
-        )
+        return self._pending_eval_callbacks > 0 or bool(self._native_eval_wait)
 
     def _try_create(self) -> None:
         if self._destroyed or self._webview is not None:
@@ -1495,6 +1492,8 @@ class WebView:
     def _on_map(self, event: tk.Event) -> None:
         if event.widget is not self._frame or self._destroyed:
             return
+        if sys.platform == "linux":
+            GtkPump.ensure_attached(self._frame)
         self._schedule_bounds_sync()
         self._maybe_fire_ready()
         self._frame.after_idle(self._run_initial_load)

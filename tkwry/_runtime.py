@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import sys
+import tkinter as tk
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import tkinter as tk
+    pass
 
 
 def _gtk_pump_tick(root_id: int) -> None:
@@ -19,13 +20,18 @@ def _gtk_pump_tick(root_id: int) -> None:
         if not root.winfo_exists():
             pump.stop()
             return
-    except Exception:
+    except tk.TclError:
         pump.stop()
         return
     pump._clear_tick_after_id()
     from tkwry._core import pump_events
 
-    pump_events()
+    try:
+        pump_events()
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
     if pump._active:
         pump._schedule_tick(10)
 
@@ -36,6 +42,7 @@ class GtkPump:
     _by_root_id: dict[int, GtkPump] = {}
     # widget id -> (root_id, attach count for that widget)
     _widget_attachments: dict[int, tuple[int, int]] = {}
+    _pending_attach: set[int] = set()
 
     def __init__(self, root: tk.Misc) -> None:
         self._root = root.winfo_toplevel()
@@ -61,7 +68,7 @@ class GtkPump:
             return
         try:
             self._root.after_cancel(after_id)
-        except Exception:
+        except tk.TclError:
             pass
 
     def _clear_tick_after_id(self) -> None:
@@ -71,17 +78,14 @@ class GtkPump:
     def _resolve_root_id(cls, widget: tk.Misc) -> int | None:
         try:
             return widget.winfo_toplevel().winfo_id()
-        except Exception:
-            entry = cls._widget_attachments.get(id(widget))
-            if entry is None:
-                return None
-            return entry[0]
+        except tk.TclError:
+            return None
 
     @classmethod
     def _record_widget_attach(cls, widget: tk.Misc, root_id: int) -> None:
         widget_id = id(widget)
-        root_id_for_widget, count = cls._widget_attachments.get(widget_id, (root_id, 0))
-        cls._widget_attachments[widget_id] = (root_id_for_widget, count + 1)
+        _, count = cls._widget_attachments.get(widget_id, (root_id, 0))
+        cls._widget_attachments[widget_id] = (root_id, count + 1)
 
     @classmethod
     def _release_widget_attach(cls, widget: tk.Misc) -> int | None:
@@ -97,6 +101,21 @@ class GtkPump:
         return root_id
 
     @classmethod
+    def _migrate_widget_if_reparented(cls, widget: tk.Misc, root_id: int) -> bool:
+        widget_id = id(widget)
+        prev = cls._widget_attachments.get(widget_id)
+        if prev is None or prev[0] == root_id:
+            return False
+        old_root_id, count = prev
+        del cls._widget_attachments[widget_id]
+        old_pump = cls._by_root_id.get(old_root_id)
+        if old_pump is not None:
+            old_pump._refcount = max(0, old_pump._refcount - count)
+            if old_pump._refcount == 0:
+                old_pump.stop()
+        return True
+
+    @classmethod
     def _purge_widget_attachments(cls, root_id: int) -> None:
         stale = [
             widget_id
@@ -107,12 +126,64 @@ class GtkPump:
             del cls._widget_attachments[widget_id]
 
     @classmethod
+    def _schedule_attach_retry(cls, widget: tk.Misc) -> None:
+        widget_id = id(widget)
+        if widget_id in cls._pending_attach:
+            return
+        cls._pending_attach.add(widget_id)
+        try:
+            root = widget.winfo_toplevel()
+        except tk.TclError:
+            cls._pending_attach.discard(widget_id)
+            return
+
+        def _retry() -> None:
+            cls._pending_attach.discard(widget_id)
+            try:
+                if not widget.winfo_exists():
+                    return
+            except tk.TclError:
+                return
+            if widget_id in cls._widget_attachments:
+                root_id = cls._resolve_root_id(widget)
+                if root_id is not None:
+                    cls._migrate_widget_if_reparented(widget, root_id)
+                return
+            cls.attach(widget)
+
+        try:
+            root.after_idle(_retry)
+        except tk.TclError:
+            cls._pending_attach.discard(widget_id)
+
+    @classmethod
+    def ensure_attached(cls, widget: tk.Misc) -> None:
+        """Attach *widget* once; retry when the toplevel is not mapped yet."""
+        if sys.platform != "linux":
+            return
+        widget_id = id(widget)
+        root_id = cls._resolve_root_id(widget)
+        if root_id is None:
+            cls._schedule_attach_retry(widget)
+            return
+        cls._pending_attach.discard(widget_id)
+        if widget_id in cls._widget_attachments:
+            if cls._widget_attachments[widget_id][0] != root_id:
+                cls._migrate_widget_if_reparented(widget, root_id)
+                cls.attach(widget)
+            return
+        cls.attach(widget)
+
+    @classmethod
     def attach(cls, widget: tk.Misc) -> None:
         if sys.platform != "linux":
             return
         root_id = cls._resolve_root_id(widget)
         if root_id is None:
+            cls._schedule_attach_retry(widget)
             return
+        cls._pending_attach.discard(id(widget))
+        cls._migrate_widget_if_reparented(widget, root_id)
         pump = cls._by_root_id.get(root_id)
         if pump is None:
             pump = cls(widget)
@@ -126,6 +197,7 @@ class GtkPump:
         """Drop one WebView attachment; stop pumping when none remain."""
         if sys.platform != "linux":
             return
+        cls._pending_attach.discard(id(widget))
         root_id = cls._release_widget_attach(widget)
         if root_id is None:
             return
@@ -154,7 +226,7 @@ class GtkPump:
         if bind_id is not None:
             try:
                 self._root.unbind("<Destroy>", bind_id)
-            except Exception:
+            except tk.TclError:
                 pass
         self._purge_widget_attachments(self._root_id)
         self._by_root_id.pop(self._root_id, None)

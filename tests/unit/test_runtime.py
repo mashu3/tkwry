@@ -13,9 +13,11 @@ from tkwry._runtime import GtkPump, _gtk_pump_tick
 def _clear_gtk_pumps() -> None:
     GtkPump._by_root_id.clear()
     GtkPump._widget_attachments.clear()
+    GtkPump._pending_attach.clear()
     yield
     GtkPump._by_root_id.clear()
     GtkPump._widget_attachments.clear()
+    GtkPump._pending_attach.clear()
 
 
 def test_gtk_pump_tick_skips_when_stopped(
@@ -221,3 +223,119 @@ def test_gtk_pump_stop_does_not_zero_refcount(
 
     assert pump._refcount == 2
     assert pump._root_id not in GtkPump._by_root_id
+
+
+def test_gtk_pump_tick_keeps_pumping_after_transient_pump_error(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = {"n": 0}
+    scheduled: list[object] = []
+
+    def flaky_pump() -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient")
+
+    monkeypatch.setattr("tkwry._core.pump_events", flaky_pump, raising=False)
+
+    pump = GtkPump(tk_root)
+    GtkPump._by_root_id[pump._root_id] = pump
+    pump._active = True
+    monkeypatch.setattr(
+        pump._root,
+        "after",
+        lambda _delay, callback: scheduled.append(callback) or "after-id",
+    )
+
+    _gtk_pump_tick(pump._root_id)
+
+    assert calls["n"] == 1
+    assert pump._active
+    assert scheduled
+    pump.stop()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
+def test_attach_schedules_retry_when_root_id_unavailable(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
+    frame = tk.Frame(tk_root)
+    attempts = {"n": 0}
+    real_resolve = GtkPump._resolve_root_id
+
+    def resolve(widget: tk.Misc) -> int | None:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return None
+        return real_resolve(widget)
+
+    idle_callbacks: list[object] = []
+    monkeypatch.setattr(GtkPump, "_resolve_root_id", staticmethod(resolve))
+    monkeypatch.setattr(
+        tk_root,
+        "after_idle",
+        lambda callback: idle_callbacks.append(callback),
+    )
+
+    GtkPump.attach(frame)
+
+    assert attempts["n"] == 1
+    assert id(frame) in GtkPump._pending_attach
+    assert id(frame) not in GtkPump._widget_attachments
+
+    idle_callbacks[0]()
+
+    assert id(frame) in GtkPump._widget_attachments
+    assert GtkPump._by_root_id[tk_root.winfo_id()]._refcount == 1
+    GtkPump.detach(frame)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
+def test_attach_migrates_widget_when_reparented(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
+    monkeypatch.setattr(tk_root, "after", lambda *_a, **_k: "after-id")
+
+    frame = tk.Frame(tk_root)
+    old_root_id = 111
+    new_root_id = 222
+    root_ids = iter([old_root_id, new_root_id, new_root_id])
+
+    monkeypatch.setattr(
+        GtkPump,
+        "_resolve_root_id",
+        staticmethod(lambda _widget: next(root_ids)),
+    )
+
+    GtkPump.attach(frame)
+    assert GtkPump._widget_attachments[id(frame)] == (old_root_id, 1)
+    assert GtkPump._by_root_id[old_root_id]._refcount == 1
+
+    GtkPump.attach(frame)
+
+    assert GtkPump._widget_attachments[id(frame)] == (new_root_id, 1)
+    assert old_root_id not in GtkPump._by_root_id
+    assert GtkPump._by_root_id[new_root_id]._refcount == 1
+
+    GtkPump.detach(frame)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
+def test_ensure_attached_is_idempotent(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
+    monkeypatch.setattr(tk_root, "after", lambda *_a, **_k: "after-id")
+
+    GtkPump.ensure_attached(tk_root)
+    GtkPump.ensure_attached(tk_root)
+
+    pump = GtkPump._by_root_id[tk_root.winfo_id()]
+    assert pump._refcount == 1
+    GtkPump.detach(tk_root)
