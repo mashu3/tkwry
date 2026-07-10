@@ -301,9 +301,16 @@ def test_destroy_rejects_layout_and_bind(tk_root) -> None:
 def test_macos_focused_true_prints_warning(
     tk_root, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    import tkwry.webview as webview_mod
+
     frame = tk.Frame(tk_root)
     monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
-    monkeypatch.setattr("tkwry.webview._register_macos_webview", lambda _web: None)
+    monkeypatch.setattr(
+        webview_mod,
+        "_register_macos_webview",
+        lambda _web: None,
+        raising=False,
+    )
 
     web = WebView(frame, width=400, height=300, focused=True)
 
