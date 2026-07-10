@@ -926,13 +926,6 @@ class WebView:
         del self._pending_eval_tokens[token]
         self._pending_eval_callbacks = max(0, self._pending_eval_callbacks - 1)
 
-    def _drop_native_eval_wait_for_py_token(self, py_token: int) -> None:
-        for native_token, (_epoch, token, _cb, _on_error) in list(
-            self._native_eval_wait.items()
-        ):
-            if token == py_token:
-                del self._native_eval_wait[native_token]
-
     def _expire_pending_evals(self) -> None:
         if not self._pending_eval_tokens:
             return
@@ -942,7 +935,6 @@ class WebView:
         ):
             if now >= deadline:
                 self._release_pending_eval(token)
-                self._drop_native_eval_wait_for_py_token(token)
                 exc = TimeoutError(
                     f"eval_js_with_callback timed out after "
                     f"{_EVAL_CALLBACK_TIMEOUT_S:g}s"
@@ -1026,7 +1018,11 @@ class WebView:
     def _should_keep_polling(self) -> bool:
         if self._needs_event_poll():
             return True
-        return self._pending_eval_callbacks > 0 or not self._eval_result_queue.empty()
+        return (
+            self._pending_eval_callbacks > 0
+            or bool(self._native_eval_wait)
+            or not self._eval_result_queue.empty()
+        )
 
     def _try_create(self) -> None:
         if self._destroyed or self._webview is not None:

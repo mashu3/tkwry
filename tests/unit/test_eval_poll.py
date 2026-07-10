@@ -56,6 +56,14 @@ def test_should_keep_polling_while_eval_pending(tk_root) -> None:
     assert web._should_keep_polling() is True
 
 
+def test_should_keep_polling_while_native_eval_wait(tk_root) -> None:
+    _frame, web = _make_web(tk_root)
+
+    web._native_eval_wait[1] = (0, 1, lambda _r: None, None)
+
+    assert web._should_keep_polling() is True
+
+
 def test_poll_events_keeps_polling_until_eval_delivers(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -270,6 +278,35 @@ def test_poll_events_does_not_double_invoke_after_eval_timeout(
     assert results == [""]
     assert web._pending_eval_callbacks == 0
     assert not web._native_eval_wait
+
+
+def test_poll_keeps_running_after_timeout_until_native_eval_drained(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _make_web(tk_root)
+    _configure_poll_test(web, monkeypatch)
+    native = MagicMock()
+    web._webview = native
+    results: list[str] = []
+    py_token = web._register_pending_eval(results.append, None)
+    web._pending_eval_tokens[py_token] = (0.0, results.append, None)
+    web._native_eval_wait[1] = (web._eval_epoch, py_token, results.append, None)
+    native.drain_eval_callbacks.return_value = []
+    web._event_poll_active = True
+
+    web._poll_events()
+
+    assert results == [""]
+    assert web._pending_eval_callbacks == 0
+    assert web._native_eval_wait
+    assert web._event_poll_active is True
+
+    native.drain_eval_callbacks.return_value = [(1, results.append, "late")]
+    web._poll_events()
+
+    assert results == [""]
+    assert not web._native_eval_wait
+    assert web._event_poll_active is False
 
 
 def test_poll_events_expires_stale_eval_callbacks_with_on_error(
