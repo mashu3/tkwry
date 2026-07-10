@@ -89,6 +89,9 @@ fn push_eval_result(
     if queue.len() >= MAX_EVAL_PENDING {
         dropped.fetch_add(1, Ordering::SeqCst);
         eprintln!("tkwry: dropping eval result (pending queue full at {MAX_EVAL_PENDING} events)");
+        // Still queue an empty result so drain_eval_callbacks can pair with the
+        // registered callback instead of leaving it orphaned until Python times out.
+        queue.push((token, String::new()));
         return;
     }
     queue.push((token, result));
@@ -1126,4 +1129,24 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pump_events, m)?)?;
     m.add_function(wrap_pyfunction!(ensure_gtk_init, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn push_eval_result_queues_empty_when_pending_full() {
+        let pending = Arc::new(Mutex::new(Vec::new()));
+        let dropped = AtomicU64::new(0);
+        for token in 0..MAX_EVAL_PENDING as u64 {
+            push_eval_result(&pending, &dropped, token, format!("r{token}"));
+        }
+        push_eval_result(&pending, &dropped, 999, "lost".into());
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        let queue = pending.lock().unwrap();
+        assert_eq!(queue.len(), MAX_EVAL_PENDING + 1);
+        assert_eq!(queue.last(), Some(&(999, String::new())));
+        assert_eq!(queue[MAX_EVAL_PENDING - 1], (255, "r255".to_string()));
+    }
 }
