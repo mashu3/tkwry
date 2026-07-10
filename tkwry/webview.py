@@ -11,7 +11,7 @@ import time
 import tkinter as tk
 import traceback
 from collections.abc import Callable
-from typing import Literal, TypeAlias, TypeVar
+from typing import Literal, TypeAlias, TypeVar, cast
 
 from tkwry._core import (
     DragDropEvent,
@@ -914,8 +914,8 @@ class WebView:
             write_fd = getattr(toplevel, "_tkwry_wake_write_fd", None)
             if write_fd is None:
                 read_fd, write_fd = os.pipe()
-                toplevel._tkwry_wake_read_fd = read_fd
-                toplevel._tkwry_wake_write_fd = write_fd
+                setattr(toplevel, "_tkwry_wake_read_fd", read_fd)
+                setattr(toplevel, "_tkwry_wake_write_fd", write_fd)
         self._tk_wakeup_write_fd = write_fd
 
     def _wake_tk_for_sync_hook(self) -> None:
@@ -936,7 +936,7 @@ class WebView:
                 return default
 
         done = threading.Event()
-        result: list[_T] = [default]
+        result: list[object] = [default]
         self._sync_hook_queue.put((invoke, result, default, done))
         self._wake_tk_for_sync_hook()
         if not done.wait(timeout=_SYNC_HOOK_TIMEOUT_S):
@@ -945,7 +945,7 @@ class WebView:
                 file=sys.stderr,
             )
             return default
-        return result[0]
+        return cast(_T, result[0])
 
     def _drain_sync_hooks(self) -> None:
         while True:
