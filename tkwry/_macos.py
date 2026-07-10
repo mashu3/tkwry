@@ -10,13 +10,18 @@ if TYPE_CHECKING:
     from tkwry._core import WebView as NativeWebViewType
     from tkwry.webview import WebView
 
-_MAC_TEXT_CLASSES = (
-    "Entry",
-    "TEntry",
-    "Text",
-    "Spinbox",
-    "TSpinbox",
-    "TCombobox",
+_MAC_TEXT_CLASSES = frozenset(
+    {
+        "Entry",
+        "TEntry",
+        "Text",
+        "Spinbox",
+        "TSpinbox",
+        "TCombobox",
+        "Listbox",
+        "Treeview",
+        "TTreeview",
+    }
 )
 _MAC_KEY_GUARD_TAG = "TkwryMacWebKeyGuard"
 
@@ -171,7 +176,7 @@ def _mac_pump_tick(toplevel: tk.Misc) -> None:
         return
     _mac_service_wakeup(toplevel)
     if _mac_unfocus_pending(toplevel) or _mac_pipe_readable(toplevel):
-        delay = 0
+        delay = 1
     elif _mac_web_input_active(toplevel):
         delay = 16
     else:
@@ -209,7 +214,7 @@ def _mac_web_key_guard(event: tk.Event) -> str | None:
     toplevel = event.widget.winfo_toplevel()
     if _mac_web_input_active(toplevel):
         if _mac_unfocus_pending(toplevel):
-            toplevel.after(0, _mac_service_wakeup, toplevel)
+            toplevel.after(1, _mac_service_wakeup, toplevel)
         return "break"
     return None
 
@@ -314,7 +319,11 @@ def _set_mac_webviews_input_active(
 
 
 def _register_macos_webview(web: WebView) -> None:
-    toplevel = web._frame.winfo_toplevel()
+    try:
+        toplevel = web._frame.winfo_toplevel()
+    except tk.TclError:
+        return
+    web._macos_toplevel = toplevel
     views: list[WebView] | None = getattr(toplevel, "_tkwry_mac_webviews", None)
     if views is None:
         views = []
@@ -325,7 +334,19 @@ def _register_macos_webview(web: WebView) -> None:
 
 
 def _unregister_macos_webview(web: WebView) -> None:
-    toplevel = web._frame.winfo_toplevel()
+    toplevel = getattr(web, "_macos_toplevel", None)
+    if hasattr(web, "_macos_toplevel"):
+        delattr(web, "_macos_toplevel")
+    if toplevel is None:
+        try:
+            toplevel = web._frame.winfo_toplevel()
+        except tk.TclError:
+            return
+    try:
+        if not toplevel.winfo_exists():
+            return
+    except tk.TclError:
+        return
     views = getattr(toplevel, "_tkwry_mac_webviews", None)
     if views:
         try:

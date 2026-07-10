@@ -126,3 +126,66 @@ def test_set_mac_webviews_input_active_syncs_cache_from_natives(tk_root) -> None
 
     native.set_mac_web_input_active.assert_called_once_with(True)
     assert tk_root._tkwry_mac_web_input_active is True
+
+
+def test_widget_accepts_tk_keys_includes_listbox_and_treeview(tk_root) -> None:
+    import tkinter as tk
+    from tkinter import ttk
+
+    assert _macos._widget_accepts_tk_keys(tk.Listbox(tk_root)) is True
+    assert _macos._widget_accepts_tk_keys(ttk.Treeview(tk_root)) is True
+    assert _macos._widget_accepts_tk_keys(tk.Button(tk_root)) is False
+
+
+def test_unregister_macos_webview_uses_stored_toplevel_when_frame_gone(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    teardown_calls: list[tk.Misc] = []
+
+    def capture_teardown(toplevel: tk.Misc) -> None:
+        teardown_calls.append(toplevel)
+
+    monkeypatch.setattr(_macos, "_teardown_mac_wakeup_pipe", capture_teardown)
+    monkeypatch.setattr(_macos, "_teardown_mac_key_guard", lambda _t: None)
+
+    frame = tk.Frame(tk_root)
+    web = SimpleNamespace(
+        _frame=frame,
+        destroyed=False,
+        native=MagicMock(),
+        _macos_toplevel=tk_root,
+    )
+    tk_root._tkwry_mac_webviews = [web]  # type: ignore[list-item]
+
+    def boom() -> tk.Misc:
+        raise tk.TclError("bad window path")
+
+    frame.winfo_toplevel = boom  # type: ignore[method-assign]
+
+    _macos._unregister_macos_webview(web)  # type: ignore[arg-type]
+
+    assert teardown_calls == [tk_root]
+    assert not hasattr(web, "_macos_toplevel")
+    assert not hasattr(tk_root, "_tkwry_mac_webviews")
+
+
+def test_mac_pump_tick_avoids_zero_delay_when_unfocus_pending(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scheduled: list[int] = []
+    web = SimpleNamespace(destroyed=False, native=MagicMock())
+    tk_root._tkwry_mac_webviews = [web]  # type: ignore[list-item]
+    monkeypatch.setattr(_macos, "_mac_service_wakeup", lambda _t: None)
+    monkeypatch.setattr(_macos, "_mac_unfocus_pending", lambda _t: True)
+    monkeypatch.setattr(_macos, "_mac_pipe_readable", lambda _t: False)
+    monkeypatch.setattr(
+        tk_root,
+        "after",
+        lambda delay, _func, *_args: scheduled.append(delay) or "after-id",
+    )
+
+    _macos._mac_pump_tick(tk_root)
+
+    assert scheduled == [1]
