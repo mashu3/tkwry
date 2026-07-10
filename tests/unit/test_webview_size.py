@@ -330,6 +330,29 @@ def test_fire_ready_delivers_bind_before_when_ready_callbacks(
     assert order == ["bind", "when_ready_1", "when_ready_2"]
 
 
+def test_fire_ready_delivers_all_when_ready_callbacks_despite_destroy(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>ready</p>")
+
+    class _Native:
+        def destroy(self) -> None:
+            return None
+
+    web._webview = _Native()
+    order: list[int] = []
+    web.when_ready(lambda: (order.append(1), web.destroy()))
+    web.when_ready(lambda: order.append(2))
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+
+    web._maybe_fire_ready()
+    tk_root.update_idletasks()
+
+    assert order == [1, 2]
+    assert web.destroyed
+
+
 def test_fire_ready_skips_delivery_if_destroyed_before_idle(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -381,6 +404,30 @@ def test_layout_ready_skips_viewable_on_linux(tk_root, monkeypatch) -> None:
 
     assert web._layout_ready() is True
     assert web.ready is True
+
+
+def test_frame_ready_for_initial_load_checks_geometry_on_linux(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+    web._webview = object()
+    monkeypatch.setattr("tkwry.webview.sys.platform", "linux")
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 300)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: True)
+
+    assert web._frame_ready_for_initial_load() is False
+
+
+def test_second_webview_on_same_frame_raises(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+    with pytest.raises(ValueError, match="one WebView per host frame"):
+        WebView(frame, width=400, height=300)
+    web.destroy()
+    WebView(frame, width=400, height=300)
 
 
 def test_maybe_fire_ready_fires_once_after_unmap_remap(

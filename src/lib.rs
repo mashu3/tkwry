@@ -73,6 +73,29 @@ fn push_if_listening<T>(
     Ok(())
 }
 
+fn push_pending_capped<T>(
+    pending: &Arc<Mutex<Vec<T>>>,
+    dropped: &AtomicU64,
+    item: T,
+    max: usize,
+    label: &str,
+) -> Result<(), ()> {
+    let mut queue = match pending.lock() {
+        Ok(queue) => queue,
+        Err(_) => {
+            eprintln!("tkwry: {label} event dropped (event queue lock poisoned)");
+            return Err(());
+        }
+    };
+    if queue.len() >= max {
+        dropped.fetch_add(1, Ordering::SeqCst);
+        eprintln!("tkwry: dropping newest {label} event (pending queue full at {max} events)");
+        return Ok(());
+    }
+    queue.push(item);
+    Ok(())
+}
+
 fn push_eval_result(
     pending: &Arc<Mutex<Vec<(u64, String)>>>,
     dropped: &AtomicU64,
@@ -467,15 +490,13 @@ impl WebView {
         };
 
         let page_load_pending_clone = page_load_pending.clone();
-        let page_load_listening_clone = page_load_listening.clone();
         let page_load_overflow_clone = page_load_overflow_dropped.clone();
         let pageload_handler = move |event: wry::PageLoadEvent, url: String| {
             let evt = match event {
                 wry::PageLoadEvent::Started => PageLoadEvent::Started,
                 wry::PageLoadEvent::Finished => PageLoadEvent::Finished,
             };
-            let _ = push_if_listening(
-                &page_load_listening_clone,
+            let _ = push_pending_capped(
                 &page_load_pending_clone,
                 &page_load_overflow_clone,
                 (evt, url),

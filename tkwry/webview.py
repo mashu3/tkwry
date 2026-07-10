@@ -10,6 +10,7 @@ import threading
 import time
 import tkinter as tk
 import traceback
+import weakref
 from collections.abc import Callable
 from typing import Literal, TypeAlias, TypeVar, cast
 
@@ -67,6 +68,28 @@ _MIN_LAYOUT_DIMENSION = 2
 _CREATE_MAX_ATTEMPTS = 30
 _FLUSH_LOAD_MAX_ATTEMPTS = 3
 _T = TypeVar("_T")
+_frame_webview_refs: dict[int, weakref.ReferenceType[WebView]] = {}
+
+
+def _claim_frame_host(frame: tk.Misc, web: WebView) -> None:
+    """Raise if *frame* already hosts a live WebView."""
+    key = id(frame)
+    existing = _frame_webview_refs.get(key)
+    if existing is not None:
+        prior = existing()
+        if prior is not None and not prior.destroyed:
+            raise ValueError(
+                "tkwry: only one WebView per host frame is supported; "
+                "create a child frame for each embedded view"
+            )
+    _frame_webview_refs[key] = weakref.ref(web)
+
+
+def _release_frame_host(frame: tk.Misc, web: WebView) -> None:
+    key = id(frame)
+    existing = _frame_webview_refs.get(key)
+    if existing is not None and existing() is web:
+        del _frame_webview_refs[key]
 
 
 def _validate_color_component(value: int, name: str) -> None:
@@ -141,8 +164,8 @@ class WebView:
     re-fire the event.
 
     **Page load** (``on_page_load``): fires ``Started`` and ``Finished`` for
-    every navigation. Events that occurred while no handler was registered are
-    **discarded** when a handler is attached.
+    every navigation. Events are buffered (up to a fixed cap) until a handler
+    is registered and delivered when :meth:`set_on_page_load` attaches one.
 
     **JavaScript** (``eval_js`` / ``eval_js_with_callback``): ``eval_js`` is
     fire-and-forget (Tk idle, no return value). ``eval_js_with_callback`` is
@@ -257,6 +280,7 @@ class WebView:
             self._ensure_event_poll()
         if self._creation_size() is not None or self._early_create:
             self._schedule_try_create()
+        _claim_frame_host(frame, self)
 
     def pack(self, **kwargs) -> None:
         self._require_tk_thread()
@@ -464,6 +488,7 @@ class WebView:
         self._ready_pending = False
         self._ready_callbacks.clear()
         self._creation_error = None
+        _release_frame_host(self._frame, self)
         self._unbind_frame_events()
         if self._webview is not None:
             native = self._webview
@@ -686,6 +711,7 @@ class WebView:
             self._webview.set_page_load_listening(handler is not None)
         if handler is not None:
             self._ensure_event_poll()
+            self._deliver_page_load_events()
 
     def sync_bounds(self) -> None:
         """Push the host frame's size and position to the native WebView.
@@ -818,8 +844,6 @@ class WebView:
             callbacks = self._ready_callbacks
             self._ready_callbacks = []
             for callback in callbacks:
-                if self._destroyed:
-                    return
                 self._invoke_callback(callback)
 
         self._frame.after_idle(_deliver_ready)
@@ -1271,9 +1295,6 @@ class WebView:
         try:
             if not self._frame.winfo_exists() or self._webview is None:
                 return False
-            # Creation already required a real size; Xvfb can still report 1×1 later.
-            if sys.platform == "linux":
-                return True
             if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
                 return False
             return bool(self._frame.winfo_viewable())
