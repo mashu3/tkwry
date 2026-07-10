@@ -97,7 +97,7 @@ def test_creation_size_prefers_laid_out_frame(tk_root, monkeypatch) -> None:
 
 def test_layout_ready_false_before_frame_geometry(tk_root, monkeypatch) -> None:
     frame = tk.Frame(tk_root)
-    web = WebView(frame, width=300, height=200)
+    web = WebView(frame)
     web._webview = object()
     monkeypatch.setattr(frame, "winfo_exists", lambda: True)
     monkeypatch.setattr(frame, "winfo_width", lambda: 1)
@@ -105,6 +105,20 @@ def test_layout_ready_false_before_frame_geometry(tk_root, monkeypatch) -> None:
     monkeypatch.setattr(frame, "winfo_viewable", lambda: True)
 
     assert web._layout_ready() is False
+
+
+def test_layout_ready_true_with_init_size_before_frame_layout(
+    tk_root, monkeypatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    web._webview = object()
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: True)
+
+    assert web._layout_ready() is True
 
 
 def test_layout_ready_true_when_frame_is_laid_out(tk_root, monkeypatch) -> None:
@@ -349,9 +363,24 @@ def test_layout_ready_false_when_not_viewable(tk_root, monkeypatch) -> None:
     monkeypatch.setattr(frame, "winfo_width", lambda: 400)
     monkeypatch.setattr(frame, "winfo_height", lambda: 300)
     monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
+    monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
 
     assert web._layout_ready() is False
     assert web.ready is False
+
+
+def test_layout_ready_skips_viewable_on_linux(tk_root, monkeypatch) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    web._webview = object()
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 400)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 300)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
+    monkeypatch.setattr("tkwry.webview.sys.platform", "linux")
+
+    assert web._layout_ready() is True
+    assert web.ready is True
 
 
 def test_maybe_fire_ready_fires_once_after_unmap_remap(

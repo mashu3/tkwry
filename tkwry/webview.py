@@ -739,16 +739,7 @@ class WebView:
         """Whether the host frame has real geometry for callbacks and API use."""
         if self._webview is None or self._destroyed:
             return False
-        try:
-            if not self._frame.winfo_exists():
-                return False
-            if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
-                return False
-            if not self._frame.winfo_viewable():
-                return False
-            return True
-        except tk.TclError:
-            return False
+        return self._frame_should_show()
 
     def _maybe_fire_ready(self) -> None:
         if self._destroyed or self._webview is None:
