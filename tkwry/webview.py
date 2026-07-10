@@ -56,7 +56,6 @@ DragDropHandler: TypeAlias = Callable[[DragDropEvent, list[str], tuple[int, int]
 EvalCallback: TypeAlias = Callable[[str], None]
 EvalErrorHandler: TypeAlias = Callable[[Exception], None]
 _PendingLoad: TypeAlias = tuple[Literal["url"], str] | tuple[Literal["html"], str]
-_EvalQueueItem: TypeAlias = tuple[int, int, EvalCallback, str]
 _PendingEval: TypeAlias = tuple[float, EvalCallback, EvalErrorHandler | None]
 _NativeEvalWait: TypeAlias = tuple[int, int, EvalCallback, EvalErrorHandler | None]
 _SyncHookItem: TypeAlias = tuple[
@@ -233,10 +232,14 @@ class WebView:
         self._user_agent = user_agent
         self._initialization_script = initialization_script
         if sys.platform == "darwin" and focused:
+            print(
+                "tkwry: focused=True is ignored on macOS at create time; "
+                "call focus() after the WebView is ready",
+                file=sys.stderr,
+            )
             # Child WKWebView + focused=True fights Tk for first responder at create.
             focused = False
         self._focused = focused
-        self._eval_result_queue: queue.SimpleQueue[_EvalQueueItem] = queue.SimpleQueue()
         self._event_poll_active = False
         self._wait_until_ready_active = False
         self._pending_eval_callbacks = 0
@@ -283,21 +286,21 @@ class WebView:
         _claim_frame_host(frame, self)
 
     def pack(self, **kwargs) -> None:
-        self._require_tk_thread()
+        self._require_not_destroyed("pack")
         self._frame.pack(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
         self._maybe_fire_ready()
 
     def grid(self, **kwargs) -> None:
-        self._require_tk_thread()
+        self._require_not_destroyed("grid")
         self._frame.grid(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
         self._maybe_fire_ready()
 
     def place(self, **kwargs) -> None:
-        self._require_tk_thread()
+        self._require_not_destroyed("place")
         self._frame.place(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
@@ -364,7 +367,7 @@ class WebView:
         add: Literal["", "+"] | None = None,
     ) -> str:
         """Bind a Tk event on the host frame (e.g. ``\"<<WebViewReady>>\"``)."""
-        self._require_tk_thread()
+        self._require_not_destroyed("bind")
         result = self._frame.bind(sequence, func, add=add)
         if sequence == "<<WebViewReady>>" and self._ready_delivered:
 
@@ -428,7 +431,7 @@ class WebView:
                 on this instance.
         """
         self._require_tk_thread()
-        if type(timeout) is not int and type(timeout) is not float:
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
             raise ValueError("timeout must be a finite number of seconds > 0")
         timeout_s = float(timeout)
         if not math.isfinite(timeout_s) or timeout_s <= 0:
@@ -483,7 +486,6 @@ class WebView:
         self._pending_eval_tokens.clear()
         self._native_eval_wait.clear()
         self._abort_sync_hooks()
-        self._drain_eval_result_queue(discard=True)
         self._ready_delivered = False
         self._ready_pending = False
         self._ready_callbacks.clear()
@@ -781,6 +783,13 @@ class WebView:
     def _require_tk_thread(self) -> None:
         # Compare a plain int only — never touch Tk/Tcl from a foreign thread.
         check_tk_thread_id(self._tk_thread_id)
+
+    def _require_not_destroyed(self, method: str) -> None:
+        self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError(
+                f"WebView.destroy() was called; cannot call {method}()"
+            )
 
     def _require_ready(self, method: str) -> NativeWebView:
         self._require_tk_thread()
@@ -1114,18 +1123,6 @@ class WebView:
         self._event_poll_active = True
         self._frame.after(1, self._poll_events)
 
-    def _drain_eval_result_queue(self, *, discard: bool = False) -> None:
-        """Consume queued eval results on the Tk thread (or drop them on destroy)."""
-        while True:
-            try:
-                epoch, token, callback, result = self._eval_result_queue.get_nowait()
-            except queue.Empty:
-                break
-            self._release_pending_eval(token)
-            if discard or epoch != self._eval_epoch:
-                continue
-            self._invoke_callback(callback, result)
-
     def _drain_native_eval_callbacks(self) -> None:
         native = self._webview
         if native is None:
@@ -1172,7 +1169,6 @@ class WebView:
 
         self._expire_pending_evals()
         self._drain_native_eval_callbacks()
-        self._drain_eval_result_queue()
 
         if self._should_keep_polling():
             delay = 1 if sys.platform == "linux" else 10
@@ -1189,7 +1185,6 @@ class WebView:
         return (
             self._pending_eval_callbacks > 0
             or bool(self._native_eval_wait)
-            or not self._eval_result_queue.empty()
         )
 
     def _try_create(self) -> None:

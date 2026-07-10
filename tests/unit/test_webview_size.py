@@ -285,6 +285,32 @@ def test_run_initial_load_reschedules_after_exception_until_attempts_exhausted(
     assert web._initial_load_attempt == 2
 
 
+def test_destroy_rejects_layout_and_bind(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+    web.destroy()
+
+    from tkwry.exceptions import WebViewDestroyedError
+
+    with pytest.raises(WebViewDestroyedError, match="pack"):
+        web.pack()
+    with pytest.raises(WebViewDestroyedError, match="bind"):
+        web.bind("<<WebViewReady>>", lambda _evt: None)
+
+
+def test_macos_focused_true_prints_warning(
+    tk_root, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    frame = tk.Frame(tk_root)
+    monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
+    monkeypatch.setattr("tkwry.webview._register_macos_webview", lambda _web: None)
+
+    web = WebView(frame, width=400, height=300, focused=True)
+
+    assert web._focused is False
+    assert "focused=True is ignored on macOS" in capsys.readouterr().err
+
+
 def test_fire_ready_defers_webview_ready_until_idle(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

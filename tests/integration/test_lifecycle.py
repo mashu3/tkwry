@@ -44,6 +44,8 @@ def test_wait_until_ready_rejects_non_finite_timeout(tk_root) -> None:
         web.wait_until_ready(timeout=float("inf"))
     with pytest.raises(ValueError, match="finite"):
         web.wait_until_ready(timeout=float("nan"))
+    with pytest.raises(ValueError, match="finite"):
+        web.wait_until_ready(timeout=True)
 
     web.destroy()
     frame.destroy()
