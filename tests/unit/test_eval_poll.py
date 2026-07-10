@@ -251,6 +251,27 @@ def test_poll_events_expires_stale_eval_callbacks(
     assert web._event_poll_active is False
 
 
+def test_poll_events_does_not_double_invoke_after_eval_timeout(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _make_web(tk_root)
+    _configure_poll_test(web, monkeypatch)
+    native = MagicMock()
+    web._webview = native
+    results: list[str] = []
+    py_token = web._register_pending_eval(results.append, None)
+    web._pending_eval_tokens[py_token] = (0.0, results.append, None)
+    web._native_eval_wait[1] = (web._eval_epoch, py_token, results.append, None)
+    native.drain_eval_callbacks.return_value = [(1, results.append, "late")]
+    web._event_poll_active = True
+
+    web._poll_events()
+
+    assert results == [""]
+    assert web._pending_eval_callbacks == 0
+    assert not web._native_eval_wait
+
+
 def test_poll_events_expires_stale_eval_callbacks_with_on_error(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

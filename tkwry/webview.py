@@ -926,6 +926,13 @@ class WebView:
         del self._pending_eval_tokens[token]
         self._pending_eval_callbacks = max(0, self._pending_eval_callbacks - 1)
 
+    def _drop_native_eval_wait_for_py_token(self, py_token: int) -> None:
+        for native_token, (_epoch, token, _cb, _on_error) in list(
+            self._native_eval_wait.items()
+        ):
+            if token == py_token:
+                del self._native_eval_wait[native_token]
+
     def _expire_pending_evals(self) -> None:
         if not self._pending_eval_tokens:
             return
@@ -935,6 +942,7 @@ class WebView:
         ):
             if now >= deadline:
                 self._release_pending_eval(token)
+                self._drop_native_eval_wait_for_py_token(token)
                 exc = TimeoutError(
                     f"eval_js_with_callback timed out after "
                     f"{_EVAL_CALLBACK_TIMEOUT_S:g}s"
@@ -967,12 +975,13 @@ class WebView:
         native = self._webview
         if native is None:
             return
-        for native_token, callback, result in native.drain_eval_callbacks():
+        for native_token, _callback, result in native.drain_eval_callbacks():
             wait = self._native_eval_wait.pop(native_token, None)
             if wait is None:
-                self._invoke_callback(callback, result)
                 continue
             wait_epoch, py_token, expected_cb, _on_error = wait
+            if py_token not in self._pending_eval_tokens:
+                continue
             self._release_pending_eval(py_token)
             if wait_epoch != self._eval_epoch:
                 continue
