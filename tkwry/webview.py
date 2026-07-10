@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import queue
 import sys
 import threading
@@ -10,7 +11,7 @@ import time
 import tkinter as tk
 import traceback
 from collections.abc import Callable
-from typing import Literal, TypeAlias
+from typing import Literal, TypeAlias, TypeVar
 
 from tkwry._core import (
     DragDropEvent,
@@ -53,10 +54,15 @@ _PendingLoad: TypeAlias = tuple[Literal["url"], str] | tuple[Literal["html"], st
 _EvalQueueItem: TypeAlias = tuple[int, int, EvalCallback, str]
 _PendingEval: TypeAlias = tuple[float, EvalCallback, EvalErrorHandler | None]
 _NativeEvalWait: TypeAlias = tuple[int, int, EvalCallback, EvalErrorHandler | None]
+_SyncHookItem: TypeAlias = tuple[
+    Callable[[], object], list[object], object, threading.Event
+]
 _EVAL_CALLBACK_TIMEOUT_S = 30.0
+_SYNC_HOOK_TIMEOUT_S = 30.0
 _MIN_LAYOUT_DIMENSION = 2
 _CREATE_MAX_ATTEMPTS = 30
 _FLUSH_LOAD_MAX_ATTEMPTS = 3
+_T = TypeVar("_T")
 
 
 def _validate_color_component(value: int, name: str) -> None:
@@ -81,6 +87,26 @@ def _validate_background_color(color: tuple[int, int, int, int]) -> None:
         _validate_color_component(val, name)
 
 
+def _toplevel_wakeup_read_fd(toplevel: tk.Misc) -> int | None:
+    if sys.platform == "darwin":
+        return getattr(toplevel, "_tkwry_mac_wake_read_fd", None)
+    return getattr(toplevel, "_tkwry_wake_read_fd", None)
+
+
+def _pump_toplevel_wakeup_pipe(toplevel: tk.Misc) -> None:
+    read_fd = _toplevel_wakeup_read_fd(toplevel)
+    if read_fd is None:
+        return
+    try:
+        import select
+
+        while select.select([read_fd], [], [], 0)[0]:
+            if not os.read(read_fd, 64):
+                break
+    except (OSError, ValueError):
+        pass
+
+
 class WebView:
     """Embed a system WebView (wry) inside an existing Tk ``Frame``.
 
@@ -91,11 +117,10 @@ class WebView:
     (``-> None``); OS drops are always accepted and cannot be denied from
     Python.
 
-    **Navigation hooks** (``on_navigation``, ``on_new_window``) are invoked
-    **synchronously on the WebKit thread** — wry needs an immediate return
-    value, so they cannot be queued. Keep handlers fast; do not call Tk
-    widgets or other thread-unsafe APIs from them. Defer work with
-    ``frame.after`` if needed.
+    **Navigation hooks** (``on_navigation``, ``on_new_window``) must return
+    immediately to WebKit, so the native layer blocks until your handler
+    finishes. Handlers run on the **Tk main thread** (queued from WebKit).
+    Keep them fast.
 
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
@@ -185,6 +210,8 @@ class WebView:
         self._eval_token_seq = 0
         self._pending_eval_tokens: dict[int, _PendingEval] = {}
         self._native_eval_wait: dict[int, _NativeEvalWait] = {}
+        self._sync_hook_queue: queue.SimpleQueue[_SyncHookItem] = queue.SimpleQueue()
+        self._tk_wakeup_write_fd: int | None = None
         # Bumped on destroy so late WebKit-thread delivers are discarded.
         self._eval_epoch = 0
         if url is not None and html is not None:
@@ -417,6 +444,7 @@ class WebView:
         self._pending_eval_callbacks = 0
         self._pending_eval_tokens.clear()
         self._native_eval_wait.clear()
+        self._abort_sync_hooks()
         self._drain_eval_result_queue(discard=True)
         self._ready_delivered = False
         self._ready_callbacks.clear()
@@ -618,7 +646,7 @@ class WebView:
             self._ensure_event_poll()
 
     def set_on_navigation(self, handler: NavigationHandler | None) -> None:
-        """Register a navigation hook (runs synchronously on the WebKit thread)."""
+        """Register a navigation hook (runs on the Tk main thread)."""
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
@@ -628,6 +656,8 @@ class WebView:
                 self._webview.set_on_navigation(self._native_navigation)
             else:
                 self._webview.clear_on_navigation()
+        if handler is not None:
+            self._ensure_event_poll()
 
     def set_on_page_load(self, handler: PageLoadHandler | None) -> None:
         self._require_tk_thread()
@@ -663,7 +693,7 @@ class WebView:
             self._ensure_event_poll()
 
     def set_on_new_window(self, handler: NewWindowHandler | None) -> None:
-        """Register a new-window hook (runs synchronously on the WebKit thread)."""
+        """Register a new-window hook (runs on the Tk main thread)."""
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
@@ -673,6 +703,8 @@ class WebView:
                 self._webview.set_on_new_window(self._native_new_window)
             else:
                 self._webview.clear_on_new_window()
+        if handler is not None:
+            self._ensure_event_poll()
 
     def set_drag_drop_handler(self, handler: DragDropHandler | None) -> None:
         """Register a notify-only drop handler (runs on the Tk main thread).
@@ -772,6 +804,8 @@ class WebView:
         return any(
             (
                 self._ipc_handler is not None,
+                self._on_navigation is not None,
+                self._on_new_window is not None,
                 self._on_page_load is not None,
                 self._on_title_changed is not None,
                 self._drag_drop_handler is not None,
@@ -790,11 +824,12 @@ class WebView:
         native._enqueue_drag_drop_event(event, paths, position)
         self._ensure_event_poll()
 
-    def _native_navigation(self, url: str) -> bool:
-        if self._on_navigation is None:
+    def _invoke_navigation_handler(self, url: str) -> bool:
+        handler = self._on_navigation
+        if handler is None:
             return True
         try:
-            result = self._on_navigation(url)
+            result = handler(url)
         except Exception:
             traceback.print_exc()
             return False
@@ -806,6 +841,14 @@ class WebView:
             return False
         return result
 
+    def _native_navigation(self, url: str) -> bool:
+        if self._on_navigation is None:
+            return True
+        return self._dispatch_sync_hook(
+            lambda: self._invoke_navigation_handler(url),
+            default=False,
+        )
+
     def _native_title_changed(self, title: str) -> None:
         native = self._webview
         if native is None or self._on_title_changed is None:
@@ -814,11 +857,12 @@ class WebView:
         native._enqueue_title_event(title)
         self._ensure_event_poll()
 
-    def _native_new_window(self, url: str) -> NewWindowResponse:
-        if self._on_new_window is None:
+    def _invoke_new_window_handler(self, url: str) -> NewWindowResponse:
+        handler = self._on_new_window
+        if handler is None:
             return NewWindowResponse.Allow
         try:
-            result = self._on_new_window(url)
+            result = handler(url)
         except Exception:
             traceback.print_exc()
             return NewWindowResponse.Deny
@@ -830,6 +874,14 @@ class WebView:
             )
             return NewWindowResponse.Deny
         return result
+
+    def _native_new_window(self, url: str) -> NewWindowResponse:
+        if self._on_new_window is None:
+            return NewWindowResponse.Allow
+        return self._dispatch_sync_hook(
+            lambda: self._invoke_new_window_handler(url),
+            default=NewWindowResponse.Deny,
+        )
 
     def _enqueue_ipc(self, message: str) -> None:
         native = self._webview
@@ -853,6 +905,72 @@ class WebView:
             callback(*args)
         except Exception:
             traceback.print_exc()
+
+    def _ensure_tk_wakeup_pipe(self) -> None:
+        toplevel = self._frame.winfo_toplevel()
+        if sys.platform == "darwin":
+            write_fd = getattr(toplevel, "_tkwry_mac_wake_write_fd", None)
+        else:
+            write_fd = getattr(toplevel, "_tkwry_wake_write_fd", None)
+            if write_fd is None:
+                read_fd, write_fd = os.pipe()
+                toplevel._tkwry_wake_read_fd = read_fd
+                toplevel._tkwry_wake_write_fd = write_fd
+        self._tk_wakeup_write_fd = write_fd
+
+    def _wake_tk_for_sync_hook(self) -> None:
+        write_fd = self._tk_wakeup_write_fd
+        if write_fd is None:
+            return
+        try:
+            os.write(write_fd, b"\x01")
+        except OSError:
+            pass
+
+    def _dispatch_sync_hook(self, invoke: Callable[[], _T], default: _T) -> _T:
+        if threading.get_ident() == self._tk_thread_id:
+            try:
+                return invoke()
+            except Exception:
+                traceback.print_exc()
+                return default
+
+        done = threading.Event()
+        result: list[_T] = [default]
+        self._sync_hook_queue.put((invoke, result, default, done))
+        self._wake_tk_for_sync_hook()
+        if not done.wait(timeout=_SYNC_HOOK_TIMEOUT_S):
+            print(
+                f"tkwry: sync hook timed out after {_SYNC_HOOK_TIMEOUT_S:g}s",
+                file=sys.stderr,
+            )
+            return default
+        return result[0]
+
+    def _drain_sync_hooks(self) -> None:
+        while True:
+            try:
+                invoke, result, default, done = self._sync_hook_queue.get_nowait()
+            except queue.Empty:
+                break
+            if self._destroyed:
+                result[0] = default
+            else:
+                try:
+                    result[0] = invoke()
+                except Exception:
+                    traceback.print_exc()
+                    result[0] = default
+            done.set()
+
+    def _abort_sync_hooks(self) -> None:
+        while True:
+            try:
+                _invoke, result, default, done = self._sync_hook_queue.get_nowait()
+            except queue.Empty:
+                break
+            result[0] = default
+            done.set()
 
     def _deliver_ipc_messages(self) -> None:
         handler = self._ipc_handler
@@ -917,6 +1035,11 @@ class WebView:
         del self._pending_eval_tokens[token]
         self._pending_eval_callbacks = max(0, self._pending_eval_callbacks - 1)
 
+    def _drop_native_eval_wait_for_py_token(self, py_token: int) -> None:
+        for native_token, wait in list(self._native_eval_wait.items()):
+            if wait[1] == py_token:
+                del self._native_eval_wait[native_token]
+
     def _expire_pending_evals(self) -> None:
         if not self._pending_eval_tokens:
             return
@@ -926,6 +1049,7 @@ class WebView:
         ):
             if now >= deadline:
                 self._release_pending_eval(token)
+                self._drop_native_eval_wait_for_py_token(token)
                 exc = TimeoutError(
                     f"eval_js_with_callback timed out after "
                     f"{_EVAL_CALLBACK_TIMEOUT_S:g}s"
@@ -979,7 +1103,12 @@ class WebView:
 
             pump_events()
         elif sys.platform == "darwin":
-            _mac_service_wakeup(self._frame.winfo_toplevel())
+            toplevel = self._frame.winfo_toplevel()
+            _mac_service_wakeup(toplevel)
+        else:
+            _pump_toplevel_wakeup_pipe(self._frame.winfo_toplevel())
+
+        self._drain_sync_hooks()
 
         handler = self._ipc_handler
         if handler is not None:
@@ -1091,6 +1220,7 @@ class WebView:
             toplevel = self._frame.winfo_toplevel()
             _ensure_mac_wakeup_pipe(toplevel, self._webview)
             _ensure_mac_pump(toplevel)
+        self._ensure_tk_wakeup_pipe()
         if self._needs_event_poll():
             self._ensure_event_poll()
             if sys.platform == "linux":

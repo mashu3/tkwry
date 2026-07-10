@@ -280,7 +280,7 @@ def test_poll_events_does_not_double_invoke_after_eval_timeout(
     assert not web._native_eval_wait
 
 
-def test_poll_keeps_running_after_timeout_until_native_eval_drained(
+def test_poll_stops_after_timeout_when_native_eval_never_returns(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _frame, web = _make_web(tk_root)
@@ -298,8 +298,8 @@ def test_poll_keeps_running_after_timeout_until_native_eval_drained(
 
     assert results == [""]
     assert web._pending_eval_callbacks == 0
-    assert web._native_eval_wait
-    assert web._event_poll_active is True
+    assert not web._native_eval_wait
+    assert web._event_poll_active is False
 
     native.drain_eval_callbacks.return_value = [(1, results.append, "late")]
     web._poll_events()

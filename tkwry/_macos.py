@@ -159,6 +159,8 @@ def _mac_service_wakeup(toplevel: tk.Misc) -> bool:
     """Drain Rust->Python unfocus signals on the Tk thread."""
     _mac_pump_wakeup_pipe(toplevel)
     drained = _drain_mac_tk_unfocus(toplevel)
+    for web in _mac_webviews(toplevel):
+        web._drain_sync_hooks()
     _sync_mac_web_input_cache(toplevel)
     return drained
 
