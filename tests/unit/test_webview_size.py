@@ -301,8 +301,15 @@ def test_destroy_rejects_layout_and_bind(tk_root) -> None:
 def test_macos_focused_true_prints_warning(
     tk_root, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    from tkwry._parent import EmbedParent
+
     frame = tk.Frame(tk_root)
     monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
+    monkeypatch.setattr(
+        "tkwry.webview.tk_embed_parent",
+        lambda _frame: EmbedParent(1),
+    )
+    monkeypatch.setattr("tkwry.webview.GtkPump.ensure_attached", lambda _frame: None)
     monkeypatch.setattr(
         "tkwry.webview._register_macos_webview",
         lambda _web: None,
