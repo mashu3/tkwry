@@ -44,9 +44,9 @@ class GtkPump:
     _widget_attachments: dict[int, tuple[int, int]] = {}
     _pending_attach: set[int] = set()
 
-    def __init__(self, root: tk.Misc) -> None:
+    def __init__(self, root: tk.Misc, *, root_id: int | None = None) -> None:
         self._root = root.winfo_toplevel()
-        self._root_id = self._root.winfo_id()
+        self._root_id = root_id if root_id is not None else self._root.winfo_id()
         self._active = False
         self._refcount = 0
         self._destroy_bind_id: str | None = None
@@ -186,7 +186,7 @@ class GtkPump:
         cls._migrate_widget_if_reparented(widget, root_id)
         pump = cls._by_root_id.get(root_id)
         if pump is None:
-            pump = cls(widget)
+            pump = GtkPump(widget, root_id=root_id)
             cls._by_root_id[root_id] = pump
         cls._record_widget_attach(widget, root_id)
         pump._refcount += 1
