@@ -305,7 +305,7 @@ class WebView:
         """Bind a Tk event on the host frame (e.g. ``\"<<WebViewReady>>\"``)."""
         self._require_tk_thread()
         result = self._frame.bind(sequence, func, add=add)
-        if sequence == "<<WebViewReady>>" and self.ready:
+        if sequence == "<<WebViewReady>>" and self._ready_delivered:
 
             def _deliver_ready(
                 _func: Callable = func, _frame: tk.Misc = self._frame
@@ -338,7 +338,7 @@ class WebView:
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
-        if self.ready:
+        if self._ready_delivered:
 
             def _deliver() -> None:
                 if self._destroyed:

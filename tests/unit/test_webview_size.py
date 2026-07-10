@@ -418,6 +418,7 @@ def test_bind_after_ready_falls_back_when_probe_misses(
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)
     web._webview = object()
+    web._ready_delivered = True
     monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
     monkeypatch.setattr(web._frame, "event_generate", lambda *_a, **_k: None)
 
