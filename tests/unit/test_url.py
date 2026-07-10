@@ -36,6 +36,23 @@ def test_validate_requires_host() -> None:
         _validate_url("https://")
 
 
+def test_validate_rejects_invalid_host() -> None:
+    with pytest.raises(ValueError, match="invalid URL host"):
+        _validate_url("https://@@@")
+
+
+def test_normalize_symlink_path_does_not_resolve_target(tmp_path: Path) -> None:
+    target = tmp_path / "target.html"
+    target.write_text("<p>target</p>", encoding="utf-8")
+    link = tmp_path / "link.html"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported")
+    assert _normalize_url(str(link)) == link.absolute().as_uri()
+    assert _normalize_url(str(link)) != target.absolute().as_uri()
+
+
 def test_normalize_strips_zero_width_chars() -> None:
     assert _normalize_url("\u200bhttps://example.com\u200b") == "https://example.com"
 
@@ -49,13 +66,13 @@ def test_normalize_absolute_path_to_file_uri(tmp_path: Path) -> None:
     page = tmp_path / "index.html"
     page.write_text("<p>local</p>", encoding="utf-8")
 
-    assert _normalize_url(str(page)) == page.resolve().as_uri()
+    assert _normalize_url(str(page)) == page.absolute().as_uri()
 
 
 def test_normalize_file_uri(tmp_path: Path) -> None:
     page = tmp_path / "index.html"
     page.write_text("<p>local</p>", encoding="utf-8")
-    file_url = page.resolve().as_uri()
+    file_url = page.absolute().as_uri()
 
     assert _normalize_url(file_url) == file_url
 
@@ -63,7 +80,7 @@ def test_normalize_file_uri(tmp_path: Path) -> None:
 def test_validate_accepts_file_uri(tmp_path: Path) -> None:
     page = tmp_path / "index.html"
     page.write_text("<p>local</p>", encoding="utf-8")
-    file_url = page.resolve().as_uri()
+    file_url = page.absolute().as_uri()
 
     _validate_url(file_url)
 
@@ -75,7 +92,7 @@ def test_normalize_relative_path_to_file_uri(
     page.write_text("<p>local</p>", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    assert _normalize_url("./index.html") == page.resolve().as_uri()
+    assert _normalize_url("./index.html") == page.absolute().as_uri()
 
 
 def test_normalize_host_port_without_scheme() -> None:
@@ -122,15 +139,15 @@ def test_relative_paths_are_not_https_urls(
     (tmp_path / "myserver").mkdir()
     (tmp_path / "myserver" / "api").write_text("x", encoding="utf-8")
 
-    assert _normalize_url("README") == (tmp_path / "README").resolve().as_uri()
+    assert _normalize_url("README") == (tmp_path / "README").absolute().as_uri()
     assert (
         _normalize_url("docs/readme")
-        == (tmp_path / "docs" / "readme").resolve().as_uri()
+        == (tmp_path / "docs" / "readme").absolute().as_uri()
     )
-    assert _normalize_url("api/v1") == (tmp_path / "api" / "v1").resolve().as_uri()
+    assert _normalize_url("api/v1") == (tmp_path / "api" / "v1").absolute().as_uri()
     assert (
         _normalize_url("myserver/api")
-        == (tmp_path / "myserver" / "api").resolve().as_uri()
+        == (tmp_path / "myserver" / "api").absolute().as_uri()
     )
 
 
@@ -165,8 +182,8 @@ def test_normalize_relative_path_still_file_uri(
     page.write_text("<p>local</p>", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    assert _normalize_url("subdir/page.html") == page.resolve().as_uri()
-    assert _normalize_url("./subdir/page.html") == page.resolve().as_uri()
+    assert _normalize_url("subdir/page.html") == page.absolute().as_uri()
+    assert _normalize_url("./subdir/page.html") == page.absolute().as_uri()
 
 
 def test_normalize_bare_filename_to_file_uri(
@@ -176,7 +193,7 @@ def test_normalize_bare_filename_to_file_uri(
     page.write_text("<p>local</p>", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    assert _normalize_url("index.html") == page.resolve().as_uri()
+    assert _normalize_url("index.html") == page.absolute().as_uri()
 
 
 def test_normalize_ipv6_host_port_without_scheme() -> None:
@@ -204,7 +221,7 @@ def test_normalize_unicode_filename_to_file_uri(
     page.write_text("<p>local</p>", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    assert _normalize_url("ページ.html") == page.resolve().as_uri()
+    assert _normalize_url("ページ.html") == page.absolute().as_uri()
 
 
 def test_normalize_windows_drive_root_file_uri(

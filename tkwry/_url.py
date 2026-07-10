@@ -296,7 +296,8 @@ def _file_uri_from_path(path: str) -> str:
     expanded = os.path.expanduser(path.strip())
     expanded = _strip_leading_slash_from_windows_path(expanded)
     expanded = _windows_drive_root_path(expanded)
-    return Path(expanded).resolve().as_uri()
+    # Do not follow symlinks; resolve() can load a different file than requested.
+    return Path(expanded).absolute().as_uri()
 
 
 def _normalize_file_url(url: str) -> str:
@@ -356,6 +357,30 @@ def _normalize_url(url: str) -> str:
     return _fix_https_ipv6_netloc(cleaned)
 
 
+def _is_valid_http_host(host: str) -> bool:
+    if not host:
+        return False
+    if _is_ipv6_literal(host):
+        return True
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return True
+    return _looks_like_hostname(host)
+
+
+def _validate_http_url(parsed) -> None:
+    host = parsed.hostname
+    if not host:
+        if parsed.netloc:
+            raise ValueError("invalid URL host")
+        raise ValueError("URL must include a host, e.g. https://example.com")
+    if not _is_valid_http_host(host):
+        raise ValueError(f"invalid URL host: {host!r}")
+
+
 def _validate_url(url: str) -> None:
     if "\x00" in url:
         raise ValueError("invalid URL")
@@ -364,7 +389,7 @@ def _validate_url(url: str) -> None:
     parsed = urlparse(url)
     if parsed.scheme not in _SUPPORTED_SCHEMES:
         raise ValueError(f"unsupported URL scheme: {parsed.scheme!r}")
-    if parsed.scheme in {"http", "https"} and not parsed.netloc:
-        raise ValueError("URL must include a host, e.g. https://example.com")
+    if parsed.scheme in {"http", "https"}:
+        _validate_http_url(parsed)
     if parsed.scheme == "file" and (not parsed.path or parsed.path == "/"):
         raise ValueError("file URL must include a path")
