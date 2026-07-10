@@ -7,7 +7,7 @@ import tkinter as tk
 import pytest
 
 from tkwry import WebView
-from tkwry.exceptions import WebViewDestroyedError
+from tkwry.exceptions import WebViewCreationError, WebViewDestroyedError
 from tkwry.webview import _CREATE_MAX_ATTEMPTS, _FLUSH_LOAD_MAX_ATTEMPTS
 
 _real_try_create = WebView._try_create
@@ -399,17 +399,34 @@ def test_maybe_fire_ready_fires_once_after_unmap_remap(
 
     web._maybe_fire_ready()
     assert fired == [1]
-    assert web._ready_delivered
+    assert web._ready_pending
+    assert not web._ready_delivered
 
     viewable[0] = False
     web._maybe_fire_ready()
-    assert web._ready_delivered
+    assert web._ready_pending
     assert fired == [1]
 
     viewable[0] = True
     web._maybe_fire_ready()
     assert fired == [1]
-    assert web._ready_delivered
+    assert web._ready_pending
+
+
+def test_bind_after_ready_flag_before_idle_fires_once(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+    web._webview = object()
+    counts: list[int] = []
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+
+    web._maybe_fire_ready()
+    web.bind("<<WebViewReady>>", lambda _evt: counts.append(1))
+    tk_root.update_idletasks()
+
+    assert counts == [1]
 
 
 def test_bind_after_ready_falls_back_when_probe_misses(
@@ -518,6 +535,9 @@ def test_try_create_stops_after_max_attempts(
     assert web._webview is None
     assert scheduled == []
     assert web._create_attempt == _CREATE_MAX_ATTEMPTS
+    assert web._creation_error is not None
+    with pytest.raises(WebViewCreationError, match="native creation failed"):
+        web._require_ready("eval_js")
 
 
 def test_try_create_retries_after_native_failure(

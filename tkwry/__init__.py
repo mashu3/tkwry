@@ -4,7 +4,11 @@ import sys
 
 from tkwry._core import DragDropEvent, NewWindowResponse, PageLoadEvent
 from tkwry._version import __version__
-from tkwry.exceptions import WebViewDestroyedError, WebViewNotReadyError
+from tkwry.exceptions import (
+    WebViewCreationError,
+    WebViewDestroyedError,
+    WebViewNotReadyError,
+)
 
 try:
     from tkwry.webview import (
@@ -44,6 +48,7 @@ __all__ = [
     "PageLoadHandler",
     "TitleChangedHandler",
     "WebView",
+    "WebViewCreationError",
     "WebViewDestroyedError",
     "WebViewNotReadyError",
     "__version__",

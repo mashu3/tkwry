@@ -164,6 +164,27 @@ def test_poll_events_rearms_if_result_arrives_during_stop(
     assert not results  # re-armed poll would drain; we suppressed after(_poll)
 
 
+def test_eval_js_with_callback_uses_native_stub_not_user_callback(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _make_web(tk_root)
+    _configure_poll_test(web, monkeypatch)
+    native = MagicMock()
+    native.eval_js_with_callback.return_value = 1
+    _stub_native_ready(web, native, monkeypatch)
+    results: list[str] = []
+    user_cb = results.append
+
+    web.eval_js_with_callback("'ok'", user_cb)
+    tk_root.update_idletasks()
+    tk_root.update()
+
+    native.eval_js_with_callback.assert_called_once()
+    rust_cb = native.eval_js_with_callback.call_args[0][1]
+    assert rust_cb is not user_cb
+    assert rust_cb.__name__ == "_noop_native_eval_callback"
+
+
 def test_eval_js_with_callback_on_error(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

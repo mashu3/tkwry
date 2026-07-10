@@ -86,6 +86,7 @@ def test_public_exports() -> None:
     assert DragDropEvent is not None
     assert NewWindowResponse is not None
     assert tkwry.WebViewNotReadyError is not None
+    assert tkwry.WebViewCreationError is not None
     assert tkwry.WebViewDestroyedError is not None
     for alias in PUBLIC_TYPE_ALIASES:
         assert alias is not None

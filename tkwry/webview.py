@@ -29,7 +29,11 @@ from tkwry._parent import (
 )
 from tkwry._runtime import GtkPump
 from tkwry._url import _normalize_url, _validate_url
-from tkwry.exceptions import WebViewDestroyedError, WebViewNotReadyError
+from tkwry.exceptions import (
+    WebViewCreationError,
+    WebViewDestroyedError,
+    WebViewNotReadyError,
+)
 
 if sys.platform == "darwin":
     from tkwry._macos import (
@@ -105,6 +109,10 @@ def _pump_toplevel_wakeup_pipe(toplevel: tk.Misc) -> None:
                 break
     except (OSError, ValueError):
         pass
+
+
+def _noop_native_eval_callback(_result: str) -> None:
+    """Stub passed to Rust; Python delivers via ``_native_eval_wait``."""
 
 
 class WebView:
@@ -183,9 +191,11 @@ class WebView:
         )
         self._destroyed = False
         self._ready_delivered = False
+        self._ready_pending = False
         self._ready_callbacks: list[Callable[[], None]] = []
         self._create_pending = False
         self._create_attempt = 0
+        self._creation_error: BaseException | None = None
         self._flush_load_attempt = 0
         self._embed = tk_embed_parent(frame)
         self._webview: NativeWebView | None = None
@@ -402,6 +412,8 @@ class WebView:
 
         if self.ready:
             return True
+        if self._creation_error is not None:
+            return False
         if self._destroyed:
             return False
         if self._wait_until_ready_active:
@@ -415,6 +427,8 @@ class WebView:
         self._wait_until_ready_active = True
         try:
             while not self.ready and not self._destroyed:
+                if self._creation_error is not None:
+                    return False
                 if time.monotonic() >= deadline:
                     return False
                 root.update_idletasks()
@@ -447,7 +461,9 @@ class WebView:
         self._abort_sync_hooks()
         self._drain_eval_result_queue(discard=True)
         self._ready_delivered = False
+        self._ready_pending = False
         self._ready_callbacks.clear()
+        self._creation_error = None
         self._unbind_frame_events()
         if self._webview is not None:
             native = self._webview
@@ -563,7 +579,9 @@ class WebView:
                 return
 
             try:
-                native_token = self._webview.eval_js_with_callback(script, callback)
+                native_token = self._webview.eval_js_with_callback(
+                    script, _noop_native_eval_callback
+                )
             except Exception as exc:
                 self._release_pending_eval(token)
                 if on_error is not None:
@@ -744,6 +762,10 @@ class WebView:
             raise WebViewDestroyedError(
                 f"WebView.destroy() was called; cannot call {method}()"
             )
+        if self._creation_error is not None:
+            raise WebViewCreationError(
+                f"WebView native creation failed; cannot call {method}()"
+            ) from self._creation_error
         if not self.ready:
             raise WebViewNotReadyError(
                 f"WebView is not ready; call wait_until_ready() or bind to "
@@ -778,21 +800,23 @@ class WebView:
             return
         if not self._layout_ready():
             return
-        if self._ready_delivered:
+        if self._ready_delivered or self._ready_pending:
             return
-        self._ready_delivered = True
+        self._ready_pending = True
         self._fire_ready()
 
     def _fire_ready(self) -> None:
-        callbacks = self._ready_callbacks
-        self._ready_callbacks = []
-
         def _deliver_ready() -> None:
             if self._destroyed:
+                self._ready_pending = False
                 return
             # Defer bind handlers until create/bounds/poll paths return. event_generate
             # from idle is synchronous for bindings but no longer re-enters _try_create.
             self._frame.event_generate("<<WebViewReady>>")
+            self._ready_delivered = True
+            self._ready_pending = False
+            callbacks = self._ready_callbacks
+            self._ready_callbacks = []
             for callback in callbacks:
                 if self._destroyed:
                     return
@@ -1191,10 +1215,11 @@ class WebView:
                 owner_thread=self._tk_thread_id,
                 **kwargs,
             )
-        except Exception:
+        except Exception as exc:
             traceback.print_exc()
             self._create_attempt += 1
             if self._create_attempt >= _CREATE_MAX_ATTEMPTS:
+                self._creation_error = exc
                 print(
                     f"tkwry: failed to create native WebView after "
                     f"{_CREATE_MAX_ATTEMPTS} attempts; giving up",
