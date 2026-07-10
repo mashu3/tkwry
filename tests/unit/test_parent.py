@@ -167,9 +167,23 @@ def test_tk_window_drawable_offsets_scale_with_pointer_size(
 ) -> None:
     monkeypatch.setattr(_parent, "sizeof", lambda _type: 8)
     assert _parent._tk_window_drawable_offsets() == (40, 48, 32)
+    assert _parent._tk_window_drawable_offset_candidates()[:3] == (40, 48, 32)
 
     monkeypatch.setattr(_parent, "sizeof", lambda _type: 4)
     assert _parent._tk_window_drawable_offsets() == (20, 24, 16)
+    assert _parent._tk_window_drawable_offset_candidates()[:3] == (20, 24, 16)
+
+
+def test_mac_root_relative_when_top_ns_missing() -> None:
+    assert _parent._mac_root_relative(handle=100, top_ns=0) is True
+
+
+def test_mac_root_relative_when_handles_match() -> None:
+    assert _parent._mac_root_relative(handle=100, top_ns=100) is True
+
+
+def test_mac_root_relative_when_handles_differ() -> None:
+    assert _parent._mac_root_relative(handle=100, top_ns=200) is False
 
 
 def test_mac_drawable_from_tk_window_probes_offsets(
@@ -180,6 +194,7 @@ def test_mac_drawable_from_tk_window_probes_offsets(
     wid = 0x0000_00AB
     full = 0xFFFF_FF00_0000_00AB
     calls: list[int] = []
+    lookup_calls: list[int] = []
 
     def fake_from_address(addr: int) -> c_void_p:
         calls.append(addr)
@@ -187,8 +202,34 @@ def test_mac_drawable_from_tk_window_probes_offsets(
         value = full if offset == 24 else 0
         return c_void_p(value)
 
+    def fake_lookup(drawable: c_void_p) -> int:
+        lookup_calls.append(drawable.value or 0)
+        return 1 if drawable.value == full else 0
+
     monkeypatch.setattr(_parent, "sizeof", lambda _type: 4)
     monkeypatch.setattr(_parent.c_void_p, "from_address", fake_from_address)
+    monkeypatch.setattr(_parent, "_mac_nsview_lookup", lambda _dylib: fake_lookup)
 
-    assert _parent._mac_drawable_from_tk_window(1000, wid) == full
+    assert _parent._mac_drawable_from_tk_window(1000, wid, object()) == full
     assert calls == [1020, 1024]
+    assert lookup_calls == [full]
+
+
+def test_mac_drawable_from_tk_window_rejects_low32_without_native_view(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ctypes import c_void_p
+
+    wid = 0x0000_00AB
+    full = 0xFFFF_FF00_0000_00AB
+
+    def fake_from_address(addr: int) -> c_void_p:
+        offset = addr - 1000
+        return c_void_p(full if offset == 20 else 0)
+
+    monkeypatch.setattr(_parent, "sizeof", lambda _type: 4)
+    monkeypatch.setattr(_parent.c_void_p, "from_address", fake_from_address)
+    monkeypatch.setattr(_parent, "_mac_nsview_lookup", lambda _dylib: lambda _d: 0)
+
+    with pytest.raises(RuntimeError, match="Drawable sanity check failed"):
+        _parent._mac_drawable_from_tk_window(1000, wid, object())

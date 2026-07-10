@@ -181,19 +181,47 @@ def _tk_window_drawable_offsets() -> tuple[int, ...]:
     return tuple(offset for offset in candidates if offset > 0)
 
 
-def _mac_drawable_from_tk_window(tk_win: int, wid: int) -> int:
-    """Read the Drawable field, probing nearby offsets when layout differs."""
-    low32 = wid & 0xFFFFFFFF
+def _tk_window_drawable_offset_candidates() -> tuple[int, ...]:
+    """Return drawable-field offsets to probe, preferred order first."""
+    ptr_size = sizeof(c_void_p)
+    seen: set[int] = set()
+    ordered: list[int] = []
     for offset in _tk_window_drawable_offsets():
+        if offset not in seen:
+            seen.add(offset)
+            ordered.append(offset)
+    # Non-standard Tk builds may place ``window`` elsewhere in the header.
+    for offset in range(0, 12 * ptr_size + 1, ptr_size):
+        if offset > 0 and offset not in seen:
+            seen.add(offset)
+            ordered.append(offset)
+    return tuple(ordered)
+
+
+def _mac_root_relative(*, handle: int, top_ns: int) -> bool:
+    """Return whether bounds should be positioned relative to the toplevel."""
+    # When the toplevel lookup fails we still need root-relative offsets for
+    # child frames that share the toplevel NSView.
+    return not top_ns or handle == top_ns
+
+
+def _mac_drawable_from_tk_window(tk_win: int, wid: int, dylib: CDLL) -> int:
+    """Read the Drawable field, probing offsets validated via native Tk."""
+    lookup = _mac_nsview_lookup(dylib)
+    low32 = wid & 0xFFFFFFFF
+    tried: list[int] = []
+    for offset in _tk_window_drawable_offset_candidates():
+        tried.append(offset)
         full = c_void_p.from_address(tk_win + offset).value
         if full is None or full == 0:
             continue
-        if (full & 0xFFFFFFFF) == low32:
+        if (full & 0xFFFFFFFF) != low32:
+            continue
+        if lookup(c_void_p(full)):
             return full
     raise RuntimeError(
         "Drawable sanity check failed for TkWindow struct "
-        f"(tried offsets {_tk_window_drawable_offsets()!r}, "
-        f"winfo_id returned {wid:#x})"
+        f"(tried offsets {tried!r}, winfo_id returned {wid:#x})"
     )
 
 
@@ -224,7 +252,7 @@ def _mac_drawable(widget: tk.Misc, dylib: CDLL) -> int:
     if not tk_win:
         raise RuntimeError(f"Tk_NameToWindow failed for {widget!r}")
 
-    return _mac_drawable_from_tk_window(tk_win, wid)
+    return _mac_drawable_from_tk_window(tk_win, wid, dylib)
 
 
 _mac_tk_dylib_cache: dict[str, CDLL] = {}
@@ -268,7 +296,7 @@ def tk_embed_parent(widget: tk.Misc) -> EmbedParent:
         top = widget.winfo_toplevel()
         top_drawable = _mac_drawable(top, dylib)
         top_ns = lookup(c_void_p(top_drawable))
-        root_relative = bool(top_ns) and handle == int(top_ns)
+        root_relative = _mac_root_relative(handle=handle, top_ns=int(top_ns or 0))
         return EmbedParent(handle, root_relative=root_relative)
 
     # Linux (X11): winfo_id is the X11 window ID.
