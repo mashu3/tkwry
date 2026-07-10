@@ -728,6 +728,20 @@ class WebView:
             raise WebViewDestroyedError("WebView.destroy() was called")
         self._sync_bounds()
 
+    def take_queue_drop_counts(self) -> tuple[int, int, int, int, int]:
+        """Return overflow drop counts since the last call.
+
+        Returns ``(ipc, page_load, title, drag_drop, eval)``. Each internal
+        queue caps at 256 pending items; additional events are discarded and
+        counted here so applications can detect handler backlogs.
+        """
+        self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
+        if self._webview is None:
+            return (0, 0, 0, 0, 0)
+        return self._webview.take_queue_drop_counts()
+
     def set_on_title_changed(self, handler: TitleChangedHandler | None) -> None:
         self._require_tk_thread()
         if self._destroyed:

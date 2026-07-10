@@ -54,6 +54,7 @@ WEBVIEW_METHODS = (
     "set_on_new_window",
     "set_drag_drop_handler",
     "sync_bounds",
+    "take_queue_drop_counts",
     "pack",
     "grid",
     "place",
