@@ -596,10 +596,7 @@ impl WebView {
     }
 
     fn native_is_alive(&self) -> bool {
-        self.inner
-            .lock()
-            .ok()
-            .is_some_and(|guard| guard.is_some())
+        self.inner.lock().ok().is_some_and(|guard| guard.is_some())
     }
 }
 

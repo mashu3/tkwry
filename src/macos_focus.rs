@@ -1,8 +1,8 @@
 //! macOS: route keyboard focus between WKWebView and Tk at the NSEvent layer.
 //!
-//! wry ``set_bounds`` uses top-left logical coordinates; AppKit mouse points in
-//! the embed parent may use bottom-left unless the view is flipped.  Hit
-//! testing must convert before comparing to ``WebView::bounds()``.
+//! Hit testing uses AppKit view conversion (window point → WKWebView local
+//! space) so embed-parent flip, Retina scale, and non-standard view hierarchies
+//! stay aligned with wry ``set_bounds``.
 //!
 //! Never call Python from AppKit callbacks or ``performBlock`` — deadlock with
 //! Tk.  Instead write one byte to a pipe and set a flag; Python drains on the
@@ -18,7 +18,7 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSEvent, NSEventMask, NSView, NSWindowDidBecomeKeyNotification};
-use objc2_foundation::{NSNotification, NSNotificationCenter, NSOperationQueue, NSPoint};
+use objc2_foundation::{NSNotification, NSNotificationCenter, NSOperationQueue, NSPoint, NSRect};
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::WebViewExtMacOS;
 
@@ -74,14 +74,11 @@ pub fn install_focus_sync(
         let wakeup = wakeup_write_fd.clone();
         RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
             let event_ref = unsafe { event.as_ref() };
-
-            let parent = unsafe { parent_ns_view.as_ref() };
-            let parent_point = parent.convertPoint_fromView(event_ref.locationInWindow(), None);
-            let wry_point = parent_point_to_wry(parent, parent_point);
+            let window_point = event_ref.locationInWindow();
 
             if let Ok(guard) = inner.lock() {
                 if let Some(ref wv) = *guard {
-                    if point_in_wry_bounds(wv, wry_point) {
+                    if window_point_hits_webview(wv, window_point) {
                         web_wants.store(true, Ordering::SeqCst);
                         unfocus.store(true, Ordering::SeqCst);
                         focus_webview(wv, "focus");
@@ -125,12 +122,12 @@ pub fn install_focus_sync(
             }
             if let Ok(guard) = inner.lock() {
                 if let Some(ref wv) = *guard {
-                    let Some(wry_point) = current_mouse_wry_point(parent_ns_view) else {
+                    let Some(window_point) = current_window_point(parent_ns_view) else {
                         unfocus.store(true, Ordering::SeqCst);
                         notify_wakeup(&wakeup);
                         return event.as_ptr();
                     };
-                    if !point_in_wry_bounds(wv, wry_point) {
+                    if !window_point_hits_webview(wv, window_point) {
                         unfocus.store(true, Ordering::SeqCst);
                         notify_wakeup(&wakeup);
                     }
@@ -157,16 +154,11 @@ pub fn install_focus_sync(
             }
             if let Ok(guard) = inner.lock() {
                 if let Some(ref wv) = *guard {
-                    let Some(wry_point) = current_mouse_wry_point(parent_ns_view) else {
-                        return;
-                    };
-                    if point_in_wry_bounds(wv, wry_point) {
-                        focus_webview(wv, "focus on window key");
-                        unfocus.store(true, Ordering::SeqCst);
-                        notify_wakeup(&wakeup);
-                    } else {
-                        release_web_focus_locked(wv, &web_wants);
-                    }
+                    // Keyboard-only window activation (Alt+Tab, etc.): restore web
+                    // input without requiring a mouse hit-test.
+                    focus_webview(wv, "focus on window key");
+                    unfocus.store(true, Ordering::SeqCst);
+                    notify_wakeup(&wakeup);
                 } else {
                     web_wants.store(false, Ordering::SeqCst);
                 }
@@ -243,25 +235,27 @@ fn point_in_wry_bounds(wv: &wry::WebView, wry_point: NSPoint) -> bool {
     wry_point_in_logical_rect(wry_point, x, y, width, height)
 }
 
-fn current_mouse_wry_point(parent_ns_view: NonNull<NSView>) -> Option<NSPoint> {
+/// Whether *window_point* lies inside the WKWebView using AppKit conversion.
+fn window_point_hits_webview(wv: &wry::WebView, window_point: NSPoint) -> bool {
+    let wk = wv.webview();
+    let local = wk.convertPoint_fromView(window_point, None);
+    point_in_ns_rect(local, wk.bounds())
+}
+
+fn point_in_ns_rect(point: NSPoint, rect: NSRect) -> bool {
+    point.x >= rect.origin.x
+        && point.y >= rect.origin.y
+        && point.x < rect.origin.x + rect.size.width
+        && point.y < rect.origin.y + rect.size.height
+}
+
+fn current_window_point(parent_ns_view: NonNull<NSView>) -> Option<NSPoint> {
     let _mtm = MainThreadMarker::new()?;
     unsafe {
         let parent = parent_ns_view.as_ref();
         let window = parent.window()?;
         let screen = NSEvent::mouseLocation();
-        let window_point = window.convertPointFromScreen(screen);
-        let parent_point = parent.convertPoint_fromView(window_point, None);
-        Some(parent_point_to_wry(parent, parent_point))
-    }
-}
-
-/// Convert a point in the embed parent's AppKit space to wry top-left space.
-fn parent_point_to_wry(parent: &NSView, point: NSPoint) -> NSPoint {
-    if parent.isFlipped() {
-        point
-    } else {
-        let height = parent.frame().size.height;
-        NSPoint::new(point.x, height - point.y)
+        Some(window.convertPointFromScreen(screen))
     }
 }
 
@@ -285,6 +279,18 @@ mod tests {
             100.0,
             50.0
         ));
+    }
+
+    #[test]
+    fn point_in_ns_rect_uses_appkit_bounds() {
+        let rect = NSRect::new(
+            NSPoint::new(5.0, 10.0),
+            objc2_foundation::NSSize::new(20.0, 30.0),
+        );
+        assert!(point_in_ns_rect(NSPoint::new(5.0, 10.0), rect));
+        assert!(point_in_ns_rect(NSPoint::new(24.9, 39.9), rect));
+        assert!(!point_in_ns_rect(NSPoint::new(25.0, 10.0), rect));
+        assert!(!point_in_ns_rect(NSPoint::new(5.0, 40.0), rect));
     }
 
     #[test]
