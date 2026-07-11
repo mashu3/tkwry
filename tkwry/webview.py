@@ -458,8 +458,8 @@ class WebView:
     def wait_until_ready(self, timeout: float = 30.0) -> bool:
         """Pump a nested Tk event loop until the webview is laid out or *timeout*.
 
-        This is **not** a passive wait: it runs ``root.update()`` repeatedly and
-        therefore re-enters other Tk callbacks while waiting. Prefer
+        This pumps Tk via ``update_idletasks`` and non-blocking ``dooneevent``
+        (not a full ``root.update()``). Prefer
         :meth:`when_ready` or ``bind(\"<<WebViewReady>>\")`` when you can avoid
         nesting the event loop (especially from handlers that touch Tk state).
 
@@ -976,10 +976,12 @@ class WebView:
             from tkwry._core import pump_events
 
             pump_events()
-        try:
-            root.tk.dooneevent(_TK_DONT_WAIT)
-        except tk.TclError:
-            pass
+        for _ in range(10):
+            try:
+                if not root.tk.dooneevent(_TK_DONT_WAIT):
+                    break
+            except tk.TclError:
+                break
 
     def _schedule_eval_js(self) -> None:
         if self._eval_js_scheduled:

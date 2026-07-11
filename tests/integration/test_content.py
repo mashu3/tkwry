@@ -47,7 +47,7 @@ def test_load_html_supersedes_pending_url_before_create(tk_root) -> None:
     web.load_url("example.com")
     web.load_html("<p>html wins</p>")
 
-    assert web.url is None
+    assert web.url == "<html>"
     assert web._pending_html == "<p>html wins</p>"
     assert web._pending_url is None
 

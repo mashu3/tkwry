@@ -64,8 +64,8 @@ def test_wait_until_ready_rejects_nested_calls(tk_root) -> None:
             nested_error.append(exc)
 
     web.bind("<<WebViewReady>>", reenter, add="+")
-    # Force an idle callback that nested-calls while the outer wait pumps.
-    web._frame.after(1, reenter)
+    # Idle callback re-enters while the outer wait pumps idletasks.
+    web._frame.after_idle(reenter)
     assert not web.wait_until_ready(timeout=0.2)
     assert nested_error
     assert isinstance(nested_error[0], RuntimeError)
