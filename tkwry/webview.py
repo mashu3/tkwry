@@ -70,8 +70,20 @@ _SYNC_HOOK_TIMEOUT_S = 30.0
 _MIN_LAYOUT_DIMENSION = 2
 _CREATE_MAX_ATTEMPTS = 30
 _FLUSH_LOAD_MAX_ATTEMPTS = 3
+_TK_DONT_WAIT = 1
+_QUEUE_DROP_IPC = 0
+_QUEUE_DROP_PAGE_LOAD = 1
+_QUEUE_DROP_TITLE = 2
+_QUEUE_DROP_DRAG_DROP = 3
+_QUEUE_DROP_EVAL = 4
 _T = TypeVar("_T")
 _frame_webview_refs: dict[int, weakref.ReferenceType[WebView]] = {}
+
+
+def _frame_webview_weakref_dead(ref: weakref.ReferenceType[WebView]) -> None:
+    dead = [key for key, entry in _frame_webview_refs.items() if entry is ref]
+    for key in dead:
+        _frame_webview_refs.pop(key, None)
 
 
 def _claim_frame_host(frame: tk.Misc, web: WebView) -> None:
@@ -85,7 +97,9 @@ def _claim_frame_host(frame: tk.Misc, web: WebView) -> None:
                 "tkwry: only one WebView per host frame is supported; "
                 "create a child frame for each embedded view"
             )
-    _frame_webview_refs[key] = weakref.ref(web)
+        if prior is None:
+            del _frame_webview_refs[key]
+    _frame_webview_refs[key] = weakref.ref(web, _frame_webview_weakref_dead)
 
 
 def _release_frame_host(frame: tk.Misc, web: WebView) -> None:
@@ -266,10 +280,14 @@ class WebView:
         self._pending_html = html
         self._pending_load: _PendingLoad | None = None
         self._flush_load_scheduled = False
+        self._pending_eval_js: tuple[str, EvalErrorHandler | None] | None = None
+        self._eval_js_scheduled = False
+        self._local_queue_drop_counts = [0, 0, 0, 0, 0]
         self._bounds_sync_scheduled = False
         self._initial_load: _PendingLoad | None = None
         self._initial_load_attempt = 0
         self._initial_load_after_id: str | None = None
+        self._deferred_after_ids: list[str] = []
 
         GtkPump.ensure_attached(frame)
         self._frame_bind_ids: list[tuple[str, str]] = []
@@ -358,16 +376,12 @@ class WebView:
     def creation_failed(self) -> bool:
         """``True`` when native creation was abandoned after all retries."""
         self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
         return self._creation_error is not None
 
     @property
     def creation_error(self) -> BaseException | None:
         """The exception from the final failed creation attempt, if any."""
         self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
         return self._creation_error
 
     @property
@@ -482,16 +496,23 @@ class WebView:
                     return False
                 if time.monotonic() >= deadline:
                     return False
-                root.update_idletasks()
-                root.update()
-                if sys.platform == "linux":
-                    from tkwry._core import pump_events
-
-                    pump_events()
+                self._pump_wait_until_ready(root)
                 time.sleep(0.01)
             return self.ready
         finally:
             self._wait_until_ready_active = False
+
+    def __del__(self) -> None:
+        try:
+            if self._destroyed:
+                return
+            if sys.platform == "darwin":
+                _unregister_macos_webview(self)
+            if threading.get_ident() == self._tk_thread_id:
+                self._cancel_deferred_callbacks()
+                self.destroy()
+        except Exception:
+            pass
 
     def destroy(self) -> None:
         """Hide and release the native webview without destroying the host frame.
@@ -504,16 +525,19 @@ class WebView:
             return
         self._destroyed = True
         self._event_poll_active = False
-        self._cancel_initial_load_timer()
+        self._cancel_deferred_callbacks()
         self._eval_epoch += 1
+        if self._pending_eval_tokens:
+            self._bump_queue_drop(_QUEUE_DROP_EVAL, len(self._pending_eval_tokens))
         self._pending_eval_callbacks = 0
         self._pending_eval_tokens.clear()
         self._native_eval_wait.clear()
+        self._pending_eval_js = None
+        self._eval_js_scheduled = False
         self._abort_sync_hooks()
         self._ready_delivered = False
         self._ready_pending = False
         self._ready_callbacks.clear()
-        self._creation_error = None
         _release_frame_host(self._frame, self)
         self._unbind_frame_events()
         if self._webview is not None:
@@ -610,7 +634,8 @@ class WebView:
         failure; otherwise the traceback is printed to stderr.
         """
         self._require_ready("eval_js")
-        self._frame.after_idle(lambda: self._run_eval_js(script, on_error))
+        self._pending_eval_js = (script, on_error)
+        self._schedule_eval_js()
 
     def eval_js_with_callback(
         self,
@@ -784,11 +809,11 @@ class WebView:
         counted here so applications can detect handler backlogs.
         """
         self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
-        if self._webview is None:
-            return (0, 0, 0, 0, 0)
-        return self._webview.take_queue_drop_counts()
+        local = self._take_local_queue_drop_counts()
+        if self._destroyed or self._webview is None:
+            return local
+        native = self._webview.take_queue_drop_counts()
+        return tuple(a + b for a, b in zip(local, native, strict=True))
 
     def set_on_title_changed(self, handler: TitleChangedHandler | None) -> None:
         self._require_tk_thread()
@@ -851,9 +876,31 @@ class WebView:
             return
         self._create_pending = True
         if delay_ms is None:
-            self._frame.after_idle(self._run_try_create)
+            self._track_after(self._frame.after_idle(self._run_try_create))
         else:
-            self._frame.after(delay_ms, self._run_try_create)
+            self._track_after(self._frame.after(delay_ms, self._run_try_create))
+
+    def _track_after(self, after_id: str | None) -> str | None:
+        if after_id:
+            self._deferred_after_ids.append(after_id)
+        return after_id
+
+    def _cancel_deferred_callbacks(self) -> None:
+        self._cancel_initial_load_timer()
+        self._create_pending = False
+        self._flush_load_scheduled = False
+        self._eval_js_scheduled = False
+        self._bounds_sync_scheduled = False
+        self._pending_eval_js = None
+        after_ids = self._deferred_after_ids
+        self._deferred_after_ids = []
+        for after_id in after_ids:
+            if not after_id:
+                continue
+            try:
+                self._frame.after_cancel(after_id)
+            except (tk.TclError, ValueError):
+                pass
 
     def _run_try_create(self) -> None:
         self._create_pending = False
@@ -887,6 +934,57 @@ class WebView:
             )
         assert self._webview is not None
         return self._webview
+
+    def _bump_queue_drop(self, kind: int, count: int = 1) -> None:
+        if count <= 0:
+            return
+        self._local_queue_drop_counts[kind] += count
+
+    def _take_local_queue_drop_counts(self) -> tuple[int, int, int, int, int]:
+        counts = tuple(self._local_queue_drop_counts)
+        self._local_queue_drop_counts = [0, 0, 0, 0, 0]
+        return counts
+
+    def _pump_wait_until_ready(self, root: tk.Misc) -> None:
+        """Advance this WebView without a full ``root.update()`` reentrant pump."""
+        root.update_idletasks()
+        if (
+            not self._destroyed
+            and self._webview is None
+            and self._creation_error is None
+        ):
+            if not self._create_pending and self._creation_size() is not None:
+                self._try_create()
+        if self._webview is not None and not self._destroyed:
+            if self._bounds_sync_scheduled:
+                self._deferred_sync_bounds()
+            elif not self._layout_ready():
+                self._sync_bounds()
+            if self._should_keep_polling() or self._event_poll_active:
+                self._poll_events()
+        if sys.platform == "linux":
+            from tkwry._core import pump_events
+
+            pump_events()
+        try:
+            root.tk.dooneevent(_TK_DONT_WAIT)
+        except tk.TclError:
+            pass
+
+    def _schedule_eval_js(self) -> None:
+        if self._eval_js_scheduled:
+            return
+        self._eval_js_scheduled = True
+        self._track_after(self._frame.after_idle(self._flush_eval_js))
+
+    def _flush_eval_js(self) -> None:
+        self._eval_js_scheduled = False
+        pending = self._pending_eval_js
+        self._pending_eval_js = None
+        if pending is None or self._destroyed or self._webview is None:
+            return
+        script, on_error = pending
+        self._run_eval_js(script, on_error)
 
     def _creation_size(self) -> tuple[int, int] | None:
         self._frame.update_idletasks()
@@ -934,7 +1032,7 @@ class WebView:
             for callback in callbacks:
                 self._invoke_callback(callback)
 
-        self._frame.after_idle(_deliver_ready)
+        self._track_after(self._frame.after_idle(_deliver_ready))
 
     def _needs_event_poll(self) -> bool:
         return any(
@@ -1193,6 +1291,7 @@ class WebView:
             if now >= deadline:
                 self._release_pending_eval(token)
                 self._drop_native_eval_wait_for_py_token(token)
+                self._bump_queue_drop(_QUEUE_DROP_EVAL)
                 exc = TimeoutError(
                     f"eval_js_with_callback timed out after "
                     f"{_EVAL_CALLBACK_TIMEOUT_S:g}s"
@@ -1207,7 +1306,7 @@ class WebView:
         if self._event_poll_active or self._destroyed:
             return
         self._event_poll_active = True
-        self._frame.after(1, self._poll_events)
+        self._track_after(self._frame.after(1, self._poll_events))
 
     def _drain_native_eval_callbacks(self) -> None:
         native = self._webview
@@ -1258,7 +1357,7 @@ class WebView:
 
         if self._should_keep_polling():
             delay = 1 if sys.platform == "linux" else 10
-            self._frame.after(delay, self._poll_events)
+            self._track_after(self._frame.after(delay, self._poll_events))
         else:
             # Clear before re-check so a concurrent ensure_event_poll can re-arm.
             self._event_poll_active = False
@@ -1385,7 +1484,13 @@ class WebView:
 
     def _bump_initial_load_attempt(self) -> None:
         self._initial_load_attempt += 1
-        if self._initial_load_attempt >= self._initial_load_attempts():
+        max_attempts = self._initial_load_attempts()
+        if self._initial_load_attempt >= max_attempts:
+            print(
+                "tkwry: initial load failed after "
+                f"{max_attempts} attempt(s); giving up",
+                file=sys.stderr,
+            )
             self._initial_load = None
 
     def _schedule_flush_load(self, *, delay_ms: int | None = None) -> None:
@@ -1393,9 +1498,9 @@ class WebView:
             return
         self._flush_load_scheduled = True
         if delay_ms is None:
-            self._frame.after_idle(self._flush_load)
+            self._track_after(self._frame.after_idle(self._flush_load))
         else:
-            self._frame.after(delay_ms, self._flush_load)
+            self._track_after(self._frame.after(delay_ms, self._flush_load))
 
     def _initial_load_attempts(self) -> int:
         """Headless Linux and macOS may need a second navigation after compositing."""
@@ -1520,7 +1625,7 @@ class WebView:
         try:
             if not self._frame.winfo_exists():
                 return False
-            if sys.platform != "linux" and not self._frame.winfo_viewable():
+            if not self._frame.winfo_viewable():
                 return False
             return self._bounds_size() is not None
         except tk.TclError:
@@ -1532,7 +1637,7 @@ class WebView:
         self._bounds_sync_scheduled = True
         try:
             self._frame.update_idletasks()
-            self._frame.after_idle(self._deferred_sync_bounds)
+            self._track_after(self._frame.after_idle(self._deferred_sync_bounds))
         except tk.TclError:
             self._bounds_sync_scheduled = False
 
@@ -1586,7 +1691,7 @@ class WebView:
             GtkPump.ensure_attached(self._frame)
         self._schedule_bounds_sync()
         self._maybe_fire_ready()
-        self._frame.after_idle(self._run_initial_load)
+        self._track_after(self._frame.after_idle(self._run_initial_load))
 
     def _on_unmap(self, event: tk.Event) -> None:
         if event.widget is not self._frame or self._destroyed:

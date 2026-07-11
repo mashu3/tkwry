@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tkinter as tk
+import weakref
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -49,7 +50,18 @@ def _release_tk_keyboard_focus(toplevel: tk.Misc) -> None:
 
 def _mac_webviews(toplevel: tk.Misc) -> list[WebView]:
     registered = getattr(toplevel, "_tkwry_mac_webviews", None) or []
-    return [w for w in registered if not w.destroyed and w.native is not None]
+    alive: list[WebView] = []
+    survivors: list[WebView | weakref.ReferenceType[WebView]] = []
+    for entry in registered:
+        web = entry() if isinstance(entry, weakref.ReferenceType) else entry
+        if web is None:
+            continue
+        survivors.append(entry)
+        if not web.destroyed and web.native is not None:
+            alive.append(web)
+    if survivors != registered:
+        toplevel._tkwry_mac_webviews = survivors
+    return alive
 
 
 def _mac_bind_root(widget: tk.Misc) -> tk.Misc:
@@ -330,7 +342,7 @@ def _register_macos_webview(web: WebView) -> None:
         toplevel._tkwry_mac_webviews = views
         toplevel._tkwry_mac_web_input_active = False
         _ensure_mac_key_guard(toplevel)
-    views.append(web)
+    views.append(weakref.ref(web))
 
 
 def _unregister_macos_webview(web: WebView) -> None:
@@ -349,10 +361,12 @@ def _unregister_macos_webview(web: WebView) -> None:
         return
     views = getattr(toplevel, "_tkwry_mac_webviews", None)
     if views:
-        try:
-            views.remove(web)
-        except ValueError:
-            pass
+        views[:] = [
+            entry
+            for entry in views
+            if (entry() if isinstance(entry, weakref.ReferenceType) else entry)
+            is not web
+        ]
         if not views:
             _teardown_mac_wakeup_pipe(toplevel)
             _teardown_mac_key_guard(toplevel)

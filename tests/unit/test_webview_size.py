@@ -247,7 +247,7 @@ def test_run_initial_load_reschedules_when_frame_not_ready(
 
 
 def test_run_initial_load_reschedules_after_exception_until_attempts_exhausted(
-    tk_root, monkeypatch: pytest.MonkeyPatch
+    tk_root, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from unittest.mock import MagicMock
 
@@ -283,6 +283,9 @@ def test_run_initial_load_reschedules_after_exception_until_attempts_exhausted(
     assert scheduled == []
     assert web._initial_load is None
     assert web._initial_load_attempt == 2
+    assert "initial load failed after 2 attempt(s); giving up" in (
+        capsys.readouterr().err
+    )
 
 
 def test_destroy_rejects_layout_and_bind(tk_root) -> None:
@@ -429,7 +432,7 @@ def test_layout_ready_false_when_not_viewable(tk_root, monkeypatch) -> None:
     assert web.ready is False
 
 
-def test_layout_ready_skips_viewable_on_linux(tk_root, monkeypatch) -> None:
+def test_layout_ready_requires_viewable_on_linux(tk_root, monkeypatch) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=300, height=200)
     web._webview = object()
@@ -439,8 +442,8 @@ def test_layout_ready_skips_viewable_on_linux(tk_root, monkeypatch) -> None:
     monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
     monkeypatch.setattr("tkwry.webview.sys.platform", "linux")
 
-    assert web._layout_ready() is True
-    assert web.ready is True
+    assert web._layout_ready() is False
+    assert web.ready is False
 
 
 def test_frame_ready_for_initial_load_checks_geometry_on_linux(
@@ -775,3 +778,13 @@ def test_configure_does_not_retry_after_creation_failure(
     web._on_configure(event)
     tk_root.update_idletasks()
     assert tries == []
+
+
+def test_creation_error_survives_destroy(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _web_with_creation_failure(tk_root, monkeypatch)
+    err = web.creation_error
+    web.destroy()
+    assert web.creation_failed is True
+    assert web.creation_error is err
