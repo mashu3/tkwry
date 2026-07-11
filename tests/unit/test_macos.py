@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -465,3 +466,64 @@ def test_install_tabbing_disable_off_main_defers_to_tk_init(
     assert init_calls == [True]
 
     tk.Tk.__init__ = orig_init
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+def test_destroy_closes_mac_wakeup_pipe_when_last_webview(tk_root) -> None:
+    """WebView.destroy tears down the macOS sync-hook pipe when alone on toplevel."""
+    import os
+    import tkinter as tk
+
+    from support.tk import wait_until
+
+    from tkwry import WebView
+
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    assert wait_until(tk_root, lambda: web.native is not None)
+
+    read_fd = tk_root._tkwry_mac_wake_read_fd
+    write_fd = tk_root._tkwry_mac_wake_write_fd
+    assert read_fd is not None
+    assert write_fd is not None
+
+    web.destroy()
+
+    assert not hasattr(tk_root, "_tkwry_mac_wake_read_fd")
+    assert not hasattr(tk_root, "_tkwry_mac_wake_write_fd")
+    with pytest.raises(OSError):
+        os.fstat(read_fd)
+    with pytest.raises(OSError):
+        os.fstat(write_fd)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+def test_destroy_keeps_mac_wakeup_pipe_while_other_webviews_remain(tk_root) -> None:
+    import os
+    import tkinter as tk
+
+    from support.tk import wait_until
+
+    from tkwry import WebView
+
+    frame_a = tk.Frame(tk_root)
+    frame_b = tk.Frame(tk_root)
+    frame_a.pack(side="left", fill="both", expand=True)
+    frame_b.pack(side="right", fill="both", expand=True)
+    web_a = WebView(frame_a, width=200, height=200)
+    web_b = WebView(frame_b, width=200, height=200)
+    assert wait_until(tk_root, lambda: web_a.native is not None and web_b.native)
+
+    read_fd = tk_root._tkwry_mac_wake_read_fd
+    write_fd = tk_root._tkwry_mac_wake_write_fd
+    web_a.destroy()
+
+    assert tk_root._tkwry_mac_wake_read_fd == read_fd
+    assert tk_root._tkwry_mac_wake_write_fd == write_fd
+    os.write(write_fd, b"\x01")
+
+    web_b.destroy()
+    assert not hasattr(tk_root, "_tkwry_mac_wake_read_fd")
+    with pytest.raises(OSError):
+        os.fstat(read_fd)

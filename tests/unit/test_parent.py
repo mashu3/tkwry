@@ -64,6 +64,30 @@ def test_embed_parent_returns_nonzero_handle(tk_root) -> None:
     assert embed.handle != 0
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only drawable probe")
+def test_mac_real_tk_drawable_probe_succeeds(tk_root) -> None:
+    """Exercise the real TkMacOSX drawable probe against the running Tk build."""
+    import tkinter as tk
+    from ctypes import c_void_p
+
+    frame = tk.Frame(tk_root, width=240, height=180)
+    frame.pack_propagate(False)
+    frame.pack()
+    tk_root.update_idletasks()
+
+    tcl_lib = frame.tk.call("info", "library")
+    dylib = _parent._mac_tk_dylib(tcl_lib)
+    drawable = _parent._mac_drawable(frame, dylib)
+    assert drawable != 0
+
+    lookup = _parent._mac_nsview_lookup(dylib)
+    nsview = lookup(c_void_p(drawable))
+    assert nsview != 0
+
+    embed = tk_embed_parent(frame)
+    assert embed.handle == nsview
+
+
 def test_require_tk_thread_rejects_other_thread(tk_root) -> None:
     import tkinter as tk
 

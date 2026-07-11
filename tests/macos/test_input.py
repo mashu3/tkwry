@@ -179,6 +179,57 @@ def test_multi_webview_focus_is_exclusive(url_demo_layout) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+def test_multi_webview_z_order_click_switches_input(tk_root) -> None:
+    """PanedWindow: CGEvent click on each pane activates that WebView."""
+    from tkinter import ttk
+
+    tk_root.geometry("720x480")
+    paned = ttk.PanedWindow(tk_root, orient=tk.HORIZONTAL)
+    paned.pack(fill="both", expand=True, padx=8, pady=8)
+
+    left = tk.Frame(paned, bg="#111")
+    right = tk.Frame(paned, bg="#222")
+    paned.add(left, weight=1)
+    paned.add(right, weight=1)
+    tk_root.update_idletasks()
+
+    web_a = WebView(left, html="<p id='pane-a'>A</p>")
+    web_b = WebView(right, html="<p id='pane-b'>B</p>")
+    try:
+        _wait_native(web_a, tk_root)
+        assert wait_until(tk_root, lambda: web_b.native is not None)
+        native_a = web_a.native
+        native_b = web_b.native
+        assert native_a is not None and native_b is not None
+
+        if not cgevent_clicks_reach_tk(tk_root, left):
+            pytest.skip("CGEvent clicks do not reach Tk (grant Accessibility)")
+
+        activate_window(tk_root)
+
+        lx, ly = center(left)
+        post_screen_click(lx, ly)
+        assert wait_until(
+            tk_root,
+            lambda: (
+                native_a.mac_web_input_active() and not native_b.mac_web_input_active()
+            ),
+        )
+
+        rx, ry = center(right)
+        post_screen_click(rx, ry)
+        assert wait_until(
+            tk_root,
+            lambda: (
+                not native_a.mac_web_input_active() and native_b.mac_web_input_active()
+            ),
+        )
+    finally:
+        web_b.destroy()
+        web_a.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 @pytest.mark.skipif(
     is_github_actions(),
     reason="GHA macOS: Tcl focus drain timing not reliable on virtual runners",

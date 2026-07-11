@@ -99,8 +99,8 @@ def test_viewport_shrinks_after_sibling_pack(tk_root) -> None:
 
 
 @pytest.mark.skipif(
-    sys.platform != "win32",
-    reason="Windows WebView2 layout",
+    sys.platform not in ("darwin", "win32"),
+    reason="viewport stability after resize verified on macOS and Windows",
 )
 def test_viewport_stable_after_resize_and_redraw(tk_root) -> None:
     import tkinter as tk
