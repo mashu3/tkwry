@@ -32,6 +32,21 @@ def test_take_queue_drop_counts_delegates_to_native(tk_root) -> None:
     frame.destroy()
 
 
+def test_destroy_absorbs_pending_native_drop_counts(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+    native = MagicMock()
+    native.take_queue_drop_counts.return_value = (2, 0, 1, 0, 0)
+    web._webview = native
+
+    web.destroy()
+
+    assert web.take_queue_drop_counts() == (2, 0, 1, 0, 0)
+    native.destroy.assert_called_once_with()
+
+    frame.destroy()
+
+
 def test_take_queue_drop_counts_after_destroy_returns_zeros(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)

@@ -41,6 +41,8 @@ def test_creation_size_rejects_unit_explicit_width(tk_root) -> None:
     frame = tk.Frame(tk_root)
     with pytest.raises(ValueError, match="width must be >="):
         WebView(frame, width=1, height=200)
+    with pytest.raises(ValueError, match="width must be >="):
+        WebView(frame, width=2, height=200)
     frame.destroy()
 
 

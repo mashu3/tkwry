@@ -35,3 +35,16 @@ def test_set_on_page_load_delivers_buffered_events(tk_root) -> None:
         (PageLoadEvent.Started, "about:blank"),
         (PageLoadEvent.Finished, "about:blank"),
     ]
+
+
+def test_set_on_page_load_none_disables_native_collection(tk_root) -> None:
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300, on_page_load=lambda *_a: None)
+    native = MagicMock()
+    web._webview = native
+
+    web.set_on_page_load(None)
+
+    native.set_page_load_listening.assert_called_with(False)
