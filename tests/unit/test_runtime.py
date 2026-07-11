@@ -225,7 +225,7 @@ def test_gtk_pump_stop_does_not_zero_refcount(
     assert pump._root_id not in GtkPump._by_root_id
 
 
-def test_gtk_pump_tick_keeps_pumping_after_transient_pump_error(
+def test_gtk_pump_tick_keeps_pumping_after_single_pump_error(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls = {"n": 0}
@@ -251,8 +251,37 @@ def test_gtk_pump_tick_keeps_pumping_after_transient_pump_error(
 
     assert calls["n"] == 1
     assert pump._active
+    assert pump._consecutive_errors == 1
     assert scheduled
     pump.stop()
+
+
+def test_gtk_pump_tick_stops_after_repeated_pump_errors(
+    tk_root, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls = {"n": 0}
+
+    def always_fail() -> None:
+        calls["n"] += 1
+        raise RuntimeError("gtk broken")
+
+    monkeypatch.setattr("tkwry._core.pump_events", always_fail, raising=False)
+
+    pump = GtkPump(tk_root)
+    GtkPump._by_root_id[pump._root_id] = pump
+    pump._active = True
+    root_id = pump._root_id
+
+    for _ in range(3):
+        if root_id not in GtkPump._by_root_id:
+            break
+        GtkPump._by_root_id[root_id]._active = True
+        _gtk_pump_tick(root_id)
+
+    assert calls["n"] == 3
+    assert not pump._active
+    assert root_id not in GtkPump._by_root_id
+    assert "GTK event pump failed" in capsys.readouterr().err
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
@@ -324,6 +353,42 @@ def test_attach_migrates_widget_when_reparented(
     assert GtkPump._by_root_id[new_root_id]._refcount == 1
 
     GtkPump.detach(frame)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
+def test_reparent_keeps_pump_alive_for_remaining_widgets(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
+    monkeypatch.setattr(tk_root, "after", lambda *_a, **_k: "after-id")
+
+    frame_a = tk.Frame(tk_root)
+    frame_b = tk.Frame(tk_root)
+    old_root_id = 111
+    new_root_id = 222
+    root_ids = iter([old_root_id, old_root_id, new_root_id])
+
+    monkeypatch.setattr(
+        GtkPump,
+        "_resolve_root_id",
+        staticmethod(lambda _widget: next(root_ids)),
+    )
+
+    GtkPump.attach(frame_a)
+    GtkPump.attach(frame_b)
+    assert GtkPump._by_root_id[old_root_id]._refcount == 2
+
+    GtkPump.attach(frame_a)
+
+    assert GtkPump._widget_attachments[id(frame_a)] == (new_root_id, 1)
+    assert GtkPump._widget_attachments[id(frame_b)] == (old_root_id, 1)
+    assert GtkPump._by_root_id[old_root_id]._refcount == 1
+    assert GtkPump._by_root_id[new_root_id]._refcount == 1
+
+    GtkPump.detach(frame_a)
+    GtkPump.detach(frame_b)
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")

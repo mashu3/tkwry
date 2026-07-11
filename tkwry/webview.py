@@ -289,7 +289,11 @@ class WebView:
         self._initial_load_after_id: str | None = None
         self._deferred_after_ids: list[str] = []
 
-        GtkPump.ensure_attached(frame)
+        try:
+            if sys.platform != "linux" or frame.winfo_viewable():
+                GtkPump.ensure_attached(frame)
+        except tk.TclError:
+            pass
         self._frame_bind_ids: list[tuple[str, str]] = []
         for sequence, handler in (
             ("<Configure>", self._on_configure),
@@ -1696,6 +1700,8 @@ class WebView:
     def _on_unmap(self, event: tk.Event) -> None:
         if event.widget is not self._frame or self._destroyed:
             return
+        if sys.platform == "linux":
+            GtkPump.detach(self._frame)
         self._schedule_bounds_sync()
 
     def _on_destroy(self, event: tk.Event) -> None:
