@@ -48,9 +48,8 @@ const SYNC_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
 /// cannot block the WebKit thread forever.
 const SYNC_HOOK_HANDLER_TIMEOUT: Duration = Duration::from_secs(30);
 /// Hard cap on total wait from enqueue (pre-start + handler combined).
-const SYNC_HOOK_MAX_WAIT: Duration = Duration::from_secs(
-    SYNC_HOOK_TIMEOUT.as_secs() + SYNC_HOOK_HANDLER_TIMEOUT.as_secs(),
-);
+const SYNC_HOOK_MAX_WAIT: Duration =
+    Duration::from_secs(SYNC_HOOK_TIMEOUT.as_secs() + SYNC_HOOK_HANDLER_TIMEOUT.as_secs());
 const SYNC_HOOK_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// ``eval_js_with_callback`` registrations older than this are pruned on drain.
@@ -333,9 +332,7 @@ fn enqueue_nav_sync_hook(
         }
     });
     if queue.len() >= MAX_SYNC_HOOK_PENDING {
-        eprintln!(
-            "tkwry: rejecting navigation sync hook (queue full at {MAX_SYNC_HOOK_PENDING})"
-        );
+        eprintln!("tkwry: rejecting navigation sync hook (queue full at {MAX_SYNC_HOOK_PENDING})");
         return false;
     }
     queue.push((url, slot));
@@ -364,9 +361,7 @@ fn enqueue_newwin_sync_hook(
         }
     });
     if queue.len() >= MAX_SYNC_HOOK_PENDING {
-        eprintln!(
-            "tkwry: rejecting new-window sync hook (queue full at {MAX_SYNC_HOOK_PENDING})"
-        );
+        eprintln!("tkwry: rejecting new-window sync hook (queue full at {MAX_SYNC_HOOK_PENDING})");
         return false;
     }
     queue.push((url, slot));
@@ -1816,10 +1811,7 @@ mod tests {
 
     #[test]
     fn try_compact_page_load_queue_drops_orphan_finished() {
-        let mut queue = VecDeque::from([(
-            PageLoadEvent::Finished,
-            "https://old.example/".into(),
-        )]);
+        let mut queue = VecDeque::from([(PageLoadEvent::Finished, "https://old.example/".into())]);
         assert!(try_compact_page_load_queue(&mut queue));
         assert!(queue.is_empty());
     }
