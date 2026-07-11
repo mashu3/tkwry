@@ -183,7 +183,10 @@ def _ensure_tk_wakeup_fileevent(toplevel: tk.Misc) -> None:
         _drain_toplevel_sync_hooks(toplevel)
 
     try:
-        toplevel.createfilehandler(read_fd, tk.READABLE, _on_wake)
+        create_handler = getattr(toplevel, "createfilehandler", None)
+        if create_handler is None:
+            return
+        create_handler(read_fd, tk.READABLE, _on_wake)
         toplevel._tkwry_wake_fileevent = True
     except (tk.TclError, OSError, ValueError):
         pass
@@ -226,7 +229,9 @@ def _release_tk_wakeup_pipe(toplevel: tk.Misc) -> None:
     read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
     if read_fd is not None and getattr(toplevel, "_tkwry_wake_fileevent", False):
         try:
-            toplevel.deletefilehandler(read_fd)
+            delete_handler = getattr(toplevel, "deletefilehandler", None)
+            if delete_handler is not None:
+                delete_handler(read_fd)
         except tk.TclError:
             pass
     for fd in (

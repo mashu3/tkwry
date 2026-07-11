@@ -190,10 +190,9 @@ pub fn install_focus_sync(
     };
 
     let flags_mask = NSEventMask::FlagsChanged;
-    let flags_monitor = unsafe {
-        NSEvent::addLocalMonitorForEventsMatchingMask_handler(flags_mask, &flags_block)
-    }
-    .ok_or("failed to install NSEvent flags monitor")?;
+    let flags_monitor =
+        unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(flags_mask, &flags_block) }
+            .ok_or("failed to install NSEvent flags monitor")?;
 
     let key_block = {
         let inner = inner.clone();

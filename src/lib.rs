@@ -76,6 +76,7 @@ fn make_room_in_queue<T>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_if_listening<T>(
     listening: &AtomicBool,
     pending: &Arc<Mutex<Vec<T>>>,
@@ -843,9 +844,7 @@ impl WebView {
             let parent_ns_view = unsafe { NonNull::new_unchecked(ptr.cast::<NSView>()) };
             macos_window::disable_window_tabbing(parent_ns_view)
                 .map_err(|err| {
-                    eprintln!(
-                        "tkwry: disable_window_tabbing failed at create (will retry): {err}"
-                    );
+                    eprintln!("tkwry: disable_window_tabbing failed at create (will retry): {err}");
                 })
                 .ok();
             let raw = RawWindowHandle::AppKit(AppKitWindowHandle::new(ns_view));
