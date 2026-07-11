@@ -594,6 +594,13 @@ impl WebView {
         }
         Ok(())
     }
+
+    fn native_is_alive(&self) -> bool {
+        self.inner
+            .lock()
+            .ok()
+            .is_some_and(|guard| guard.is_some())
+    }
 }
 
 #[pymethods]
@@ -1334,11 +1341,26 @@ impl WebView {
     fn destroy(&self) -> PyResult<()> {
         self.require_owner_thread()?;
         if self.wry_call_depth.get() > 0 {
+            self.clear_callbacks_and_queues();
             self.destroy_pending.set(true);
             return Ok(());
         }
         self.clear_callbacks_and_queues();
         self.destroy_inner()
+    }
+
+    /// ``True`` while the native webview has not been torn down yet.
+    fn is_alive(&self) -> bool {
+        self.native_is_alive()
+    }
+}
+
+impl Drop for WebView {
+    fn drop(&mut self) {
+        self.clear_callbacks_and_queues();
+        if let Err(err) = self.destroy_inner() {
+            eprintln!("tkwry: WebView drop teardown failed: {err}");
+        }
     }
 }
 
