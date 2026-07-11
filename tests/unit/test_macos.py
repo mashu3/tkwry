@@ -55,6 +55,7 @@ def test_teardown_unbinds_using_stored_bind_root(
     assert unbound == [
         (tk_root, tk_root, "<Button-1>", "bind-id"),
         (tk_root, tk_root, "<Map>", "bind-id"),
+        (tk_root, tk_root, "<FocusIn>", "bind-id"),
     ]
     assert not getattr(tk_root, "_tkwry_mac_key_guard", False)
 
@@ -91,6 +92,7 @@ def test_teardown_unbinds_via_toplevel_when_bind_root_differs(
     assert unbound == [
         (("bind", "all", "<Button-1>"), "bind-id"),
         (("bind", "all", "<Map>"), "bind-id"),
+        (("bind", "all", "<FocusIn>"), "bind-id"),
     ]
 
 
@@ -147,8 +149,7 @@ def test_unregister_macos_webview_uses_stored_toplevel_when_frame_gone(
     def capture_teardown(toplevel: tk.Misc) -> None:
         teardown_calls.append(toplevel)
 
-    monkeypatch.setattr(_macos, "_teardown_mac_wakeup_pipe", capture_teardown)
-    monkeypatch.setattr(_macos, "_teardown_mac_key_guard", lambda _t: None)
+    monkeypatch.setattr(_macos, "_teardown_macos_toplevel", capture_teardown)
 
     frame = tk.Frame(tk_root)
     web = SimpleNamespace(
@@ -168,7 +169,6 @@ def test_unregister_macos_webview_uses_stored_toplevel_when_frame_gone(
 
     assert teardown_calls == [tk_root]
     assert not hasattr(web, "_macos_toplevel")
-    assert not hasattr(tk_root, "_tkwry_mac_webviews")
 
 
 def test_mac_pump_tick_avoids_zero_delay_when_unfocus_pending(
@@ -189,3 +189,116 @@ def test_mac_pump_tick_avoids_zero_delay_when_unfocus_pending(
     _macos._mac_pump_tick(tk_root)
 
     assert scheduled == [1]
+
+
+def test_mac_pump_tick_stops_when_toplevel_destroyed(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scheduled: list[int] = []
+    web = SimpleNamespace(destroyed=False, native=MagicMock())
+    tk_root._tkwry_mac_webviews = [web]  # type: ignore[list-item]
+    tk_root._tkwry_mac_pump_active = True
+    monkeypatch.setattr(_macos, "_mac_service_wakeup", lambda _t: None)
+    monkeypatch.setattr(_macos, "_mac_unfocus_pending", lambda _t: False)
+    monkeypatch.setattr(_macos, "_mac_pipe_readable", lambda _t: False)
+    monkeypatch.setattr(_macos, "_mac_web_input_active", lambda _t: False)
+    monkeypatch.setattr(
+        tk_root,
+        "after",
+        lambda delay, _func, *_args: scheduled.append(delay) or "after-id",
+    )
+    monkeypatch.setattr(tk_root, "winfo_exists", lambda: False)
+
+    _macos._mac_pump_tick(tk_root)
+
+    assert scheduled == []
+
+
+def test_widget_accepts_tk_keys_detects_insert_get_widgets(tk_root) -> None:
+    import tkinter as tk
+
+    class CustomEntry(tk.Frame):
+        def insert(self, _index, text: str) -> None:
+            self._text = text
+
+        def get(self) -> str:
+            return getattr(self, "_text", "")
+
+    widget = CustomEntry(tk_root)
+    widget.configure(takefocus=1)
+    assert _macos._widget_accepts_tk_keys(widget) is True
+
+
+def test_toplevel_destroy_closes_wakeup_pipe(tk_root) -> None:
+    import os
+
+    _macos._ensure_mac_wakeup_pipe(tk_root, MagicMock())
+    read_fd = tk_root._tkwry_mac_wake_read_fd
+    write_fd = tk_root._tkwry_mac_wake_write_fd
+    tk_root._tkwry_mac_webviews = []
+    tk_root._tkwry_mac_key_guard = False
+
+    _macos._mac_toplevel_destroy(SimpleNamespace(widget=tk_root))
+
+    assert not hasattr(tk_root, "_tkwry_mac_wake_read_fd")
+    assert not hasattr(tk_root, "_tkwry_mac_wake_write_fd")
+    with pytest.raises(OSError):
+        os.read(read_fd, 1)
+    with pytest.raises(OSError):
+        os.write(write_fd, b"x")
+
+
+def test_unregister_tears_down_when_toplevel_already_destroyed(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    teardown_calls: list[tk.Misc] = []
+    monkeypatch.setattr(
+        _macos,
+        "_teardown_macos_toplevel",
+        lambda toplevel: teardown_calls.append(toplevel),
+    )
+
+    _macos._ensure_mac_wakeup_pipe(tk_root, MagicMock())
+    web = SimpleNamespace(
+        destroyed=False,
+        native=MagicMock(),
+        _macos_toplevel=tk_root,
+    )
+    tk_root._tkwry_mac_webviews = [web]  # type: ignore[list-item]
+    monkeypatch.setattr(tk_root, "winfo_exists", lambda: False)
+
+    _macos._unregister_macos_webview(web)  # type: ignore[arg-type]
+
+    assert teardown_calls == [tk_root]
+
+
+def test_focus_in_tags_widget_and_releases_tk_focus_while_web_active(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    released: list[bool] = []
+    tagged: list[tk.Misc] = []
+    monkeypatch.setattr(
+        _macos,
+        "_release_tk_keyboard_focus",
+        lambda _t: released.append(True),
+    )
+    monkeypatch.setattr(
+        _macos,
+        "_prepend_mac_key_guard",
+        lambda widget: tagged.append(widget),
+    )
+    monkeypatch.setattr(_macos, "_mac_web_input_active", lambda _t: True)
+    monkeypatch.setattr(_macos, "_mac_after", lambda *_a, **_k: None)
+
+    entry = tk.Entry(tk_root)
+    tk_root._tkwry_mac_webviews = [SimpleNamespace()]  # type: ignore[list-item]
+    event = SimpleNamespace(widget=entry)
+
+    _macos._mac_focus_in_handler(event)  # type: ignore[arg-type]
+
+    assert tagged == [entry]
+    assert released == [True]

@@ -17,7 +17,7 @@ use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSEvent, NSEventMask, NSEventType, NSView, NSWindowDidBecomeKeyNotification};
+use objc2_app_kit::{NSEvent, NSEventMask, NSView, NSWindowDidBecomeKeyNotification};
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSOperationQueue, NSPoint};
 use wry::dpi::{LogicalPosition, LogicalSize, Position, Size};
 
@@ -66,10 +66,6 @@ pub fn install_focus_sync(
         RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
             let event_ref = unsafe { event.as_ref() };
 
-            if event_ref.r#type() != NSEventType::LeftMouseDown {
-                return event.as_ptr();
-            }
-
             let parent = unsafe { parent_ns_view.as_ref() };
             let parent_point = parent.convertPoint_fromView(event_ref.locationInWindow(), None);
             let wry_point = parent_point_to_wry(parent, parent_point);
@@ -99,11 +95,12 @@ pub fn install_focus_sync(
         })
     };
 
+    let click_mask = NSEventMask::LeftMouseDown
+        | NSEventMask::RightMouseDown
+        | NSEventMask::OtherMouseDown;
+
     let click_monitor = unsafe {
-        NSEvent::addLocalMonitorForEventsMatchingMask_handler(
-            NSEventMask::LeftMouseDown,
-            &click_block,
-        )
+        NSEvent::addLocalMonitorForEventsMatchingMask_handler(click_mask, &click_block)
     }
     .ok_or("failed to install NSEvent local monitor")?;
 

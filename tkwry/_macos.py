@@ -24,7 +24,42 @@ _MAC_TEXT_CLASSES = frozenset(
         "TTreeview",
     }
 )
+_MAC_TEXT_CLASS_SUFFIXES = (
+    "Entry",
+    "Textbox",
+    "Text",
+    "Spinbox",
+    "Combobox",
+    "Edit",
+)
 _MAC_KEY_GUARD_TAG = "TkwryMacWebKeyGuard"
+
+
+def _toplevel_alive(toplevel: tk.Misc) -> bool:
+    try:
+        return bool(toplevel.winfo_exists())
+    except tk.TclError:
+        return False
+
+
+def _widget_takefocus_enabled(widget: tk.Misc) -> bool:
+    try:
+        takefocus = widget.cget("takefocus")
+    except tk.TclError:
+        return True
+    return str(takefocus).lower() not in ("0", "false", "no")
+
+
+def _widget_has_text_input_capability(widget: tk.Misc) -> bool:
+    insert = getattr(widget, "insert", None)
+    if not callable(insert):
+        return False
+    if not (
+        callable(getattr(widget, "get", None))
+        or callable(getattr(widget, "index", None))
+    ):
+        return False
+    return _widget_takefocus_enabled(widget)
 
 
 def _widget_accepts_tk_keys(widget: tk.Misc) -> bool:
@@ -32,7 +67,11 @@ def _widget_accepts_tk_keys(widget: tk.Misc) -> bool:
         cls = widget.winfo_class()
     except tk.TclError:
         return False
-    return cls in _MAC_TEXT_CLASSES
+    if cls in _MAC_TEXT_CLASSES:
+        return True
+    if cls.endswith(_MAC_TEXT_CLASS_SUFFIXES):
+        return _widget_takefocus_enabled(widget)
+    return _widget_has_text_input_capability(widget)
 
 
 def _release_tk_keyboard_focus(toplevel: tk.Misc) -> None:
@@ -182,25 +221,40 @@ def _mac_service_wakeup(toplevel: tk.Misc) -> bool:
     return drained
 
 
+def _mac_after(toplevel: tk.Misc, delay: int, callback, *args) -> None:
+    if not _toplevel_alive(toplevel):
+        return
+    try:
+        toplevel.after(delay, callback, *args)
+    except tk.TclError:
+        pass
+
+
 def _mac_pump_tick(toplevel: tk.Misc) -> None:
+    if not _toplevel_alive(toplevel):
+        return
     if not _mac_webviews(toplevel):
         toplevel._tkwry_mac_pump_active = False
         return
     _mac_service_wakeup(toplevel)
+    if not _toplevel_alive(toplevel):
+        return
     if _mac_unfocus_pending(toplevel) or _mac_pipe_readable(toplevel):
         delay = 1
     elif _mac_web_input_active(toplevel):
         delay = 16
     else:
         delay = 200
-    toplevel.after(delay, _mac_pump_tick, toplevel)
+    _mac_after(toplevel, delay, _mac_pump_tick, toplevel)
 
 
 def _ensure_mac_pump(toplevel: tk.Misc) -> None:
+    if not _toplevel_alive(toplevel):
+        return
     if getattr(toplevel, "_tkwry_mac_pump_active", False):
         return
     toplevel._tkwry_mac_pump_active = True
-    toplevel.after(0, _mac_pump_tick, toplevel)
+    _mac_after(toplevel, 0, _mac_pump_tick, toplevel)
 
 
 def _mac_widget_mapped(event: tk.Event) -> None:
@@ -222,11 +276,25 @@ def _mac_input_wakeup(event: tk.Event) -> None:
         _ensure_mac_pump(toplevel)
 
 
+def _mac_focus_in_handler(event: tk.Event) -> None:
+    """Tag editable widgets on focus and drop Tcl focus when web input is active."""
+    widget = event.widget
+    toplevel = widget.winfo_toplevel()
+    if not getattr(toplevel, "_tkwry_mac_webviews", None):
+        return
+    if not _widget_accepts_tk_keys(widget):
+        return
+    _prepend_mac_key_guard(widget)
+    if _mac_web_input_active(toplevel):
+        _release_tk_keyboard_focus(toplevel)
+        _mac_after(toplevel, 1, _mac_service_wakeup, toplevel)
+
+
 def _mac_web_key_guard(event: tk.Event) -> str | None:
     toplevel = event.widget.winfo_toplevel()
     if _mac_web_input_active(toplevel):
         if _mac_unfocus_pending(toplevel):
-            toplevel.after(1, _mac_service_wakeup, toplevel)
+            _mac_after(toplevel, 1, _mac_service_wakeup, toplevel)
         return "break"
     return None
 
@@ -293,6 +361,9 @@ def _ensure_mac_key_guard(toplevel: tk.Misc) -> None:
     toplevel._tkwry_mac_map_bind_id = bind_root.bind_all(
         "<Map>", _mac_widget_mapped, add="+"
     )
+    toplevel._tkwry_mac_focusin_bind_id = bind_root.bind_all(
+        "<FocusIn>", _mac_focus_in_handler, add="+"
+    )
     _prepend_mac_key_guard(toplevel)
     _tag_mac_text_widgets(toplevel)
 
@@ -306,6 +377,7 @@ def _teardown_mac_key_guard(toplevel: tk.Misc) -> None:
     for sequence, attr in (
         ("<Button-1>", "_tkwry_mac_button1_bind_id"),
         ("<Map>", "_tkwry_mac_map_bind_id"),
+        ("<FocusIn>", "_tkwry_mac_focusin_bind_id"),
     ):
         funcid = getattr(toplevel, attr, None)
         _unbind_mac_global(bind_root, toplevel, sequence, funcid)
@@ -318,6 +390,29 @@ def _teardown_mac_key_guard(toplevel: tk.Misc) -> None:
     toplevel._tkwry_mac_key_guard = False
     if hasattr(toplevel, "_tkwry_mac_bind_root"):
         delattr(toplevel, "_tkwry_mac_bind_root")
+
+
+def _mac_toplevel_destroy(event: tk.Event) -> None:
+    _teardown_macos_toplevel(event.widget)
+
+
+def _teardown_macos_toplevel(toplevel: tk.Misc) -> None:
+    _teardown_mac_wakeup_pipe(toplevel)
+    _teardown_mac_key_guard(toplevel)
+    destroy_bind_id = getattr(toplevel, "_tkwry_mac_destroy_bind_id", None)
+    if destroy_bind_id is not None:
+        try:
+            toplevel.unbind("<Destroy>", destroy_bind_id)
+        except tk.TclError:
+            pass
+        if hasattr(toplevel, "_tkwry_mac_destroy_bind_id"):
+            delattr(toplevel, "_tkwry_mac_destroy_bind_id")
+    for attr in (
+        "_tkwry_mac_webviews",
+        "_tkwry_mac_web_input_active",
+    ):
+        if hasattr(toplevel, attr):
+            delattr(toplevel, attr)
 
 
 def _set_mac_webviews_input_active(
@@ -342,6 +437,10 @@ def _register_macos_webview(web: WebView) -> None:
         toplevel._tkwry_mac_webviews = views
         toplevel._tkwry_mac_web_input_active = False
         _ensure_mac_key_guard(toplevel)
+        if not getattr(toplevel, "_tkwry_mac_destroy_bind_id", None):
+            toplevel._tkwry_mac_destroy_bind_id = toplevel.bind(
+                "<Destroy>", _mac_toplevel_destroy, add="+"
+            )
     views.append(weakref.ref(web))
 
 
@@ -354,22 +453,13 @@ def _unregister_macos_webview(web: WebView) -> None:
             toplevel = web._frame.winfo_toplevel()
         except tk.TclError:
             return
-    try:
-        if not toplevel.winfo_exists():
-            return
-    except tk.TclError:
-        return
     views = getattr(toplevel, "_tkwry_mac_webviews", None)
-    if views:
-        views[:] = [
-            entry
-            for entry in views
-            if (entry() if isinstance(entry, weakref.ReferenceType) else entry)
-            is not web
-        ]
-        if not views:
-            _teardown_mac_wakeup_pipe(toplevel)
-            _teardown_mac_key_guard(toplevel)
-            for attr in ("_tkwry_mac_webviews", "_tkwry_mac_web_input_active"):
-                if hasattr(toplevel, attr):
-                    delattr(toplevel, attr)
+    if not views:
+        return
+    views[:] = [
+        entry
+        for entry in views
+        if (entry() if isinstance(entry, weakref.ReferenceType) else entry) is not web
+    ]
+    if not views:
+        _teardown_macos_toplevel(toplevel)
