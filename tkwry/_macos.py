@@ -37,6 +37,8 @@ _MAC_TEXT_CLASS_SUFFIXES = (
 _MAC_KEY_GUARD_TAG = "TkwryMacWebKeyGuard"
 _TAB_TRAVERSAL_KEYS = frozenset({"Tab", "ISO_Left_Tab"})
 _TABBING_DISABLE_MAX_ATTEMPTS = 8
+_MAC_PUMP_ACTIVE_DELAY_MS = 16
+_MAC_PUMP_IDLE_DELAY_MS = 32
 
 
 def _toplevel_alive(toplevel: tk.Misc) -> bool:
@@ -85,10 +87,47 @@ def _release_tk_keyboard_focus(toplevel: tk.Misc) -> None:
         return
     if focused is None or not _widget_accepts_tk_keys(focused):
         return
+
+    def _tk_focus_cleared() -> bool:
+        try:
+            current = toplevel.focus_get()
+        except tk.TclError:
+            return True
+        return current is None or not _widget_accepts_tk_keys(current)
+
     try:
-        toplevel.focus_force()
+        widget_path = str(focused)
     except tk.TclError:
-        pass
+        widget_path = ""
+
+    if widget_path:
+        try:
+            cls = focused.winfo_class()
+        except tk.TclError:
+            cls = ""
+        if cls.startswith("T"):
+            try:
+                toplevel.tk.call("ttk::focus", widget_path, "none")
+            except tk.TclError:
+                pass
+        if _tk_focus_cleared():
+            return
+
+    for target in (".", str(toplevel)):
+        try:
+            toplevel.tk.call("focus", target)
+        except tk.TclError:
+            pass
+        if _tk_focus_cleared():
+            return
+
+    for move_focus in (toplevel.focus_set, toplevel.focus_force):
+        try:
+            move_focus()
+        except tk.TclError:
+            pass
+        if _tk_focus_cleared():
+            return
 
 
 def _mac_webviews(toplevel: tk.Misc) -> list[WebView]:
@@ -158,6 +197,7 @@ def _unbind_mac_global(
 
 
 def _mac_web_input_active(toplevel: tk.Misc) -> bool:
+    was_active = getattr(toplevel, "_tkwry_mac_web_input_active", False)
     active = False
     for web in _mac_webviews(toplevel):
         native = web.native
@@ -165,6 +205,8 @@ def _mac_web_input_active(toplevel: tk.Misc) -> bool:
             active = True
             break
     toplevel._tkwry_mac_web_input_active = active
+    if active and not was_active:
+        _release_tk_keyboard_focus(toplevel)
     return active
 
 
@@ -217,11 +259,19 @@ def _mac_pump_wakeup_pipe(toplevel: tk.Misc) -> None:
 
 def _mac_service_wakeup(toplevel: tk.Misc) -> bool:
     """Drain Rust->Python unfocus signals on the Tk thread."""
+    had_pipe_data = _mac_pipe_readable(toplevel)
     _mac_pump_wakeup_pipe(toplevel)
     drained = _drain_mac_tk_unfocus(toplevel)
     for web in _mac_webviews(toplevel):
         web._drain_sync_hooks()
     _sync_mac_web_input_cache(toplevel)
+    if drained or had_pipe_data:
+        try:
+            toplevel.update_idletasks()
+        except tk.TclError:
+            pass
+        if had_pipe_data or _mac_unfocus_pending(toplevel):
+            _ensure_mac_pump(toplevel)
     return drained
 
 
@@ -246,9 +296,9 @@ def _mac_pump_tick(toplevel: tk.Misc) -> None:
     if _mac_unfocus_pending(toplevel) or _mac_pipe_readable(toplevel):
         delay = 1
     elif _mac_web_input_active(toplevel):
-        delay = 16
+        delay = _MAC_PUMP_ACTIVE_DELAY_MS
     else:
-        delay = 200
+        delay = _MAC_PUMP_IDLE_DELAY_MS
     _mac_after(toplevel, delay, _mac_pump_tick, toplevel)
 
 
@@ -533,17 +583,22 @@ def _schedule_mac_window_tabbing_disable(toplevel: tk.Misc, *, attempt: int) -> 
 
         toplevel.update_idletasks()
         disable_macos_window_tabbing(tk_parent_handle(toplevel))
-    except Exception:
-        if attempt + 1 >= _TABBING_DISABLE_MAX_ATTEMPTS:
+    except Exception as exc:
+        next_attempt = attempt + 1
+        if next_attempt >= _TABBING_DISABLE_MAX_ATTEMPTS:
             print(
                 "tkwry: disable_macos_window_tabbing failed after "
-                f"{_TABBING_DISABLE_MAX_ATTEMPTS} attempts",
+                f"{_TABBING_DISABLE_MAX_ATTEMPTS} attempts: {exc}",
                 file=sys.stderr,
             )
             toplevel._tkwry_mac_tabbing_scheduled = False
             return
+        print(
+            "tkwry: disable_macos_window_tabbing attempt "
+            f"{next_attempt}/{_TABBING_DISABLE_MAX_ATTEMPTS} failed: {exc}",
+            file=sys.stderr,
+        )
         delay = min(500, 50 * (2 ** min(attempt, 4)))
-        next_attempt = attempt + 1
         _mac_after(
             toplevel,
             delay,
