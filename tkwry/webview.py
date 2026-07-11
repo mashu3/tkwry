@@ -817,7 +817,13 @@ class WebView:
         if self._destroyed or self._webview is None:
             return local
         native = self._webview.take_queue_drop_counts()
-        return tuple(a + b for a, b in zip(local, native, strict=True))
+        return (
+            local[0] + native[0],
+            local[1] + native[1],
+            local[2] + native[2],
+            local[3] + native[3],
+            local[4] + native[4],
+        )
 
     def set_on_title_changed(self, handler: TitleChangedHandler | None) -> None:
         self._require_tk_thread()
@@ -945,9 +951,9 @@ class WebView:
         self._local_queue_drop_counts[kind] += count
 
     def _take_local_queue_drop_counts(self) -> tuple[int, int, int, int, int]:
-        counts = tuple(self._local_queue_drop_counts)
+        ipc, page_load, title, drag_drop, eval_ = self._local_queue_drop_counts
         self._local_queue_drop_counts = [0, 0, 0, 0, 0]
-        return counts
+        return (ipc, page_load, title, drag_drop, eval_)
 
     def _pump_wait_until_ready(self, root: tk.Misc) -> None:
         """Advance this WebView without a full ``root.update()`` reentrant pump."""
