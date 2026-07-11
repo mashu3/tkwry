@@ -1043,11 +1043,9 @@ impl WebView {
     fn url(&self) -> PyResult<Option<String>> {
         #[cfg(target_os = "macos")]
         {
-            return with_webview(self, |wv| {
-                match macos_document_url::read_document_url(wv) {
-                    Ok(url) => Ok(normalize_document_url(url)),
-                    Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(err)),
-                }
+            return with_webview(self, |wv| match macos_document_url::read_document_url(wv) {
+                Ok(url) => Ok(normalize_document_url(url)),
+                Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(err)),
             });
         }
         #[cfg(not(target_os = "macos"))]

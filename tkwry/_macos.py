@@ -398,24 +398,19 @@ def _mac_toplevel_destroy(event: tk.Event) -> None:
         toplevel = widget.winfo_toplevel()
     except tk.TclError:
         return
+    if getattr(toplevel, "_tkwry_mac_torn_down", False):
+        return
     if widget is not toplevel:
         return
-    _teardown_macos_toplevel(toplevel, unbind_destroy=False)
+    _teardown_macos_toplevel(toplevel)
 
 
-def _teardown_macos_toplevel(toplevel: tk.Misc, *, unbind_destroy: bool = True) -> None:
+def _teardown_macos_toplevel(toplevel: tk.Misc) -> None:
+    if getattr(toplevel, "_tkwry_mac_torn_down", False):
+        return
+    toplevel._tkwry_mac_torn_down = True
     _teardown_mac_wakeup_pipe(toplevel)
     _teardown_mac_key_guard(toplevel)
-    if not unbind_destroy:
-        return
-    destroy_bind_id = getattr(toplevel, "_tkwry_mac_destroy_bind_id", None)
-    if destroy_bind_id is not None:
-        try:
-            toplevel.unbind("<Destroy>", destroy_bind_id)
-        except tk.TclError:
-            pass
-        if hasattr(toplevel, "_tkwry_mac_destroy_bind_id"):
-            delattr(toplevel, "_tkwry_mac_destroy_bind_id")
     for attr in (
         "_tkwry_mac_webviews",
         "_tkwry_mac_web_input_active",
@@ -442,6 +437,8 @@ def _register_macos_webview(web: WebView) -> None:
     web._macos_toplevel = toplevel
     views: list[WebView] | None = getattr(toplevel, "_tkwry_mac_webviews", None)
     if views is None:
+        if getattr(toplevel, "_tkwry_mac_torn_down", False):
+            delattr(toplevel, "_tkwry_mac_torn_down")
         views = []
         toplevel._tkwry_mac_webviews = views
         toplevel._tkwry_mac_web_input_active = False

@@ -257,13 +257,32 @@ def test_mac_toplevel_destroy_ignores_child_destroy(
     monkeypatch.setattr(
         _macos,
         "_teardown_macos_toplevel",
-        lambda toplevel, **kwargs: teardown_calls.append(toplevel),
+        lambda toplevel: teardown_calls.append(toplevel),
     )
 
     frame = tk.Frame(tk_root)
     _macos._mac_toplevel_destroy(SimpleNamespace(widget=frame))  # type: ignore[arg-type]
 
     assert teardown_calls == []
+
+
+def test_teardown_macos_toplevel_does_not_unbind_destroy(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unbound: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        tk_root,
+        "unbind",
+        lambda sequence, funcid: unbound.append((sequence, funcid)),
+    )
+    tk_root._tkwry_mac_destroy_bind_id = "destroy-bind-id"
+    tk_root._tkwry_mac_key_guard = False
+
+    _macos._teardown_macos_toplevel(tk_root)
+
+    assert unbound == []
+    assert getattr(tk_root, "_tkwry_mac_torn_down", False) is True
+    assert tk_root._tkwry_mac_destroy_bind_id == "destroy-bind-id"
 
 
 def test_unregister_tears_down_when_toplevel_already_destroyed(

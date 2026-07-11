@@ -12,7 +12,7 @@ from tkwry import WebView
 def main() -> None:
     root = tk.Tk()
     root.title("tkwry demo")
-    root.geometry("960x640")
+    root.minsize(720, 480)
 
     toolbar = ttk.Frame(root)
     toolbar.pack(fill="x", padx=8, pady=(8, 0))
@@ -41,6 +41,8 @@ def main() -> None:
 
     # Avoid starting with the URL bar caret active while the pointer is elsewhere.
     root.focus_set()
+    root.update_idletasks()
+    root.geometry("960x640")
 
     root.mainloop()
 

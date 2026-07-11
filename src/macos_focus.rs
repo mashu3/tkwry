@@ -95,14 +95,12 @@ pub fn install_focus_sync(
         })
     };
 
-    let click_mask = NSEventMask::LeftMouseDown
-        | NSEventMask::RightMouseDown
-        | NSEventMask::OtherMouseDown;
+    let click_mask =
+        NSEventMask::LeftMouseDown | NSEventMask::RightMouseDown | NSEventMask::OtherMouseDown;
 
-    let click_monitor = unsafe {
-        NSEvent::addLocalMonitorForEventsMatchingMask_handler(click_mask, &click_block)
-    }
-    .ok_or("failed to install NSEvent local monitor")?;
+    let click_monitor =
+        unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(click_mask, &click_block) }
+            .ok_or("failed to install NSEvent local monitor")?;
 
     let key_block = {
         let inner = inner.clone();
