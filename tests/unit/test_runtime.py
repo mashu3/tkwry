@@ -157,22 +157,26 @@ def test_gtk_pump_stale_tick_does_not_drive_reattached_pump(
 def test_gtk_pump_attach_detach_stops_when_last_webview_gone(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import tkinter as tk
+
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
     monkeypatch.setattr(tk_root, "after", lambda *_a, **_k: "after-id")
 
-    GtkPump.attach(tk_root)
-    GtkPump.attach(tk_root)
+    frame_a = tk.Frame(tk_root)
+    frame_b = tk.Frame(tk_root)
+    GtkPump.attach(frame_a)
+    GtkPump.attach(frame_b)
     root_id = tk_root.winfo_id()
     pump = GtkPump._by_root_id[root_id]
     assert pump._refcount == 2
     assert pump._active
 
-    GtkPump.detach(tk_root)
+    GtkPump.detach(frame_a)
     assert root_id in GtkPump._by_root_id
     assert pump._refcount == 1
     assert pump._active
 
-    GtkPump.detach(tk_root)
+    GtkPump.detach(frame_b)
     assert root_id not in GtkPump._by_root_id
     assert not pump._active
 

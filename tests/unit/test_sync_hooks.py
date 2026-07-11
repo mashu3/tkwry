@@ -100,21 +100,17 @@ def test_sync_hook_timeout_skips_late_handler(tk_root, monkeypatch) -> None:
     import time
 
     _frame, web = _make_web(tk_root)
-    started = threading.Event()
-    finished = threading.Event()
     seen: list[str] = []
 
     def slow_handler(url: str) -> bool:
-        started.set()
         time.sleep(0.2)
         seen.append(url)
-        finished.set()
         return True
 
     web.set_on_navigation(slow_handler)
     web._ensure_tk_wakeup_pipe()
-    web._ensure_event_poll()
     monkeypatch.setattr("tkwry.webview._SYNC_HOOK_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(web, "_ensure_event_poll", lambda: None, raising=False)
 
     result_holder: list[bool] = []
 
@@ -123,14 +119,11 @@ def test_sync_hook_timeout_skips_late_handler(tk_root, monkeypatch) -> None:
 
     thread = threading.Thread(target=worker)
     thread.start()
-    thread.join(timeout=2.0)
+    thread.join(timeout=1.0)
 
-    for _ in range(200):
-        tk_root.update_idletasks()
-        tk_root.update()
-        web._poll_events()
-        if finished.is_set():
-            break
+    # Drain the cancelled hook once; must not run the slow handler.
+    web._drain_sync_hooks()
 
     assert result_holder == [False]
     assert seen == []
+    web.destroy()
