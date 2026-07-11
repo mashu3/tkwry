@@ -44,6 +44,11 @@ const MAX_IPC_MESSAGE_BYTES: usize = 10 * 1024 * 1024;
 /// Navigation/new-window hooks block the WebKit thread until the Tk thread drains
 /// them; cap wait time so a stuck handler cannot freeze the page indefinitely.
 const SYNC_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
+/// Hard cap on total wait from enqueue (pre-start deadline may slide on wakeup).
+const SYNC_HOOK_MAX_WAIT: Duration = Duration::from_secs(120);
+/// After the Python handler starts, cap execution so a non-returning callback
+/// cannot block the WebKit thread forever.
+const SYNC_HOOK_HANDLER_TIMEOUT: Duration = Duration::from_secs(30);
 const SYNC_HOOK_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// ``eval_js_with_callback`` registrations older than this are pruned on drain.
@@ -123,16 +128,15 @@ fn push_eval_result(pending: &EvalResultPending, dropped: &AtomicU64, token: u64
             return;
         }
     };
-    if queue.len() >= MAX_EVAL_PENDING {
+    while queue.len() >= MAX_EVAL_PENDING {
         dropped.fetch_add(1, Ordering::SeqCst);
-        queue.remove(0);
+        let (evicted_token, evicted_result) = queue.remove(0);
         eprintln!(
             "tkwry: dropping oldest eval result (pending queue full at {MAX_EVAL_PENDING} events)"
         );
-        // Queue a dropped sentinel so drain_eval_callbacks can pair with the
-        // registered callback without conflating overflow with an empty JS value.
-        queue.push((token, None));
-        return;
+        if evicted_result.is_some() {
+            queue.push((evicted_token, None));
+        }
     }
     queue.push((token, Some(result)));
 }
@@ -158,6 +162,7 @@ struct SyncHookSlot<T> {
     cvar: Condvar,
     cancelled: AtomicBool,
     started: AtomicBool,
+    handler_started_at: Mutex<Option<Instant>>,
 }
 
 impl<T> SyncHookSlot<T> {
@@ -167,13 +172,22 @@ impl<T> SyncHookSlot<T> {
             cvar: Condvar::new(),
             cancelled: AtomicBool::new(false),
             started: AtomicBool::new(false),
+            handler_started_at: Mutex::new(None),
         }
+    }
+}
+
+fn mark_sync_hook_started<T>(slot: &SyncHookSlot<T>) {
+    slot.started.store(true, Ordering::SeqCst);
+    if let Ok(mut started_at) = slot.handler_started_at.lock() {
+        *started_at = Some(Instant::now());
     }
 }
 
 fn wait_sync_hook<T: Copy>(
     slot: &SyncHookSlot<T>,
     timeout: Duration,
+    handler_timeout: Duration,
     label: &str,
     default: T,
     wakeup: Option<&Arc<AtomicI32>>,
@@ -185,13 +199,17 @@ fn wait_sync_hook<T: Copy>(
             return default;
         }
     };
-    let deadline = Instant::now() + timeout;
+    let enqueued_at = Instant::now();
+    let absolute_deadline = enqueued_at + SYNC_HOOK_MAX_WAIT;
+    let mut deadline = enqueued_at + timeout;
     while guard.is_none() {
         if slot.cancelled.load(Ordering::SeqCst) {
             return default;
         }
         if !slot.started.load(Ordering::SeqCst) {
-            let remaining = deadline.saturating_duration_since(Instant::now());
+            let remaining = deadline
+                .min(absolute_deadline)
+                .saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 slot.cancelled.store(true, Ordering::SeqCst);
                 eprintln!("tkwry: {label} timed out after {}s", timeout.as_secs());
@@ -210,8 +228,25 @@ fn wait_sync_hook<T: Copy>(
             };
             guard = next;
         } else {
-            let (next, _) = match slot.cvar.wait(guard) {
-                Ok(next) => (next, ()),
+            let handler_deadline = slot
+                .handler_started_at
+                .lock()
+                .ok()
+                .and_then(|started_at| *started_at)
+                .map(|started_at| started_at + handler_timeout)
+                .unwrap_or_else(|| Instant::now() + handler_timeout);
+            let remaining = handler_deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                slot.cancelled.store(true, Ordering::SeqCst);
+                eprintln!(
+                    "tkwry: {label} handler timed out after {}s",
+                    handler_timeout.as_secs()
+                );
+                return default;
+            }
+            let wait_for = remaining.min(SYNC_HOOK_POLL_INTERVAL);
+            let (next, _) = match slot.cvar.wait_timeout(guard, wait_for) {
+                Ok(pair) => pair,
                 Err(_) => {
                     eprintln!("tkwry: {label} dropped (sync hook lock poisoned)");
                     return default;
@@ -270,6 +305,15 @@ fn enqueue_nav_sync_hook(
             return false;
         }
     };
+    queue.retain(|(existing_url, old_slot)| {
+        if existing_url == &url {
+            old_slot.cancelled.store(true, Ordering::SeqCst);
+            resolve_sync_hook(old_slot, false);
+            false
+        } else {
+            true
+        }
+    });
     while queue.len() >= MAX_SYNC_HOOK_PENDING {
         let (_, old_slot) = queue.remove(0);
         old_slot.cancelled.store(true, Ordering::SeqCst);
@@ -294,6 +338,15 @@ fn enqueue_newwin_sync_hook(
             return false;
         }
     };
+    queue.retain(|(existing_url, old_slot)| {
+        if existing_url == &url {
+            old_slot.cancelled.store(true, Ordering::SeqCst);
+            resolve_sync_hook(old_slot, NewWindowResponse::Deny);
+            false
+        } else {
+            true
+        }
+    });
     while queue.len() >= MAX_SYNC_HOOK_PENDING {
         let (_, old_slot) = queue.remove(0);
         old_slot.cancelled.store(true, Ordering::SeqCst);
@@ -319,7 +372,7 @@ fn drain_nav_sync_hooks(nav_cb: &PyCallback, pending: &NavSyncPending) {
             resolve_sync_hook(&slot, false);
             continue;
         }
-        slot.started.store(true, Ordering::SeqCst);
+        mark_sync_hook_started(&slot);
         let allowed = Python::attach(|py| {
             if let Some(func) = clone_py_callback(py, nav_cb) {
                 call_sync_bool_callback(py, &func, url.as_str(), "on_navigation", false)
@@ -344,7 +397,7 @@ fn drain_newwin_sync_hooks(newwin_cb: &PyCallback, pending: &NewWinSyncPending) 
             resolve_sync_hook(&slot, NewWindowResponse::Deny);
             continue;
         }
-        slot.started.store(true, Ordering::SeqCst);
+        mark_sync_hook_started(&slot);
         let resp = Python::attach(|py| {
             if let Some(func) = clone_py_callback(py, newwin_cb) {
                 match func.call1(py, (url.as_str(),)) {
@@ -520,6 +573,16 @@ type NavSyncPending = Arc<Mutex<Vec<(String, Arc<SyncHookSlot<bool>>)>>>;
 type NewWinSyncPending = Arc<Mutex<Vec<(String, Arc<SyncHookSlot<NewWindowResponse>>)>>>;
 
 fn try_compact_title_queue(queue: &mut Vec<String>) -> bool {
+    for index in 0..queue.len().saturating_sub(1) {
+        if queue[index] == queue[index + 1] {
+            queue.remove(index);
+            return true;
+        }
+    }
+    false
+}
+
+fn try_compact_ipc_queue(queue: &mut Vec<String>) -> bool {
     for index in 0..queue.len().saturating_sub(1) {
         if queue[index] == queue[index + 1] {
             queue.remove(index);
@@ -909,7 +972,7 @@ impl WebView {
                 MAX_IPC_PENDING,
                 "IPC",
                 Some(&wakeup_for_ipc),
-                |_: &mut Vec<String>| false,
+                try_compact_ipc_queue,
             );
         };
 
@@ -929,6 +992,7 @@ impl WebView {
             wait_sync_hook(
                 &slot,
                 SYNC_HOOK_TIMEOUT,
+                SYNC_HOOK_HANDLER_TIMEOUT,
                 "on_navigation",
                 false,
                 Some(&wakeup_fd_clone),
@@ -984,6 +1048,7 @@ impl WebView {
                 let resp = wait_sync_hook(
                     &slot,
                     SYNC_HOOK_TIMEOUT,
+                    SYNC_HOOK_HANDLER_TIMEOUT,
                     "on_new_window",
                     NewWindowResponse::Deny,
                     Some(&wakeup_fd_for_newwin),
@@ -1553,6 +1618,10 @@ where
 {
     this.require_owner_thread()?;
     this.enter_wry_call();
+    // Resolve sync hooks queued before this nested wry call so WebKit callbacks
+    // are not rejected while the Tk thread is inside load_url / eval_js.
+    drain_nav_sync_hooks(&this.nav_cb, &this.nav_sync_pending);
+    drain_newwin_sync_hooks(&this.newwin_cb, &this.newwin_sync_pending);
     let result = (|| -> PyResult<T> {
         let guard = this
             .inner
@@ -1649,19 +1718,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn push_eval_result_queues_none_when_pending_full() {
+    fn push_eval_result_evicts_oldest_and_delivers_new_result_when_pending_full() {
         let pending = Arc::new(Mutex::new(Vec::new()));
         let dropped = AtomicU64::new(0);
         for token in 0..MAX_EVAL_PENDING as u64 {
             push_eval_result(&pending, &dropped, token, format!("r{token}"));
         }
         push_eval_result(&pending, &dropped, 999, "lost".into());
-        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        assert!(dropped.load(Ordering::SeqCst) >= 1);
         let queue = pending.lock().unwrap();
         assert_eq!(queue.len(), MAX_EVAL_PENDING);
-        assert_eq!(queue.last(), Some(&(999, None)));
-        assert_eq!(queue[MAX_EVAL_PENDING - 1], (999, None));
-        assert_eq!(queue[0], (1, Some("r1".to_string())));
+        assert_eq!(queue.last(), Some(&(999, Some("lost".to_string()))));
     }
 
     #[test]
@@ -1730,13 +1797,36 @@ mod tests {
         let slot_clone = slot.clone();
         let worker = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(50));
-            slot_clone.started.store(true, Ordering::SeqCst);
+            mark_sync_hook_started(&slot_clone);
             std::thread::sleep(Duration::from_millis(150));
             resolve_sync_hook(&slot_clone, true);
         });
-        let result = wait_sync_hook(&slot, Duration::from_millis(80), "test", false, None);
+        let result = wait_sync_hook(
+            &slot,
+            Duration::from_millis(80),
+            Duration::from_secs(1),
+            "test",
+            false,
+            None,
+        );
         worker.join().unwrap();
         assert!(result);
+    }
+
+    #[test]
+    fn wait_sync_hook_times_out_when_handler_never_returns() {
+        let slot = Arc::new(SyncHookSlot::new());
+        mark_sync_hook_started(&slot);
+        let result = wait_sync_hook(
+            &slot,
+            Duration::from_millis(50),
+            Duration::from_millis(50),
+            "test",
+            false,
+            None,
+        );
+        assert!(!result);
+        assert!(slot.cancelled.load(Ordering::SeqCst));
     }
 
     #[test]

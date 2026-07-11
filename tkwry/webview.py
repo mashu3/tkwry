@@ -65,9 +65,12 @@ _SyncHookItem: TypeAlias = tuple[
     threading.Event,
     list[bool],
     list[bool],
+    list[float],
 ]
 _EVAL_CALLBACK_TIMEOUT_S = 30.0
 _SYNC_HOOK_TIMEOUT_S = 30.0
+_SYNC_HOOK_HANDLER_TIMEOUT_S = 30.0
+_SYNC_HOOK_MAX_WAIT_S = 120.0
 _MIN_LAYOUT_DIMENSION = 2
 _CREATE_MAX_ATTEMPTS = 30
 _FLUSH_LOAD_MAX_ATTEMPTS = 3
@@ -1359,13 +1362,26 @@ class WebView:
         result: list[object] = [default]
         cancelled = [False]
         started = [False]
-        self._sync_hook_queue.put((invoke, result, default, done, cancelled, started))
+        handler_started_at = [0.0]
+        self._sync_hook_queue.put(
+            (
+                invoke,
+                result,
+                default,
+                done,
+                cancelled,
+                started,
+                handler_started_at,
+            )
+        )
         self._ensure_event_poll()
         self._wake_tk_for_sync_hook()
-        deadline = time.monotonic() + _SYNC_HOOK_TIMEOUT_S
+        enqueued_at = time.monotonic()
+        deadline = enqueued_at + _SYNC_HOOK_TIMEOUT_S
+        absolute_deadline = enqueued_at + _SYNC_HOOK_MAX_WAIT_S
         while not done.is_set():
             if not started[0]:
-                remaining = deadline - time.monotonic()
+                remaining = min(deadline, absolute_deadline) - time.monotonic()
                 if remaining <= 0:
                     cancelled[0] = True
                     print(
@@ -1375,22 +1391,42 @@ class WebView:
                     return default
                 done.wait(timeout=min(0.05, remaining))
             else:
-                done.wait(timeout=0.05)
+                handler_deadline = handler_started_at[0] + _SYNC_HOOK_HANDLER_TIMEOUT_S
+                remaining = handler_deadline - time.monotonic()
+                if remaining <= 0:
+                    cancelled[0] = True
+                    print(
+                        "tkwry: sync hook handler timed out after "
+                        f"{_SYNC_HOOK_HANDLER_TIMEOUT_S:g}s",
+                        file=sys.stderr,
+                    )
+                    return default
+                done.wait(timeout=min(0.05, remaining))
             self._wake_tk_for_sync_hook()
+            native = self._webview
+            if native is not None:
+                native.drain_sync_hooks()
         return cast(_T, result[0])
 
     def _drain_sync_hooks(self) -> None:
         while True:
             try:
-                invoke, result, default, done, cancelled, started = (
-                    self._sync_hook_queue.get_nowait()
-                )
+                (
+                    invoke,
+                    result,
+                    default,
+                    done,
+                    cancelled,
+                    started,
+                    handler_started_at,
+                ) = self._sync_hook_queue.get_nowait()
             except queue.Empty:
                 break
             if cancelled[0] or self._destroyed:
                 result[0] = default
             else:
                 started[0] = True
+                handler_started_at[0] = time.monotonic()
                 try:
                     result[0] = invoke()
                 except Exception:
@@ -1401,9 +1437,15 @@ class WebView:
     def _abort_sync_hooks(self) -> None:
         while True:
             try:
-                _invoke, result, default, done, cancelled, _started = (
-                    self._sync_hook_queue.get_nowait()
-                )
+                (
+                    _invoke,
+                    result,
+                    default,
+                    done,
+                    cancelled,
+                    _started,
+                    _handler_started_at,
+                ) = self._sync_hook_queue.get_nowait()
             except queue.Empty:
                 break
             cancelled[0] = True
