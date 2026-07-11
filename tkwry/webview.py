@@ -70,7 +70,6 @@ _SYNC_HOOK_TIMEOUT_S = 30.0
 _MIN_LAYOUT_DIMENSION = 2
 _CREATE_MAX_ATTEMPTS = 30
 _FLUSH_LOAD_MAX_ATTEMPTS = 3
-_TK_DONT_WAIT = 1
 _QUEUE_DROP_IPC = 0
 _QUEUE_DROP_PAGE_LOAD = 1
 _QUEUE_DROP_TITLE = 2
@@ -458,8 +457,9 @@ class WebView:
     def wait_until_ready(self, timeout: float = 30.0) -> bool:
         """Pump a nested Tk event loop until the webview is laid out or *timeout*.
 
-        This pumps Tk via ``update_idletasks`` and non-blocking ``dooneevent``
-        (not a full ``root.update()``). Prefer
+        This pumps the Tk event loop via ``update_idletasks`` and ``update``.
+        Nested :meth:`wait_until_ready` on the same instance raises
+        :exc:`RuntimeError`. Prefer
         :meth:`when_ready` or ``bind(\"<<WebViewReady>>\")`` when you can avoid
         nesting the event loop (especially from handlers that touch Tk state).
 
@@ -956,7 +956,7 @@ class WebView:
         return (ipc, page_load, title, drag_drop, eval_)
 
     def _pump_wait_until_ready(self, root: tk.Misc) -> None:
-        """Advance this WebView without a full ``root.update()`` reentrant pump."""
+        """Advance this WebView; ``update_idletasks`` runs before ``update``."""
         root.update_idletasks()
         if (
             not self._destroyed
@@ -976,12 +976,10 @@ class WebView:
             from tkwry._core import pump_events
 
             pump_events()
-        for _ in range(10):
-            try:
-                if not root.tk.dooneevent(_TK_DONT_WAIT):
-                    break
-            except tk.TclError:
-                break
+        try:
+            root.update()
+        except tk.TclError:
+            pass
 
     def _schedule_eval_js(self) -> None:
         if self._eval_js_scheduled:

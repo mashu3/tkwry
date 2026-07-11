@@ -84,3 +84,4 @@ def layout_bare_frame(
     frame.configure(width=width, height=height)
     frame.pack(fill="both", expand=True)
     root.update_idletasks()
+    root.update()
