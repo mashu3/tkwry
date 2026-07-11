@@ -8,6 +8,8 @@ __all__: Final = [
     "DragDropEvent",
     "pump_events",
     "ensure_gtk_init",
+    "disable_macos_automatic_window_tabbing",
+    "disable_macos_window_tabbing",
 ]
 
 @final
