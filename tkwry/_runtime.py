@@ -10,7 +10,35 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pass
 
-_PUMP_ERROR_LIMIT = 3
+_PUMP_ITERATIONS = 512
+_PUMP_BURST_BASE = 1
+_PUMP_BURST_MAX = 4
+_PUMP_TICK_IDLE_MS = 10
+_PUMP_TICK_BUSY_MS = 1
+_PUMP_ERROR_LIMIT = 5
+_PUMP_ERROR_RECOVERY_BASE_MS = 100
+_PUMP_ERROR_RECOVERY_MAX_MS = 2000
+
+
+def pump_gtk_events(
+    *,
+    bursts: int = 1,
+    max_iterations: int | None = _PUMP_ITERATIONS,
+    refcount: int = 1,
+) -> bool:
+    """Pump GTK with bounded bursts; return True when the queue still has work."""
+    from tkwry._core import pump_events
+
+    burst_count = min(_PUMP_BURST_MAX, _PUMP_BURST_BASE + max(0, refcount - 1))
+    if bursts > 1:
+        burst_count = min(_PUMP_BURST_MAX, burst_count + bursts - 1)
+    backlog = False
+    for _ in range(burst_count):
+        if pump_events(max_iterations):
+            backlog = True
+        else:
+            return False
+    return backlog
 
 
 def _gtk_pump_tick(root_id: int) -> None:
@@ -27,25 +55,16 @@ def _gtk_pump_tick(root_id: int) -> None:
         pump.stop()
         return
     pump._clear_tick_after_id()
-    from tkwry._core import pump_events
-
     try:
-        pump_events()
+        backlog = pump_gtk_events(refcount=pump._refcount)
     except Exception:
         traceback.print_exc()
-        pump._consecutive_errors += 1
-        if pump._consecutive_errors >= _PUMP_ERROR_LIMIT:
-            print(
-                f"tkwry: GTK event pump failed {pump._consecutive_errors} "
-                "times; stopping",
-                file=sys.stderr,
-            )
-            pump.stop()
-            return
-    else:
-        pump._consecutive_errors = 0
+        pump._handle_pump_error()
+        return
+    pump._consecutive_errors = 0
     if pump._active:
-        pump._schedule_tick(10)
+        delay = _PUMP_TICK_BUSY_MS if backlog else _PUMP_TICK_IDLE_MS
+        pump._schedule_tick(delay)
 
 
 class GtkPump:
@@ -86,6 +105,45 @@ class GtkPump:
 
     def _clear_tick_after_id(self) -> None:
         self._tick_after_id = None
+
+    def _handle_pump_error(self) -> None:
+        self._consecutive_errors += 1
+        if self._consecutive_errors < _PUMP_ERROR_LIMIT:
+            if self._active:
+                self._schedule_tick(_PUMP_TICK_IDLE_MS)
+            return
+        delay = min(
+            _PUMP_ERROR_RECOVERY_MAX_MS,
+            _PUMP_ERROR_RECOVERY_BASE_MS
+            * (2 ** min(self._consecutive_errors - _PUMP_ERROR_LIMIT, 4)),
+        )
+        print(
+            f"tkwry: GTK event pump failed {self._consecutive_errors} "
+            f"times; retrying in {delay}ms",
+            file=sys.stderr,
+        )
+        self._pause_for_recovery(delay)
+
+    def _pause_for_recovery(self, delay_ms: int) -> None:
+        self._active = False
+        self._cancel_tick()
+        if self._refcount <= 0:
+            self.stop()
+            return
+        root_id = self._root_id
+
+        def _recover() -> None:
+            pump = GtkPump._by_root_id.get(root_id)
+            if pump is None or pump._refcount <= 0:
+                return
+            pump._consecutive_errors = 0
+            pump._active = True
+            pump._schedule_tick(0)
+
+        try:
+            self._root.after(delay_ms, _recover)
+        except tk.TclError:
+            pass
 
     @classmethod
     def _resolve_root_id(cls, widget: tk.Misc) -> int | None:
@@ -179,6 +237,10 @@ class GtkPump:
         if entry is not None:
             if entry[0] != root_id:
                 cls._transfer_widget_to_root(widget, root_id)
+            pump = cls._by_root_id.get(root_id)
+            if pump is not None and not pump._active and pump._refcount > 0:
+                pump._consecutive_errors = 0
+                pump.start()
             return
         cls._widget_attachments[widget_id] = (root_id, 1)
         cls._increment_root_refcount(widget, root_id, 1)

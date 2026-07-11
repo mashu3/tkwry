@@ -1571,7 +1571,7 @@ where
 
 #[pyfunction]
 #[pyo3(signature = (max_iterations=None))]
-fn pump_events(max_iterations: Option<usize>) {
+fn pump_events(max_iterations: Option<usize>) -> bool {
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         const DEFAULT_ITERATIONS: usize = 128;
@@ -1583,12 +1583,16 @@ fn pump_events(max_iterations: Option<usize>) {
             .clamp(1, MAX_ITERATIONS);
         for _ in 0..limit {
             if !gtk::main_iteration_do(false) {
-                break;
+                return gtk::events_pending();
             }
         }
+        gtk::events_pending()
     }
     #[cfg(not(all(unix, not(target_os = "macos"))))]
-    let _ = max_iterations;
+    {
+        let _ = max_iterations;
+        false
+    }
 }
 
 #[pyfunction]

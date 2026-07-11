@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from tkwry._runtime import GtkPump, _gtk_pump_tick
+from tkwry._runtime import _PUMP_ERROR_LIMIT, GtkPump, _gtk_pump_tick
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +26,7 @@ def test_gtk_pump_tick_skips_when_stopped(
     calls: list[int] = []
     monkeypatch.setattr(
         "tkwry._core.pump_events",
-        lambda: calls.append(1),
+        lambda max_iterations=None: calls.append(1) or False,
         raising=False,
     )
 
@@ -46,7 +46,7 @@ def test_gtk_pump_tick_stops_when_root_destroyed(
     calls: list[int] = []
     monkeypatch.setattr(
         "tkwry._core.pump_events",
-        lambda: calls.append(1),
+        lambda max_iterations=None: calls.append(1) or False,
         raising=False,
     )
 
@@ -68,7 +68,7 @@ def test_gtk_pump_schedules_next_tick_with_root_id_only(
     scheduled: list[object] = []
     monkeypatch.setattr(
         "tkwry._core.pump_events",
-        lambda: None,
+        lambda max_iterations=None: False,
         raising=False,
     )
 
@@ -97,7 +97,7 @@ def test_gtk_pump_stop_cancels_pending_tick(
     cancelled: list[str] = []
     monkeypatch.setattr(
         "tkwry._core.pump_events",
-        lambda: None,
+        lambda max_iterations=None: False,
         raising=False,
     )
 
@@ -123,7 +123,7 @@ def test_gtk_pump_stale_tick_does_not_drive_reattached_pump(
     calls: list[int] = []
     monkeypatch.setattr(
         "tkwry._core.pump_events",
-        lambda: calls.append(1),
+        lambda max_iterations=None: calls.append(1) or False,
         raising=False,
     )
 
@@ -214,7 +214,7 @@ def test_gtk_pump_stop_does_not_zero_refcount(
 ) -> None:
     monkeypatch.setattr(
         "tkwry._core.pump_events",
-        lambda: None,
+        lambda max_iterations=None: False,
         raising=False,
     )
 
@@ -235,12 +235,13 @@ def test_gtk_pump_tick_keeps_pumping_after_single_pump_error(
     calls = {"n": 0}
     scheduled: list[object] = []
 
-    def flaky_pump() -> None:
+    def flaky_pump(**_kwargs: object) -> bool:
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("transient")
+        return False
 
-    monkeypatch.setattr("tkwry._core.pump_events", flaky_pump, raising=False)
+    monkeypatch.setattr("tkwry._runtime.pump_gtk_events", flaky_pump, raising=False)
 
     pump = GtkPump(tk_root)
     GtkPump._by_root_id[pump._root_id] = pump
@@ -264,28 +265,34 @@ def test_gtk_pump_tick_stops_after_repeated_pump_errors(
     tk_root, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     calls = {"n": 0}
+    scheduled: list[int] = []
 
-    def always_fail() -> None:
+    def always_fail(**_kwargs: object) -> bool:
         calls["n"] += 1
         raise RuntimeError("gtk broken")
 
-    monkeypatch.setattr("tkwry._core.pump_events", always_fail, raising=False)
+    monkeypatch.setattr("tkwry._runtime.pump_gtk_events", always_fail, raising=False)
 
     pump = GtkPump(tk_root)
     GtkPump._by_root_id[pump._root_id] = pump
     pump._active = True
+    pump._refcount = 1
     root_id = pump._root_id
+    monkeypatch.setattr(
+        pump._root,
+        "after",
+        lambda delay, _callback: scheduled.append(delay) or "after-id",
+    )
 
-    for _ in range(3):
-        if root_id not in GtkPump._by_root_id:
-            break
+    for _ in range(_PUMP_ERROR_LIMIT):
         GtkPump._by_root_id[root_id]._active = True
         _gtk_pump_tick(root_id)
 
-    assert calls["n"] == 3
+    assert calls["n"] == _PUMP_ERROR_LIMIT
     assert not pump._active
-    assert root_id not in GtkPump._by_root_id
-    assert "GTK event pump failed" in capsys.readouterr().err
+    assert root_id in GtkPump._by_root_id
+    assert scheduled
+    assert "retrying in" in capsys.readouterr().err
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
@@ -408,3 +415,75 @@ def test_ensure_attached_is_idempotent(
     pump = GtkPump._by_root_id[tk_root.winfo_id()]
     assert pump._refcount == 1
     GtkPump.detach(tk_root)
+
+
+def test_gtk_pump_tick_uses_fast_schedule_when_backlog(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    delays: list[int] = []
+    monkeypatch.setattr(
+        "tkwry._runtime.pump_gtk_events",
+        lambda **_kwargs: True,
+        raising=False,
+    )
+
+    pump = GtkPump(tk_root)
+    GtkPump._by_root_id[pump._root_id] = pump
+    pump._active = True
+    monkeypatch.setattr(
+        pump._root,
+        "after",
+        lambda delay, _callback: delays.append(delay) or "after-id",
+    )
+
+    _gtk_pump_tick(pump._root_id)
+
+    assert delays == [1]
+    pump.stop()
+
+
+def test_pump_gtk_events_scales_bursts_with_refcount(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tkwry._runtime import pump_gtk_events
+
+    calls: list[int | None] = []
+
+    def track_pump(max_iterations: int | None = None) -> bool:
+        calls.append(max_iterations)
+        return True
+
+    monkeypatch.setattr("tkwry._core.pump_events", track_pump, raising=False)
+
+    assert pump_gtk_events(refcount=3) is True
+    assert len(calls) == 3
+    assert all(limit == 512 for limit in calls)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
+def test_attach_restarts_paused_pump(tk_root, monkeypatch: pytest.MonkeyPatch) -> None:
+    import tkinter as tk
+
+    monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
+    monkeypatch.setattr(
+        "tkwry._runtime.pump_gtk_events",
+        lambda **_kwargs: False,
+        raising=False,
+    )
+    scheduled: list[int] = []
+    monkeypatch.setattr(
+        tk_root,
+        "after",
+        lambda delay, _callback: scheduled.append(delay) or "after-id",
+    )
+
+    frame = tk.Frame(tk_root)
+    GtkPump.attach(frame)
+    pump = GtkPump._by_root_id[tk_root.winfo_id()]
+    pump._active = False
+
+    GtkPump.attach(frame)
+
+    assert pump._active
+    assert scheduled
+    GtkPump.detach(frame)

@@ -187,7 +187,7 @@ def _ensure_tk_wakeup_fileevent(toplevel: tk.Misc) -> None:
         if create_handler is None:
             return
         create_handler(read_fd, tk.READABLE, _on_wake)
-        toplevel._tkwry_wake_fileevent = True
+        setattr(toplevel, "_tkwry_wake_fileevent", True)
     except (tk.TclError, OSError, ValueError):
         pass
 
@@ -1138,9 +1138,9 @@ class WebView:
             if self._should_keep_polling() or self._event_poll_active:
                 self._poll_events()
         if sys.platform == "linux":
-            from tkwry._core import pump_events
+            from tkwry._runtime import pump_gtk_events
 
-            pump_events()
+            pump_gtk_events()
         try:
             root.update()
         except tk.TclError:
@@ -1446,10 +1446,9 @@ class WebView:
     def _service_linux_events(self, *, gtk_rounds: int = 32) -> None:
         if sys.platform != "linux" or self._destroyed:
             return
-        from tkwry._core import pump_events
+        from tkwry._runtime import pump_gtk_events
 
-        for _ in range(gtk_rounds):
-            pump_events()
+        pump_gtk_events(bursts=gtk_rounds)
         self._deliver_page_load_events()
 
     def _register_pending_eval(
@@ -1534,9 +1533,9 @@ class WebView:
             self._event_poll_active = False
             return
         if sys.platform == "linux":
-            from tkwry._core import pump_events
+            from tkwry._runtime import pump_gtk_events
 
-            pump_events()
+            pump_gtk_events()
         elif sys.platform == "darwin":
             toplevel = self._frame.winfo_toplevel()
             _mac_service_wakeup(toplevel)
@@ -1617,10 +1616,9 @@ class WebView:
             kwargs["on_new_window"] = self._native_new_window
 
         if sys.platform == "linux":
-            from tkwry._core import pump_events
+            from tkwry._runtime import pump_gtk_events
 
-            for _ in range(20):
-                pump_events()
+            pump_gtk_events(bursts=20)
 
         try:
             self._webview = NativeWebView(
