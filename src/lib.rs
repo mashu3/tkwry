@@ -80,8 +80,10 @@ fn push_if_listening<T>(
     Ok(())
 }
 
+type EvalResultPending = Arc<Mutex<Vec<(u64, Option<String>)>>>;
+
 fn push_eval_result(
-    pending: &Arc<Mutex<Vec<(u64, Option<String>)>>>,
+    pending: &EvalResultPending,
     dropped: &AtomicU64,
     token: u64,
     result: String,
@@ -298,7 +300,7 @@ type TitlePending = Arc<Mutex<Vec<String>>>;
 type DragDropPendingItem = (DragDropEvent, Vec<String>, (i32, i32));
 type DragDropPending = Arc<Mutex<Vec<DragDropPendingItem>>>;
 type EvalCallbackMap = Arc<Mutex<HashMap<u64, Py<PyAny>>>>;
-type EvalResultPending = Arc<Mutex<Vec<(u64, Option<String>)>>>;
+type DrainedEvalCallback = (u64, Py<PyAny>, Option<String>);
 type NavSyncPending = Arc<Mutex<Vec<(String, Arc<SyncHookSlot<bool>>)>>>;
 type NewWinSyncPending = Arc<Mutex<Vec<(String, Arc<SyncHookSlot<NewWindowResponse>>)>>>;
 
@@ -878,7 +880,7 @@ impl WebView {
         Ok(token)
     }
 
-    fn drain_eval_callbacks(&self) -> PyResult<Vec<(u64, Py<PyAny>, Option<String>)>> {
+    fn drain_eval_callbacks(&self) -> PyResult<Vec<DrainedEvalCallback>> {
         self.require_owner_thread()?;
         let items = drain_queue(&self.eval_result_pending)?;
         let mut callbacks = self
@@ -1230,10 +1232,10 @@ impl WebView {
     fn url(&self) -> PyResult<Option<String>> {
         #[cfg(target_os = "macos")]
         {
-            return with_webview(self, |wv| match macos_document_url::read_document_url(wv) {
+            with_webview(self, |wv| match macos_document_url::read_document_url(wv) {
                 Ok(url) => Ok(normalize_document_url(url)),
                 Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(err)),
-            });
+            })
         }
         #[cfg(not(target_os = "macos"))]
         with_webview(self, |wv| match wv.url() {
@@ -1329,11 +1331,11 @@ fn disable_macos_automatic_window_tabbing() {
 }
 
 #[pyfunction]
-fn disable_macos_window_tabbing(parent: usize) -> PyResult<()> {
+fn disable_macos_window_tabbing(_parent: usize) -> PyResult<()> {
     #[cfg(target_os = "macos")]
     {
         use objc2_app_kit::NSView;
-        let ptr = parent as *mut NSView;
+        let ptr = _parent as *mut NSView;
         let Some(parent_ns_view) = NonNull::new(ptr) else {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "parent handle is null",
