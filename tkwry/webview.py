@@ -1459,10 +1459,8 @@ class WebView:
                         )
                     return default
                 done.wait(timeout=min(0.05, remaining))
+            # Wake the Tk thread; native/Python drains run on the owner thread only.
             self._schedule_sync_hook_drain()
-            native = self._webview
-            if native is not None:
-                native.drain_sync_hooks()
         return cast(_T, result[0])
 
     def _drain_sync_hooks(self) -> None:

@@ -5,16 +5,14 @@ from __future__ import annotations
 import threading
 
 import pytest
+from support.linux import noop_linux_runtime
 
 from tkwry import NewWindowResponse, WebView
 
 
 @pytest.fixture(autouse=True)
-def _noop_gtk_pumps(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "tkwry._core.pump_events", lambda max_iterations=None: False, raising=False
-    )
-    monkeypatch.setattr("tkwry._linux.GtkPump.attach", lambda _widget: None)
+def _noop_linux_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    noop_linux_runtime(monkeypatch)
 
 
 def _make_web(tk_root):
@@ -58,6 +56,7 @@ def test_native_navigation_runs_handler_on_tk_thread(tk_root) -> None:
     assert not error_holder
     assert result_holder == [True]
     assert seen == [web._tk_thread_id]
+    web.destroy()
 
 
 def test_native_new_window_runs_handler_on_tk_thread(tk_root) -> None:
@@ -89,13 +88,17 @@ def test_native_new_window_runs_handler_on_tk_thread(tk_root) -> None:
     thread.join(timeout=2.0)
     assert result_holder == [NewWindowResponse.Deny]
     assert seen == [web._tk_thread_id]
+    web.destroy()
 
 
 def test_needs_event_poll_when_navigation_handler_set(tk_root) -> None:
     _frame, web = _make_web(tk_root)
-    assert web._needs_event_poll() is False
-    web.set_on_navigation(lambda _url: True)
-    assert web._needs_event_poll() is True
+    try:
+        assert web._needs_event_poll() is False
+        web.set_on_navigation(lambda _url: True)
+        assert web._needs_event_poll() is True
+    finally:
+        web.destroy()
 
 
 def test_sync_hook_timeout_skips_late_handler(tk_root, monkeypatch) -> None:
@@ -110,8 +113,8 @@ def test_sync_hook_timeout_skips_late_handler(tk_root, monkeypatch) -> None:
         return True
 
     web.set_on_navigation(slow_handler)
-    web._ensure_tk_wakeup_pipe()
     monkeypatch.setattr("tkwry.webview._SYNC_HOOK_TIMEOUT_S", 0.05)
+    monkeypatch.setattr("tkwry.webview._SYNC_HOOK_MAX_WAIT_S", 0.1)
     monkeypatch.setattr(web, "_ensure_event_poll", lambda: None, raising=False)
 
     scheduled: list[object] = []
@@ -128,7 +131,8 @@ def test_sync_hook_timeout_skips_late_handler(tk_root, monkeypatch) -> None:
 
     thread = threading.Thread(target=worker)
     thread.start()
-    thread.join(timeout=1.0)
+    thread.join(timeout=0.5)
+    assert not thread.is_alive()
 
     for callback in scheduled:
         callback()
@@ -142,24 +146,49 @@ def test_sync_hook_timeout_skips_late_handler(tk_root, monkeypatch) -> None:
 
 
 def test_dispatch_sync_hook_schedules_tk_drain(tk_root, monkeypatch) -> None:
+    """Sync-hook drains are scheduled on the Tk thread only (not worker threads)."""
     _frame, web = _make_web(tk_root)
     monkeypatch.setattr(web, "_ensure_event_poll", lambda: None, raising=False)
+    monkeypatch.setattr(web, "_wake_tk_for_sync_hook", lambda: None, raising=False)
+
+    scheduled: list[object] = []
+    monkeypatch.setattr(
+        web._frame,
+        "after",
+        lambda _delay, callback: scheduled.append(callback) or "after-id",
+    )
+
+    web._schedule_sync_hook_drain()
+    assert len(scheduled) == 1
+
+    scheduled.clear()
+    probe = threading.Event()
+
+    def probe_worker() -> None:
+        web._schedule_sync_hook_drain()
+        probe.set()
+
+    thread = threading.Thread(target=probe_worker)
+    thread.start()
+    thread.join(timeout=1.0)
+    assert probe.is_set()
+    assert scheduled == []
 
     result_holder: list[bool] = []
 
     def worker() -> None:
         result_holder.append(web._dispatch_sync_hook(lambda: True, default=False))
 
-    thread = threading.Thread(target=worker)
-    thread.start()
-    for _ in range(200):
+    worker_thread = threading.Thread(target=worker)
+    worker_thread.start()
+    for _ in range(50):
+        web._drain_sync_hooks()
         tk_root.update_idletasks()
         tk_root.update()
-        web._drain_sync_hooks()
-        if not thread.is_alive():
+        if not worker_thread.is_alive():
             break
-    thread.join(timeout=1.0)
-
+    worker_thread.join(timeout=1.0)
+    assert not worker_thread.is_alive()
     assert result_holder == [True]
     web.destroy()
 
