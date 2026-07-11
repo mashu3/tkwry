@@ -706,6 +706,7 @@ class WebView:
             self._pending_html = None
             return
         # Supersede constructor deferred load so it cannot overwrite this nav.
+        self._cancel_initial_load_timer()
         self._initial_load = None
         self._pending_load = ("url", normalized)
         self._schedule_flush_load()
@@ -728,6 +729,7 @@ class WebView:
             self._pending_url = None
             return
         # Supersede constructor deferred load so it cannot overwrite this nav.
+        self._cancel_initial_load_timer()
         self._initial_load = None
         self._pending_load = ("html", html)
         self._schedule_flush_load()
@@ -1761,6 +1763,7 @@ class WebView:
         self._flush_load_scheduled = False
         if self._destroyed or self._webview is None or self._pending_load is None:
             return
+        self._sync_bounds()
         kind, payload = self._pending_load
         try:
             if kind == "url":
@@ -1788,9 +1791,11 @@ class WebView:
         self._flush_load_attempt = 0
         self._initial_load = None
         self._sync_bounds()
-        self._service_linux_events()
-        if self._on_page_load is not None:
-            self._ensure_event_poll()
+        if sys.platform == "linux":
+            self._service_linux_events()
+        else:
+            self._service_page_load_events()
+        self._ensure_event_poll()
 
     def _bounds_size(self) -> tuple[int, int] | None:
         """Return the width/height to push, or None when geometry is not meaningful."""

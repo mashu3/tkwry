@@ -34,6 +34,10 @@ def pump(root, *, steps: int = 80, delay_ms: int = 50) -> None:
             from tkwry._runtime import pump_gtk_events
 
             pump_gtk_events()
+        elif sys.platform == "darwin":
+            from tkwry._macos import _mac_service_wakeup
+
+            _mac_service_wakeup(root)
         root.after(delay_ms)
         root.update()
 
