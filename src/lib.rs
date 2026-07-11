@@ -1,11 +1,7 @@
 //! wry bindings for embedding a WebView into a Tkinter host window.
 
 #[cfg(target_os = "macos")]
-mod macos_document_url;
-#[cfg(target_os = "macos")]
-mod macos_focus;
-#[cfg(target_os = "macos")]
-mod macos_window;
+mod macos;
 
 use pyo3::prelude::*;
 use std::cell::Cell;
@@ -760,11 +756,7 @@ struct WebView {
     nav_cb: PyCallback,
     newwin_cb: PyCallback,
     #[cfg(target_os = "macos")]
-    _focus_sync: Mutex<Option<macos_focus::FocusSyncGuard>>,
-    #[cfg(target_os = "macos")]
-    web_wants_keyboard: Arc<AtomicBool>,
-    #[cfg(target_os = "macos")]
-    mac_tk_unfocus: Arc<AtomicBool>,
+    mac: macos::MacPlatformState,
     /// Nested wry calls (e.g. sync navigation hooks during ``load_url``).
     wry_call_depth: Cell<u32>,
     /// ``destroy()`` requested while a nested wry call is active.
@@ -835,13 +827,7 @@ impl WebView {
 
     fn destroy_inner(&self) -> PyResult<()> {
         #[cfg(target_os = "macos")]
-        {
-            self.web_wants_keyboard.store(false, Ordering::SeqCst);
-            self.mac_tk_unfocus.store(false, Ordering::SeqCst);
-            if let Ok(mut guard) = self._focus_sync.lock() {
-                *guard = None;
-            }
-        }
+        self.mac.teardown();
         self.wakeup_write_fd.store(-1, Ordering::SeqCst);
 
         let mut guard = self
@@ -923,7 +909,7 @@ impl WebView {
             let ns_view = NonNull::new(ptr)
                 .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("parent handle is null"))?;
             let parent_ns_view = unsafe { NonNull::new_unchecked(ptr.cast::<NSView>()) };
-            macos_window::disable_window_tabbing(parent_ns_view)
+            macos::disable_window_tabbing(parent_ns_view)
                 .map_err(|err| {
                     eprintln!("tkwry: disable_window_tabbing failed at create (will retry): {err}");
                 })
@@ -1171,22 +1157,12 @@ impl WebView {
         let inner = Arc::new(Mutex::new(Some(webview)));
 
         #[cfg(target_os = "macos")]
-        let web_wants_keyboard = Arc::new(AtomicBool::new(false));
-        #[cfg(target_os = "macos")]
-        let mac_tk_unfocus = Arc::new(AtomicBool::new(false));
-
-        #[cfg(target_os = "macos")]
-        let _focus_sync = {
-            let guard = macos_focus::install_focus_sync(
-                inner.clone(),
-                parent_ns_view,
-                web_wants_keyboard.clone(),
-                mac_tk_unfocus.clone(),
-                wakeup_write_fd.clone(),
-            )
-            .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
-            Mutex::new(Some(guard))
-        };
+        let mac = macos::MacPlatformState::install(
+            inner.clone(),
+            parent_ns_view,
+            wakeup_write_fd.clone(),
+        )
+        .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
 
         Ok(Self {
             owner_thread,
@@ -1211,11 +1187,7 @@ impl WebView {
             newwin_sync_pending,
             wakeup_write_fd,
             #[cfg(target_os = "macos")]
-            _focus_sync,
-            #[cfg(target_os = "macos")]
-            web_wants_keyboard,
-            #[cfg(target_os = "macos")]
-            mac_tk_unfocus,
+            mac,
             nav_cb,
             newwin_cb,
             wry_call_depth: Cell::new(0),
@@ -1473,7 +1445,7 @@ impl WebView {
     fn set_mac_web_input_active(&self, active: bool) -> PyResult<()> {
         self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
-        self.web_wants_keyboard.store(active, Ordering::SeqCst);
+        self.mac.set_web_input_active(active);
         #[cfg(not(target_os = "macos"))]
         let _ = (self, active);
         Ok(())
@@ -1489,7 +1461,7 @@ impl WebView {
         self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
         {
-            Ok(self.mac_tk_unfocus.swap(false, Ordering::SeqCst))
+            Ok(self.mac.take_tk_unfocus())
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -1503,7 +1475,7 @@ impl WebView {
         self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
         {
-            Ok(self.mac_tk_unfocus.load(Ordering::SeqCst))
+            Ok(self.mac.tk_unfocus_pending())
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -1516,11 +1488,7 @@ impl WebView {
     fn mac_request_tk_unfocus(&self) -> PyResult<()> {
         self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
-        {
-            self.web_wants_keyboard.store(true, Ordering::SeqCst);
-            self.mac_tk_unfocus.store(true, Ordering::SeqCst);
-            macos_focus::notify_wakeup(&self.wakeup_write_fd);
-        }
+        self.mac.request_tk_unfocus(&self.wakeup_write_fd);
         #[cfg(not(target_os = "macos"))]
         let _ = self;
         Ok(())
@@ -1531,7 +1499,7 @@ impl WebView {
         self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
         {
-            Ok(self.web_wants_keyboard.load(Ordering::SeqCst))
+            Ok(self.mac.web_input_active())
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -1545,7 +1513,7 @@ impl WebView {
         self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
         {
-            Ok(macos_focus::hit_test_wry_point(&self.inner, x, y))
+            Ok(macos::hit_test_wry_point(&self.inner, x, y))
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -1563,7 +1531,7 @@ impl WebView {
 
     fn focus_parent(&self) -> PyResult<()> {
         #[cfg(target_os = "macos")]
-        self.web_wants_keyboard.store(false, Ordering::SeqCst);
+        self.mac.release_web_input();
         with_webview(self, |wv| {
             wv.focus_parent()
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
@@ -1591,7 +1559,7 @@ impl WebView {
     fn url(&self) -> PyResult<Option<String>> {
         #[cfg(target_os = "macos")]
         {
-            with_webview(self, |wv| match macos_document_url::read_document_url(wv) {
+            with_webview(self, |wv| match macos::read_document_url(wv) {
                 Ok(url) => Ok(normalize_document_url(url)),
                 Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(err)),
             })
@@ -1694,7 +1662,7 @@ fn ensure_gtk_init() {
 fn disable_macos_automatic_window_tabbing() -> PyResult<()> {
     #[cfg(target_os = "macos")]
     {
-        macos_window::disable_process_automatic_window_tabbing()
+        macos::disable_process_automatic_window_tabbing()
             .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
     }
     Ok(())
@@ -1712,7 +1680,7 @@ fn disable_macos_window_tabbing(parent: usize) -> PyResult<()> {
                 "parent handle is null",
             ));
         };
-        macos_window::disable_window_tabbing(parent_ns_view)
+        macos::disable_window_tabbing(parent_ns_view)
             .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
     }
     Ok(())
