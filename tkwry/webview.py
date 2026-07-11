@@ -70,7 +70,7 @@ _SyncHookItem: TypeAlias = tuple[
 _EVAL_CALLBACK_TIMEOUT_S = 30.0
 _SYNC_HOOK_TIMEOUT_S = 30.0
 _SYNC_HOOK_HANDLER_TIMEOUT_S = 30.0
-_SYNC_HOOK_MAX_WAIT_S = 120.0
+_SYNC_HOOK_MAX_WAIT_S = _SYNC_HOOK_TIMEOUT_S + _SYNC_HOOK_HANDLER_TIMEOUT_S
 _MIN_LAYOUT_DIMENSION = 2
 _CREATE_MAX_ATTEMPTS = 30
 _FLUSH_LOAD_MAX_ATTEMPTS = 3
@@ -1442,14 +1442,21 @@ class WebView:
                 done.wait(timeout=min(0.05, remaining))
             else:
                 handler_deadline = handler_started_at[0] + _SYNC_HOOK_HANDLER_TIMEOUT_S
-                remaining = handler_deadline - time.monotonic()
+                remaining = min(handler_deadline, absolute_deadline) - time.monotonic()
                 if remaining <= 0:
                     cancelled[0] = True
-                    print(
-                        "tkwry: sync hook handler timed out after "
-                        f"{_SYNC_HOOK_HANDLER_TIMEOUT_S:g}s",
-                        file=sys.stderr,
-                    )
+                    if time.monotonic() >= absolute_deadline:
+                        print(
+                            "tkwry: sync hook timed out after "
+                            f"{_SYNC_HOOK_MAX_WAIT_S:g}s total",
+                            file=sys.stderr,
+                        )
+                    else:
+                        print(
+                            "tkwry: sync hook handler timed out after "
+                            f"{_SYNC_HOOK_HANDLER_TIMEOUT_S:g}s",
+                            file=sys.stderr,
+                        )
                     return default
                 done.wait(timeout=min(0.05, remaining))
             self._schedule_sync_hook_drain()

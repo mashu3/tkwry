@@ -9,7 +9,7 @@ mod macos_window;
 
 use pyo3::prelude::*;
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 #[cfg(target_os = "macos")]
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
@@ -44,11 +44,13 @@ const MAX_IPC_MESSAGE_BYTES: usize = 10 * 1024 * 1024;
 /// Navigation/new-window hooks block the WebKit thread until the Tk thread drains
 /// them; cap wait time so a stuck handler cannot freeze the page indefinitely.
 const SYNC_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
-/// Hard cap on total wait from enqueue (pre-start deadline may slide on wakeup).
-const SYNC_HOOK_MAX_WAIT: Duration = Duration::from_secs(120);
 /// After the Python handler starts, cap execution so a non-returning callback
 /// cannot block the WebKit thread forever.
 const SYNC_HOOK_HANDLER_TIMEOUT: Duration = Duration::from_secs(30);
+/// Hard cap on total wait from enqueue (pre-start + handler combined).
+const SYNC_HOOK_MAX_WAIT: Duration = Duration::from_secs(
+    SYNC_HOOK_TIMEOUT.as_secs() + SYNC_HOOK_HANDLER_TIMEOUT.as_secs(),
+);
 const SYNC_HOOK_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// ``eval_js_with_callback`` registrations older than this are pruned on drain.
@@ -64,18 +66,25 @@ fn queue_lock_poisoned() -> PyErr {
 }
 
 fn make_room_in_queue<T>(
-    queue: &mut Vec<T>,
+    queue: &mut VecDeque<T>,
     max: usize,
     dropped: &AtomicU64,
     label: &str,
-    mut compact: impl FnMut(&mut Vec<T>) -> bool,
+    mut compact: impl FnMut(&mut VecDeque<T>) -> bool,
 ) {
     while queue.len() >= max {
-        if compact(queue) {
+        let mut compacted = false;
+        while compact(queue) {
+            compacted = true;
+            if queue.len() < max {
+                return;
+            }
+        }
+        if compacted {
             continue;
         }
         dropped.fetch_add(1, Ordering::SeqCst);
-        queue.remove(0);
+        queue.pop_front();
         eprintln!("tkwry: dropping oldest {label} event (pending queue full at {max} events)");
         break;
     }
@@ -84,13 +93,13 @@ fn make_room_in_queue<T>(
 #[allow(clippy::too_many_arguments)]
 fn push_if_listening<T>(
     listening: &AtomicBool,
-    pending: &Arc<Mutex<Vec<T>>>,
+    pending: &Arc<Mutex<VecDeque<T>>>,
     dropped: &AtomicU64,
     item: T,
     max: usize,
     label: &str,
     wakeup: Option<&Arc<AtomicI32>>,
-    mut compact: impl FnMut(&mut Vec<T>) -> bool,
+    mut compact: impl FnMut(&mut VecDeque<T>) -> bool,
 ) -> Result<(), ()> {
     // Fast path: avoid taking the queue lock when clearly not listening.
     if !listening.load(Ordering::SeqCst) {
@@ -111,14 +120,14 @@ fn push_if_listening<T>(
         return Ok(());
     }
     make_room_in_queue(&mut queue, max, dropped, label, &mut compact);
-    queue.push(item);
+    queue.push_back(item);
     if let Some(fd) = wakeup {
         notify_wakeup(fd);
     }
     Ok(())
 }
 
-type EvalResultPending = Arc<Mutex<Vec<(u64, Option<String>)>>>;
+type EvalResultPending = Arc<Mutex<VecDeque<(u64, Option<String>)>>>;
 
 fn push_eval_result(pending: &EvalResultPending, dropped: &AtomicU64, token: u64, result: String) {
     let mut queue = match pending.lock() {
@@ -130,15 +139,15 @@ fn push_eval_result(pending: &EvalResultPending, dropped: &AtomicU64, token: u64
     };
     while queue.len() >= MAX_EVAL_PENDING {
         dropped.fetch_add(1, Ordering::SeqCst);
-        let (evicted_token, evicted_result) = queue.remove(0);
+        let (evicted_token, evicted_result) = queue.pop_front().expect("queue len checked");
         eprintln!(
             "tkwry: dropping oldest eval result (pending queue full at {MAX_EVAL_PENDING} events)"
         );
         if evicted_result.is_some() {
-            queue.push((evicted_token, None));
+            queue.push_back((evicted_token, None));
         }
     }
-    queue.push((token, Some(result)));
+    queue.push_back((token, Some(result)));
 }
 
 /// Wake the Tk main loop (pipe byte; drained by Python ``after`` pump).
@@ -235,13 +244,22 @@ fn wait_sync_hook<T: Copy>(
                 .and_then(|started_at| *started_at)
                 .map(|started_at| started_at + handler_timeout)
                 .unwrap_or_else(|| Instant::now() + handler_timeout);
-            let remaining = handler_deadline.saturating_duration_since(Instant::now());
+            let remaining = handler_deadline
+                .min(absolute_deadline)
+                .saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 slot.cancelled.store(true, Ordering::SeqCst);
-                eprintln!(
-                    "tkwry: {label} handler timed out after {}s",
-                    handler_timeout.as_secs()
-                );
+                if Instant::now() >= absolute_deadline {
+                    eprintln!(
+                        "tkwry: {label} timed out after {}s total",
+                        SYNC_HOOK_MAX_WAIT.as_secs()
+                    );
+                } else {
+                    eprintln!(
+                        "tkwry: {label} handler timed out after {}s",
+                        handler_timeout.as_secs()
+                    );
+                }
                 return default;
             }
             let wait_for = remaining.min(SYNC_HOOK_POLL_INTERVAL);
@@ -314,13 +332,11 @@ fn enqueue_nav_sync_hook(
             true
         }
     });
-    while queue.len() >= MAX_SYNC_HOOK_PENDING {
-        let (_, old_slot) = queue.remove(0);
-        old_slot.cancelled.store(true, Ordering::SeqCst);
-        resolve_sync_hook(&old_slot, false);
+    if queue.len() >= MAX_SYNC_HOOK_PENDING {
         eprintln!(
-            "tkwry: dropping oldest navigation sync hook (queue full at {MAX_SYNC_HOOK_PENDING})"
+            "tkwry: rejecting navigation sync hook (queue full at {MAX_SYNC_HOOK_PENDING})"
         );
+        return false;
     }
     queue.push((url, slot));
     true
@@ -347,13 +363,11 @@ fn enqueue_newwin_sync_hook(
             true
         }
     });
-    while queue.len() >= MAX_SYNC_HOOK_PENDING {
-        let (_, old_slot) = queue.remove(0);
-        old_slot.cancelled.store(true, Ordering::SeqCst);
-        resolve_sync_hook(&old_slot, NewWindowResponse::Deny);
+    if queue.len() >= MAX_SYNC_HOOK_PENDING {
         eprintln!(
-            "tkwry: dropping oldest new-window sync hook (queue full at {MAX_SYNC_HOOK_PENDING})"
+            "tkwry: rejecting new-window sync hook (queue full at {MAX_SYNC_HOOK_PENDING})"
         );
+        return false;
     }
     queue.push((url, slot));
     true
@@ -433,7 +447,7 @@ fn prune_stale_eval_callbacks(
 
 fn set_listening_and_clear_queue<T>(
     listening: &AtomicBool,
-    pending: &Arc<Mutex<Vec<T>>>,
+    pending: &Arc<Mutex<VecDeque<T>>>,
     enabled: bool,
 ) -> PyResult<()> {
     // Hold the queue lock across store+clear so push_if_listening cannot insert
@@ -446,16 +460,16 @@ fn set_listening_and_clear_queue<T>(
     Ok(())
 }
 
-fn drain_queue<T>(pending: &Arc<Mutex<Vec<T>>>) -> PyResult<Vec<T>> {
+fn drain_queue<T>(pending: &Arc<Mutex<VecDeque<T>>>) -> PyResult<Vec<T>> {
     pending
         .lock()
-        .map(|mut queue| std::mem::take(&mut *queue))
+        .map(|mut queue| queue.drain(..).collect())
         .map_err(|_| queue_lock_poisoned())
 }
 
 fn push_listening_py<T>(
     listening: &AtomicBool,
-    pending: &Arc<Mutex<Vec<T>>>,
+    pending: &Arc<Mutex<VecDeque<T>>>,
     dropped: &AtomicU64,
     item: T,
     max: usize,
@@ -469,7 +483,7 @@ fn push_listening_py<T>(
         max,
         label,
         None,
-        |_: &mut Vec<T>| false,
+        |_: &mut VecDeque<T>| false,
     )
     .map_err(|()| queue_lock_poisoned())
 }
@@ -561,18 +575,18 @@ enum DragDropEvent {
 }
 
 type PyCallback = Arc<Mutex<Option<Py<PyAny>>>>;
-type PageLoadPending = Arc<Mutex<Vec<(PageLoadEvent, String)>>>;
-type IpcPending = Arc<Mutex<Vec<String>>>;
-type TitlePending = Arc<Mutex<Vec<String>>>;
+type PageLoadPending = Arc<Mutex<VecDeque<(PageLoadEvent, String)>>>;
+type IpcPending = Arc<Mutex<VecDeque<String>>>;
+type TitlePending = Arc<Mutex<VecDeque<String>>>;
 type DragDropPendingItem = (DragDropEvent, Vec<String>, (i32, i32));
-type DragDropPending = Arc<Mutex<Vec<DragDropPendingItem>>>;
+type DragDropPending = Arc<Mutex<VecDeque<DragDropPendingItem>>>;
 type EvalCallbackEntry = (Py<PyAny>, Instant);
 type EvalCallbackMap = Arc<Mutex<HashMap<u64, EvalCallbackEntry>>>;
 type DrainedEvalCallback = (u64, Py<PyAny>, Option<String>);
 type NavSyncPending = Arc<Mutex<Vec<(String, Arc<SyncHookSlot<bool>>)>>>;
 type NewWinSyncPending = Arc<Mutex<Vec<(String, Arc<SyncHookSlot<NewWindowResponse>>)>>>;
 
-fn try_compact_title_queue(queue: &mut Vec<String>) -> bool {
+fn try_compact_title_queue(queue: &mut VecDeque<String>) -> bool {
     for index in 0..queue.len().saturating_sub(1) {
         if queue[index] == queue[index + 1] {
             queue.remove(index);
@@ -582,7 +596,7 @@ fn try_compact_title_queue(queue: &mut Vec<String>) -> bool {
     false
 }
 
-fn try_compact_ipc_queue(queue: &mut Vec<String>) -> bool {
+fn try_compact_ipc_queue(queue: &mut VecDeque<String>) -> bool {
     for index in 0..queue.len().saturating_sub(1) {
         if queue[index] == queue[index + 1] {
             queue.remove(index);
@@ -592,22 +606,31 @@ fn try_compact_ipc_queue(queue: &mut Vec<String>) -> bool {
     false
 }
 
-fn try_compact_page_load_queue(queue: &mut Vec<(PageLoadEvent, String)>) -> bool {
+fn try_compact_page_load_queue(queue: &mut VecDeque<(PageLoadEvent, String)>) -> bool {
     if queue.len() >= 2
         && matches!(queue[0], (PageLoadEvent::Started, _))
         && matches!(queue[1], (PageLoadEvent::Started, _))
     {
-        queue.remove(0);
+        queue.pop_front();
         return true;
     }
     if !queue.is_empty() && matches!(queue[0], (PageLoadEvent::Finished, _)) {
-        queue.remove(0);
+        queue.pop_front();
         return true;
+    }
+    for index in 0..queue.len().saturating_sub(1) {
+        if matches!(queue[index], (PageLoadEvent::Started, _))
+            && matches!(queue[index + 1], (PageLoadEvent::Finished, _))
+            && queue[index].1 == queue[index + 1].1
+        {
+            queue.remove(index);
+            return true;
+        }
     }
     false
 }
 
-fn try_compact_drag_drop_queue(queue: &mut Vec<DragDropPendingItem>) -> bool {
+fn try_compact_drag_drop_queue(queue: &mut VecDeque<DragDropPendingItem>) -> bool {
     for index in 0..queue.len().saturating_sub(1) {
         if matches!(queue[index].0, DragDropEvent::Over)
             && matches!(queue[index + 1].0, DragDropEvent::Over)
@@ -642,7 +665,7 @@ fn push_title_event(
         dropped.fetch_add(1, Ordering::SeqCst);
         return Ok(());
     }
-    if queue.last() == Some(&item) {
+    if queue.back() == Some(&item) {
         if let Some(fd) = wakeup {
             notify_wakeup(fd);
         }
@@ -655,7 +678,7 @@ fn push_title_event(
         "title-changed",
         try_compact_title_queue,
     );
-    queue.push(item);
+    queue.push_back(item);
     if let Some(fd) = wakeup {
         notify_wakeup(fd);
     }
@@ -929,12 +952,12 @@ impl WebView {
 
         let nav_cb: PyCallback = Arc::new(Mutex::new(on_navigation));
         let newwin_cb: PyCallback = Arc::new(Mutex::new(on_new_window));
-        let page_load_pending: PageLoadPending = Arc::new(Mutex::new(Vec::new()));
-        let ipc_pending: IpcPending = Arc::new(Mutex::new(Vec::new()));
-        let title_pending: TitlePending = Arc::new(Mutex::new(Vec::new()));
-        let drag_drop_pending: DragDropPending = Arc::new(Mutex::new(Vec::new()));
+        let page_load_pending: PageLoadPending = Arc::new(Mutex::new(VecDeque::new()));
+        let ipc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
+        let title_pending: TitlePending = Arc::new(Mutex::new(VecDeque::new()));
+        let drag_drop_pending: DragDropPending = Arc::new(Mutex::new(VecDeque::new()));
         let eval_callbacks: EvalCallbackMap = Arc::new(Mutex::new(HashMap::new()));
-        let eval_result_pending: EvalResultPending = Arc::new(Mutex::new(Vec::new()));
+        let eval_result_pending: EvalResultPending = Arc::new(Mutex::new(VecDeque::new()));
         // Async queues start disabled; Python enables them when a handler is set.
         let page_load_listening = Arc::new(AtomicBool::new(false));
         let ipc_listening = Arc::new(AtomicBool::new(false));
@@ -1719,22 +1742,22 @@ mod tests {
 
     #[test]
     fn push_eval_result_evicts_oldest_and_delivers_new_result_when_pending_full() {
-        let pending = Arc::new(Mutex::new(Vec::new()));
+        let pending = Arc::new(Mutex::new(VecDeque::new()));
         let dropped = AtomicU64::new(0);
         for token in 0..MAX_EVAL_PENDING as u64 {
             push_eval_result(&pending, &dropped, token, format!("r{token}"));
         }
-        push_eval_result(&pending, &dropped, 999, "lost".into());
+        push_eval_result(&pending, &dropped, 9999, "new".into());
         assert!(dropped.load(Ordering::SeqCst) >= 1);
         let queue = pending.lock().unwrap();
         assert_eq!(queue.len(), MAX_EVAL_PENDING);
-        assert_eq!(queue.last(), Some(&(999, Some("lost".to_string()))));
+        assert_eq!(queue.back(), Some(&(9999, Some("new".to_string()))));
     }
 
     #[test]
     fn push_if_listening_drops_oldest_when_full() {
         let listening = AtomicBool::new(true);
-        let pending: Arc<Mutex<Vec<i32>>> = Arc::new(Mutex::new(Vec::new()));
+        let pending: Arc<Mutex<VecDeque<i32>>> = Arc::new(Mutex::new(VecDeque::new()));
         let dropped = AtomicU64::new(0);
         for value in 0..=4_i32 {
             assert!(push_if_listening(
@@ -1745,18 +1768,18 @@ mod tests {
                 4,
                 "test",
                 None,
-                |_: &mut Vec<i32>| false,
+                |_: &mut VecDeque<i32>| false,
             )
             .is_ok());
         }
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
-        assert_eq!(*pending.lock().unwrap(), vec![1, 2, 3, 4]);
+        assert_eq!(*pending.lock().unwrap(), VecDeque::from([1, 2, 3, 4]));
     }
 
     #[test]
     fn push_if_listening_counts_drop_when_not_listening() {
         let listening = AtomicBool::new(false);
-        let pending: Arc<Mutex<Vec<i32>>> = Arc::new(Mutex::new(Vec::new()));
+        let pending: Arc<Mutex<VecDeque<i32>>> = Arc::new(Mutex::new(VecDeque::new()));
         let dropped = AtomicU64::new(0);
         assert!(push_if_listening(
             &listening,
@@ -1766,7 +1789,7 @@ mod tests {
             4,
             "test",
             None,
-            |_: &mut Vec<i32>| false,
+            |_: &mut VecDeque<i32>| false,
         )
         .is_ok());
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
@@ -1775,20 +1798,30 @@ mod tests {
 
     #[test]
     fn try_compact_title_queue_removes_adjacent_duplicates() {
-        let mut queue = vec!["a".into(), "a".into(), "b".into()];
+        let mut queue = VecDeque::from(["a".into(), "a".into(), "b".into()]);
         assert!(try_compact_title_queue(&mut queue));
-        assert_eq!(queue, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(queue, VecDeque::from(["a".to_string(), "b".to_string()]));
     }
 
     #[test]
     fn try_compact_page_load_queue_drops_stale_started() {
-        let mut queue = vec![
+        let mut queue = VecDeque::from([
             (PageLoadEvent::Started, "https://old.example/".into()),
             (PageLoadEvent::Started, "https://new.example/".into()),
-        ];
+        ]);
         assert!(try_compact_page_load_queue(&mut queue));
         assert_eq!(queue.len(), 1);
         assert_eq!(queue[0].1, "https://new.example/");
+    }
+
+    #[test]
+    fn try_compact_page_load_queue_drops_orphan_finished() {
+        let mut queue = VecDeque::from([(
+            PageLoadEvent::Finished,
+            "https://old.example/".into(),
+        )]);
+        assert!(try_compact_page_load_queue(&mut queue));
+        assert!(queue.is_empty());
     }
 
     #[test]
@@ -1811,6 +1844,25 @@ mod tests {
         );
         worker.join().unwrap();
         assert!(result);
+    }
+
+    #[test]
+    fn wait_sync_hook_enforces_absolute_deadline_after_handler_starts() {
+        let slot = Arc::new(SyncHookSlot::new());
+        mark_sync_hook_started(&slot);
+        if let Ok(mut started_at) = slot.handler_started_at.lock() {
+            *started_at = Some(Instant::now() - SYNC_HOOK_MAX_WAIT);
+        }
+        let result = wait_sync_hook(
+            &slot,
+            Duration::from_secs(30),
+            Duration::from_secs(30),
+            "test",
+            false,
+            None,
+        );
+        assert!(!result);
+        assert!(slot.cancelled.load(Ordering::SeqCst));
     }
 
     #[test]
