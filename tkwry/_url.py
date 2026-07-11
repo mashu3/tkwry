@@ -343,12 +343,50 @@ def _looks_like_file_path(url: str) -> bool:
         return True
     if _looks_like_filename(url):
         return True
-    if _contains_non_ascii(url):
-        return True
     # Bare relative segment without dots (e.g. README) — not a network host.
-    if ":" not in url and "." not in url:
+    if ":" not in url and "." not in url and url.isascii():
         return True
     return False
+
+
+def _resolve_local_path_for_file_url(parsed) -> str:
+    """Return the local filesystem path for a parsed ``file:`` URL."""
+    if parsed.netloc:
+        if parsed.netloc in ("", "localhost"):
+            pathname = url2pathname(unquote(parsed.path))
+            pathname = _strip_leading_slash_from_windows_path(pathname)
+            pathname = _windows_drive_root_path(pathname)
+            if not pathname:
+                raise ValueError("file URL must include a path")
+            return pathname
+        if _is_windows_drive_netloc(parsed.netloc):
+            pathname = f"{parsed.netloc}{parsed.path}"
+            pathname = _windows_drive_root_path(pathname)
+            if not pathname or pathname.endswith(":"):
+                raise ValueError("file URL must include a path")
+            return pathname
+        server = parsed.netloc
+        path = unquote(parsed.path)
+        if not path or path == "/":
+            raise ValueError("file URL must include a path")
+        if os.name != "nt":
+            raise ValueError(
+                "UNC file URLs "
+                f"(file://{server}/...) are not supported on this platform"
+            )
+        return f"\\\\{server}{path.replace('/', os.sep)}"
+
+    pathname = url2pathname(unquote(parsed.path))
+    pathname = _strip_leading_slash_from_windows_path(pathname)
+    pathname = _windows_drive_root_path(pathname)
+    if not pathname:
+        raise ValueError("file URL must include a path")
+    return pathname
+
+
+def _require_local_path_exists(path: str, *, display: str) -> None:
+    if not os.path.exists(path):
+        raise ValueError(f"file URL path does not exist: {display}")
 
 
 def _is_windows_drive_netloc(netloc: str) -> bool:
@@ -383,44 +421,27 @@ def _file_uri_from_path(path: str) -> str:
     expanded = os.path.expanduser(path.strip())
     expanded = _strip_leading_slash_from_windows_path(expanded)
     expanded = _windows_drive_root_path(expanded)
+    _require_local_path_exists(expanded, display=expanded)
     # Do not follow symlinks; resolve() can load a different file than requested.
     return Path(expanded).absolute().as_uri()
 
 
 def _normalize_unc_file_url(parsed) -> str:
-    server = parsed.netloc
-    path = unquote(parsed.path)
-    if not path or path == "/":
-        raise ValueError("file URL must include a path")
-    if os.name != "nt":
-        raise ValueError(
-            f"UNC file URLs (file://{server}/...) are not supported on this platform"
-        )
-    unc = f"\\\\{server}{path.replace('/', os.sep)}"
-    if not os.path.exists(unc):
-        raise ValueError(f"file URL path does not exist: file://{server}{parsed.path}")
+    unc = _resolve_local_path_for_file_url(parsed)
+    _require_local_path_exists(unc, display=f"file://{parsed.netloc}{parsed.path}")
     return urlunparse(parsed)
 
 
 def _normalize_file_url(url: str) -> str:
     parsed = urlparse(url)
-    if parsed.netloc:
-        if parsed.netloc in ("", "localhost"):
-            pass
-        elif _is_windows_drive_netloc(parsed.netloc):
-            pathname = f"{parsed.netloc}{parsed.path}"
-            pathname = _windows_drive_root_path(pathname)
-            if not pathname or pathname.endswith(":"):
-                raise ValueError("file URL must include a path")
-            return _file_uri_from_path(pathname)
-        else:
-            return _normalize_unc_file_url(parsed)
-    pathname = url2pathname(unquote(parsed.path))
-    pathname = _strip_leading_slash_from_windows_path(pathname)
-    pathname = _windows_drive_root_path(pathname)
-    if not pathname:
-        raise ValueError("file URL must include a path")
-    return _file_uri_from_path(pathname)
+    local_path = _resolve_local_path_for_file_url(parsed)
+    if (
+        parsed.netloc
+        and parsed.netloc not in ("", "localhost")
+        and not _is_windows_drive_netloc(parsed.netloc)
+    ):
+        return _normalize_unc_file_url(parsed)
+    return _file_uri_from_path(local_path)
 
 
 def _normalize_url(url: str) -> str:
@@ -504,6 +525,14 @@ def _validate_http_url(parsed) -> None:
     _validate_http_port(parsed)
 
 
+def _validate_file_url(url: str) -> None:
+    parsed = urlparse(url)
+    if not parsed.path or parsed.path == "/":
+        raise ValueError("file URL must include a path")
+    local_path = _resolve_local_path_for_file_url(parsed)
+    _require_local_path_exists(local_path, display=url)
+
+
 def _validate_url(url: str) -> None:
     if "\x00" in url:
         raise ValueError("invalid URL")
@@ -515,5 +544,5 @@ def _validate_url(url: str) -> None:
         raise ValueError(f"unsupported URL scheme: {parsed.scheme!r}")
     if parsed.scheme in {"http", "https"}:
         _validate_http_url(parsed)
-    if parsed.scheme == "file" and (not parsed.path or parsed.path == "/"):
-        raise ValueError("file URL must include a path")
+    if parsed.scheme == "file":
+        _validate_file_url(url)

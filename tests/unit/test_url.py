@@ -327,3 +327,23 @@ def test_validate_accepts_underscore_hostname() -> None:
     assert url == "https://my_host.example.com"
     _validate_url(url)
     _validate_url("https://my_host.example.com")
+
+
+def test_normalize_rejects_nonexistent_local_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="does not exist"):
+        _normalize_url("missing.html")
+
+
+def test_validate_rejects_nonexistent_file_uri(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.html"
+    file_url = missing.absolute().as_uri()
+    with pytest.raises(ValueError, match="does not exist"):
+        _validate_url(file_url)
+
+
+def test_bare_unicode_without_extension_is_not_file_path() -> None:
+    with pytest.raises(ValueError, match="invalid URL host"):
+        _validate_url(_normalize_url("日本語"))
