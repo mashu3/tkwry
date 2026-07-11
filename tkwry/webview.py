@@ -64,6 +64,7 @@ _SyncHookItem: TypeAlias = tuple[
     object,
     threading.Event,
     list[bool],
+    list[bool],
 ]
 _EVAL_CALLBACK_TIMEOUT_S = 30.0
 _SYNC_HOOK_TIMEOUT_S = 30.0
@@ -150,6 +151,69 @@ def _pump_toplevel_wakeup_pipe(toplevel: tk.Misc) -> None:
         pass
 
 
+def _drain_toplevel_sync_hooks(toplevel: tk.Misc) -> None:
+    """Drain pending navigation/new-window hooks for all WebViews on *toplevel*."""
+    refs = getattr(toplevel, "_tkwry_sync_hook_webviews", None)
+    if not refs:
+        return
+    live: list[weakref.ReferenceType[WebView]] = []
+    for ref in refs:
+        web = ref()
+        if web is None:
+            continue
+        live.append(ref)
+        if not web._destroyed:
+            web._drain_sync_hooks()
+    if live:
+        setattr(toplevel, "_tkwry_sync_hook_webviews", live)
+    elif hasattr(toplevel, "_tkwry_sync_hook_webviews"):
+        delattr(toplevel, "_tkwry_sync_hook_webviews")
+
+
+def _ensure_tk_wakeup_fileevent(toplevel: tk.Misc) -> None:
+    """Register a Tcl readable handler so sync hooks drain without polling delay."""
+    if sys.platform == "darwin" or getattr(toplevel, "_tkwry_wake_fileevent", False):
+        return
+    read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
+    if read_fd is None:
+        return
+
+    def _on_wake(_fd: int, _mask: int) -> None:
+        _pump_toplevel_wakeup_pipe(toplevel)
+        _drain_toplevel_sync_hooks(toplevel)
+
+    try:
+        toplevel.createfilehandler(read_fd, tk.READABLE, _on_wake)
+        toplevel._tkwry_wake_fileevent = True
+    except (tk.TclError, OSError, ValueError):
+        pass
+
+
+def _register_sync_hook_webview(toplevel: tk.Misc, web: WebView) -> None:
+    refs: list[weakref.ReferenceType[WebView]] | None = getattr(
+        toplevel, "_tkwry_sync_hook_webviews", None
+    )
+    if refs is None:
+        refs = []
+        setattr(toplevel, "_tkwry_sync_hook_webviews", refs)
+    refs.append(weakref.ref(web))
+
+
+def _unregister_sync_hook_webview(web: WebView) -> None:
+    if sys.platform == "darwin":
+        return
+    try:
+        toplevel = web._frame.winfo_toplevel()
+    except tk.TclError:
+        return
+    refs = getattr(toplevel, "_tkwry_sync_hook_webviews", None)
+    if not refs:
+        return
+    refs[:] = [entry for entry in refs if entry() is not web]
+    if not refs and hasattr(toplevel, "_tkwry_sync_hook_webviews"):
+        delattr(toplevel, "_tkwry_sync_hook_webviews")
+
+
 def _release_tk_wakeup_pipe(toplevel: tk.Misc) -> None:
     """Close the Win/Linux sync-hook wakeup pipe when the last user is gone."""
     users = getattr(toplevel, "_tkwry_wake_pipe_users", None)
@@ -159,8 +223,14 @@ def _release_tk_wakeup_pipe(toplevel: tk.Misc) -> None:
     if users > 0:
         setattr(toplevel, "_tkwry_wake_pipe_users", users)
         return
+    read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
+    if read_fd is not None and getattr(toplevel, "_tkwry_wake_fileevent", False):
+        try:
+            toplevel.deletefilehandler(read_fd)
+        except tk.TclError:
+            pass
     for fd in (
-        getattr(toplevel, "_tkwry_wake_read_fd", None),
+        read_fd,
         getattr(toplevel, "_tkwry_wake_write_fd", None),
     ):
         if fd is not None:
@@ -172,6 +242,8 @@ def _release_tk_wakeup_pipe(toplevel: tk.Misc) -> None:
         "_tkwry_wake_read_fd",
         "_tkwry_wake_write_fd",
         "_tkwry_wake_pipe_users",
+        "_tkwry_wake_fileevent",
+        "_tkwry_sync_hook_webviews",
     ):
         if hasattr(toplevel, attr):
             delattr(toplevel, attr)
@@ -551,6 +623,7 @@ class WebView:
             frame = self._frame
             after = frame.after
         except (AttributeError, tk.TclError):
+            self._teardown_native_if_alive()
             return
 
         tk_thread_id = self._tk_thread_id
@@ -566,7 +639,34 @@ class WebView:
         try:
             after(0, _run)
         except (tk.TclError, RuntimeError):
+            self._teardown_native_if_alive()
+
+    def _teardown_native_if_alive(self) -> None:
+        """Release the native WebView when Tk teardown is impossible."""
+        if self._destroyed:
+            return
+        self._destroyed = True
+        self._event_poll_active = False
+        self._eval_epoch += 1
+        self._pending_eval_callbacks = 0
+        self._pending_eval_tokens.clear()
+        self._native_eval_wait.clear()
+        self._abort_sync_hooks()
+        try:
+            _release_frame_host(self._frame, self)
+        except Exception:
             pass
+        _unregister_sync_hook_webview(self)
+        native = self._webview
+        if native is not None:
+            # Drop the Py handle; Rust Drop tears down without owner-thread checks.
+            self._webview = None
+            del native
+        if sys.platform == "darwin":
+            try:
+                _unregister_macos_webview(self)
+            except Exception:
+                pass
 
     def destroy(self) -> None:
         """Hide and release the native webview without destroying the host frame.
@@ -594,6 +694,7 @@ class WebView:
         self._ready_callbacks.clear()
         _release_frame_host(self._frame, self)
         self._unbind_frame_events()
+        _unregister_sync_hook_webview(self)
         native = self._webview
         if native is not None:
             try:
@@ -1224,6 +1325,8 @@ class WebView:
                 "_tkwry_wake_pipe_users",
                 getattr(toplevel, "_tkwry_wake_pipe_users", 0) + 1,
             )
+            _ensure_tk_wakeup_fileevent(toplevel)
+            _register_sync_hook_webview(toplevel, self)
         self._tk_wakeup_write_fd = write_fd
         native = self._webview
         if native is not None and write_fd is not None:
@@ -1249,21 +1352,31 @@ class WebView:
         done = threading.Event()
         result: list[object] = [default]
         cancelled = [False]
-        self._sync_hook_queue.put((invoke, result, default, done, cancelled))
+        started = [False]
+        self._sync_hook_queue.put((invoke, result, default, done, cancelled, started))
+        self._ensure_event_poll()
         self._wake_tk_for_sync_hook()
-        if not done.wait(timeout=_SYNC_HOOK_TIMEOUT_S):
-            cancelled[0] = True
-            print(
-                f"tkwry: sync hook timed out after {_SYNC_HOOK_TIMEOUT_S:g}s",
-                file=sys.stderr,
-            )
-            return default
+        deadline = time.monotonic() + _SYNC_HOOK_TIMEOUT_S
+        while not done.is_set():
+            if not started[0]:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    cancelled[0] = True
+                    print(
+                        f"tkwry: sync hook timed out after {_SYNC_HOOK_TIMEOUT_S:g}s",
+                        file=sys.stderr,
+                    )
+                    return default
+                done.wait(timeout=min(0.05, remaining))
+            else:
+                done.wait(timeout=0.05)
+            self._wake_tk_for_sync_hook()
         return cast(_T, result[0])
 
     def _drain_sync_hooks(self) -> None:
         while True:
             try:
-                invoke, result, default, done, cancelled = (
+                invoke, result, default, done, cancelled, started = (
                     self._sync_hook_queue.get_nowait()
                 )
             except queue.Empty:
@@ -1271,6 +1384,7 @@ class WebView:
             if cancelled[0] or self._destroyed:
                 result[0] = default
             else:
+                started[0] = True
                 try:
                     result[0] = invoke()
                 except Exception:
@@ -1281,7 +1395,7 @@ class WebView:
     def _abort_sync_hooks(self) -> None:
         while True:
             try:
-                _invoke, result, default, done, cancelled = (
+                _invoke, result, default, done, cancelled, _started = (
                     self._sync_hook_queue.get_nowait()
                 )
             except queue.Empty:

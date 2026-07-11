@@ -82,6 +82,51 @@ def test_schedule_destroy_on_tk_thread_runs_destroy(
     assert destroyed == [True]
 
 
+def test_schedule_destroy_falls_back_when_after_unavailable(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    teardown_calls: list[bool] = []
+
+    def track_teardown() -> None:
+        teardown_calls.append(True)
+
+    monkeypatch.setattr(web, "_teardown_native_if_alive", track_teardown, raising=False)
+
+    def broken_after(_delay: int, _func) -> str:
+        raise tk.TclError("application has been destroyed")
+
+    monkeypatch.setattr(frame, "after", broken_after, raising=False)
+    web._schedule_destroy_on_tk_thread()
+
+    assert teardown_calls == [True]
+
+
+def test_teardown_native_if_alive_drops_native_without_destroy(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    native = object()
+    web._webview = native  # type: ignore[assignment]
+    destroy_calls: list[bool] = []
+
+    class FakeNative:
+        def destroy(self) -> None:
+            destroy_calls.append(True)
+
+    web._webview = FakeNative()  # type: ignore[assignment]
+
+    web._teardown_native_if_alive()
+
+    assert web._destroyed is True
+    assert web._webview is None
+    assert destroy_calls == []
+
+
 @pytest.mark.skipif(sys.platform == "darwin", reason="macOS uses a separate pipe")
 def test_destroy_closes_wakeup_pipe_when_last_user(tk_root) -> None:
     frame = tk.Frame(tk_root)

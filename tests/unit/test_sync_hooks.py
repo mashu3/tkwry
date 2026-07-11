@@ -127,3 +127,41 @@ def test_sync_hook_timeout_skips_late_handler(tk_root, monkeypatch) -> None:
     assert result_holder == [False]
     assert seen == []
     web.destroy()
+
+
+def test_sync_hook_timeout_only_before_handler_starts(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time
+
+    _frame, web = _make_web(tk_root)
+    started = threading.Event()
+
+    def slow_handler(url: str) -> bool:
+        started.set()
+        time.sleep(0.15)
+        return True
+
+    web.set_on_navigation(slow_handler)
+    web._ensure_tk_wakeup_pipe()
+    web._ensure_event_poll()
+    monkeypatch.setattr("tkwry.webview._SYNC_HOOK_TIMEOUT_S", 0.05)
+
+    result_holder: list[bool] = []
+
+    def worker() -> None:
+        result_holder.append(web._native_navigation("https://example.com/slow"))
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    for _ in range(200):
+        tk_root.update_idletasks()
+        tk_root.update()
+        web._poll_events()
+        if not thread.is_alive():
+            break
+
+    thread.join(timeout=2.0)
+    assert result_holder == [True]
+    assert started.is_set()
+    web.destroy()
