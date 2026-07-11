@@ -968,8 +968,9 @@ class WebView:
         """Return overflow drop counts since the last call.
 
         Returns ``(ipc, page_load, title, drag_drop, eval)``. Each internal
-        queue caps at 256 pending items; additional events are discarded and
-        counted here so applications can detect handler backlogs.
+        Each internal queue caps at 2048 pending items; additional events are
+        compacted or discarded and counted here so applications can detect
+        handler backlogs.
         """
         self._require_tk_thread()
         local = self._take_local_queue_drop_counts()
