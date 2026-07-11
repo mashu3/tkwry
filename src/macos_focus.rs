@@ -24,6 +24,7 @@ use wry::WebViewExtMacOS;
 
 pub struct FocusSyncGuard {
     click_monitor: Retained<AnyObject>,
+    keydown_monitor: Retained<AnyObject>,
     key_observer: Retained<AnyObject>,
 }
 
@@ -31,6 +32,7 @@ impl Drop for FocusSyncGuard {
     fn drop(&mut self) {
         unsafe {
             NSEvent::removeMonitor(&self.click_monitor);
+            NSEvent::removeMonitor(&self.keydown_monitor);
             NSNotificationCenter::defaultCenter().removeObserver(&self.key_observer);
         }
     }
@@ -103,6 +105,47 @@ pub fn install_focus_sync(
         unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(click_mask, &click_block) }
             .ok_or("failed to install NSEvent local monitor")?;
 
+    let keydown_block = {
+        let inner = inner.clone();
+        let web_wants = web_wants_keyboard.clone();
+        let unfocus = mac_tk_unfocus.clone();
+        let wakeup = wakeup_write_fd.clone();
+        RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+            let event_ref = unsafe { event.as_ref() };
+            if !web_wants.load(Ordering::SeqCst) {
+                return event.as_ptr();
+            }
+            // Tab and other navigation keys may not reach Tcl bind_all (VoiceOver, etc.).
+            const TAB_KEY_CODE: u16 = 48;
+            let key_code = event_ref.keyCode();
+            if key_code == TAB_KEY_CODE {
+                unfocus.store(true, Ordering::SeqCst);
+                notify_wakeup(&wakeup);
+                return event.as_ptr();
+            }
+            if let Ok(guard) = inner.lock() {
+                if let Some(ref wv) = *guard {
+                    let Some(wry_point) = current_mouse_wry_point(parent_ns_view) else {
+                        unfocus.store(true, Ordering::SeqCst);
+                        notify_wakeup(&wakeup);
+                        return event.as_ptr();
+                    };
+                    if !point_in_wry_bounds(wv, wry_point) {
+                        unfocus.store(true, Ordering::SeqCst);
+                        notify_wakeup(&wakeup);
+                    }
+                }
+            }
+            event.as_ptr()
+        })
+    };
+
+    let keydown_mask = NSEventMask::KeyDown;
+    let keydown_monitor = unsafe {
+        NSEvent::addLocalMonitorForEventsMatchingMask_handler(keydown_mask, &keydown_block)
+    }
+    .ok_or("failed to install NSEvent keydown monitor")?;
+
     let key_block = {
         let inner = inner.clone();
         let web_wants = web_wants_keyboard.clone();
@@ -143,6 +186,7 @@ pub fn install_focus_sync(
 
     Ok(FocusSyncGuard {
         click_monitor,
+        keydown_monitor,
         key_observer,
     })
 }
