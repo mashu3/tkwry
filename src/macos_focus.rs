@@ -19,7 +19,8 @@ use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSEvent, NSEventMask, NSView, NSWindowDidBecomeKeyNotification};
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSOperationQueue, NSPoint};
-use wry::dpi::{LogicalPosition, LogicalSize, Position, Size};
+use wry::dpi::{LogicalPosition, LogicalSize};
+use wry::WebViewExtMacOS;
 
 pub struct FocusSyncGuard {
     click_monitor: Retained<AnyObject>,
@@ -76,25 +77,19 @@ pub fn install_focus_sync(
             let parent_point = parent.convertPoint_fromView(event_ref.locationInWindow(), None);
             let wry_point = parent_point_to_wry(parent, parent_point);
 
-            let in_web = if let Ok(guard) = inner.lock() {
-                guard
-                    .as_ref()
-                    .is_some_and(|wv| point_in_wry_bounds(wv, wry_point))
-            } else {
-                false
-            };
-
-            if in_web {
-                web_wants.store(true, Ordering::SeqCst);
-                unfocus.store(true, Ordering::SeqCst);
-                if let Ok(guard) = inner.lock() {
-                    if let Some(ref wv) = *guard {
-                        let _ = wv.focus();
+            if let Ok(guard) = inner.lock() {
+                if let Some(ref wv) = *guard {
+                    if point_in_wry_bounds(wv, wry_point) {
+                        web_wants.store(true, Ordering::SeqCst);
+                        unfocus.store(true, Ordering::SeqCst);
+                        focus_webview(wv, "focus");
+                        notify_wakeup(&wakeup);
+                    } else if web_wants.load(Ordering::SeqCst) {
+                        release_web_focus_locked(wv, &web_wants);
                     }
+                } else if web_wants.load(Ordering::SeqCst) {
+                    web_wants.store(false, Ordering::SeqCst);
                 }
-                notify_wakeup(&wakeup);
-            } else if web_wants.load(Ordering::SeqCst) {
-                release_web_focus(&inner, &web_wants);
             }
 
             event.as_ptr()
@@ -119,11 +114,20 @@ pub fn install_focus_sync(
             }
             if let Ok(guard) = inner.lock() {
                 if let Some(ref wv) = *guard {
-                    let _ = wv.focus();
+                    let Some(wry_point) = current_mouse_wry_point(parent_ns_view) else {
+                        return;
+                    };
+                    if point_in_wry_bounds(wv, wry_point) {
+                        focus_webview(wv, "focus on window key");
+                        unfocus.store(true, Ordering::SeqCst);
+                        notify_wakeup(&wakeup);
+                    } else {
+                        release_web_focus_locked(wv, &web_wants);
+                    }
+                } else {
+                    web_wants.store(false, Ordering::SeqCst);
                 }
             }
-            unfocus.store(true, Ordering::SeqCst);
-            notify_wakeup(&wakeup);
         })
     };
 
@@ -154,13 +158,56 @@ pub fn hit_test_wry_point(inner: &Arc<Mutex<Option<wry::WebView>>>, x: f64, y: f
     point_in_wry_bounds(wv, NSPoint::new(x, y))
 }
 
-/// Return keyboard from the webview to Tk **only when the webview owns it**.
-fn release_web_focus(inner: &Arc<Mutex<Option<wry::WebView>>>, web_wants: &Arc<AtomicBool>) {
+fn focus_webview(wv: &wry::WebView, label: &str) {
+    if let Err(err) = wv.focus() {
+        eprintln!("tkwry: macOS {label} failed: {err}");
+    }
+}
+
+fn focus_webview_parent(wv: &wry::WebView, label: &str) {
+    if let Err(err) = wv.focus_parent() {
+        eprintln!("tkwry: macOS {label} failed: {err}");
+    }
+}
+
+/// Return keyboard from the webview to Tk while holding the webview lock.
+fn release_web_focus_locked(wv: &wry::WebView, web_wants: &Arc<AtomicBool>) {
     web_wants.store(false, Ordering::SeqCst);
-    if let Ok(guard) = inner.lock() {
-        if let Some(ref wv) = *guard {
-            let _ = wv.focus_parent();
+    focus_webview_parent(wv, "focus_parent");
+}
+
+fn logical_bounds(wv: &wry::WebView, bounds: wry::Rect) -> (f64, f64, f64, f64) {
+    let scale = wv.ns_window().backingScaleFactor();
+    let LogicalPosition { x, y } = bounds.position.to_logical(scale);
+    let LogicalSize { width, height } = bounds.size.to_logical(scale);
+    (x, y, width, height)
+}
+
+fn wry_point_in_logical_rect(point: NSPoint, x: f64, y: f64, width: f64, height: f64) -> bool {
+    point.x >= x && point.x < x + width && point.y >= y && point.y < y + height
+}
+
+fn point_in_wry_bounds(wv: &wry::WebView, wry_point: NSPoint) -> bool {
+    let bounds = match wv.bounds() {
+        Ok(bounds) => bounds,
+        Err(err) => {
+            eprintln!("tkwry: macOS bounds query failed: {err}");
+            return false;
         }
+    };
+    let (x, y, width, height) = logical_bounds(wv, bounds);
+    wry_point_in_logical_rect(wry_point, x, y, width, height)
+}
+
+fn current_mouse_wry_point(parent_ns_view: NonNull<NSView>) -> Option<NSPoint> {
+    let _mtm = MainThreadMarker::new()?;
+    unsafe {
+        let parent = parent_ns_view.as_ref();
+        let window = parent.window()?;
+        let screen = NSEvent::mouseLocation();
+        let window_point = window.convertPointFromScreen(screen);
+        let parent_point = parent.convertPoint_fromView(window_point, None);
+        Some(parent_point_to_wry(parent, parent_point))
     }
 }
 
@@ -174,20 +221,49 @@ fn parent_point_to_wry(parent: &NSView, point: NSPoint) -> NSPoint {
     }
 }
 
-fn point_in_wry_bounds(wv: &wry::WebView, wry_point: NSPoint) -> bool {
-    let bounds = match wv.bounds() {
-        Ok(bounds) => bounds,
-        Err(_) => return false,
-    };
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let (x, y) = match bounds.position {
-        Position::Logical(LogicalPosition { x, y }) => (x, y),
-        Position::Physical(p) => (p.x as f64, p.y as f64),
-    };
-    let (width, height) = match bounds.size {
-        Size::Logical(LogicalSize { width, height }) => (width, height),
-        Size::Physical(s) => (s.width as f64, s.height as f64),
-    };
+    #[test]
+    fn wry_point_in_logical_rect_uses_top_left_space() {
+        assert!(wry_point_in_logical_rect(
+            NSPoint::new(10.0, 20.0),
+            0.0,
+            0.0,
+            100.0,
+            50.0
+        ));
+        assert!(!wry_point_in_logical_rect(
+            NSPoint::new(100.0, 20.0),
+            0.0,
+            0.0,
+            100.0,
+            50.0
+        ));
+    }
 
-    wry_point.x >= x && wry_point.x < x + width && wry_point.y >= y && wry_point.y < y + height
+    #[test]
+    fn logical_bounds_normalizes_physical_values() {
+    use wry::dpi::{PhysicalPosition, PhysicalSize, Position, Size};
+
+        let bounds = wry::Rect {
+            position: Position::Physical(PhysicalPosition::new(20, 40)),
+            size: Size::Physical(PhysicalSize::new(200, 100)),
+        };
+        let scale = 2.0;
+        let LogicalPosition { x, y } = bounds.position.to_logical(scale);
+        let LogicalSize { width, height } = bounds.size.to_logical(scale);
+        assert_eq!(x, 10.0);
+        assert_eq!(y, 20.0);
+        assert_eq!(width, 100.0);
+        assert_eq!(height, 50.0);
+        assert!(wry_point_in_logical_rect(
+            NSPoint::new(50.0, 25.0),
+            x,
+            y,
+            width,
+            height
+        ));
+    }
 }
