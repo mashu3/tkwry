@@ -8,6 +8,7 @@ dist/
 dist-test/
 build/
 target/
+vendor/
 *.egg-info/
 .ruff_cache/
 .mypy_cache/

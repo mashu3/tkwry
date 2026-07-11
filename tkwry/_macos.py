@@ -429,6 +429,20 @@ def _set_mac_webviews_input_active(
     _sync_mac_web_input_cache(toplevel)
 
 
+def _ensure_mac_window_tabbing_disabled(toplevel: tk.Misc) -> None:
+    if getattr(toplevel, "_tkwry_mac_window_tabbing", False):
+        return
+    toplevel._tkwry_mac_window_tabbing = True
+    try:
+        from tkwry._core import disable_macos_window_tabbing
+        from tkwry._parent import tk_parent_handle
+
+        toplevel.update_idletasks()
+        disable_macos_window_tabbing(tk_parent_handle(toplevel))
+    except Exception:
+        pass
+
+
 def _register_macos_webview(web: WebView) -> None:
     try:
         toplevel = web._frame.winfo_toplevel()
@@ -447,6 +461,7 @@ def _register_macos_webview(web: WebView) -> None:
             toplevel._tkwry_mac_destroy_bind_id = toplevel.bind(
                 "<Destroy>", _mac_toplevel_destroy, add="+"
             )
+    _ensure_mac_window_tabbing_disabled(toplevel)
     views.append(weakref.ref(web))
 
 

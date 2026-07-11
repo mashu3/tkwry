@@ -50,6 +50,11 @@ try:
 except ImportError as exc:
     _reraise_linux_core_build_hint(exc)
 
+if sys.platform == "darwin":
+    from tkwry._core import disable_macos_automatic_window_tabbing
+
+    disable_macos_automatic_window_tabbing()
+
 __all__ = [
     "DragDropEvent",
     "DragDropHandler",

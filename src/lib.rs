@@ -4,10 +4,14 @@
 mod macos_document_url;
 #[cfg(target_os = "macos")]
 mod macos_focus;
+#[cfg(target_os = "macos")]
+mod macos_window;
 
 use pyo3::prelude::*;
 use std::cell::Cell;
 use std::collections::HashMap;
+#[cfg(target_os = "macos")]
+use std::ptr::NonNull;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -412,6 +416,7 @@ impl WebView {
             let ns_view = NonNull::new(ptr)
                 .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("parent handle is null"))?;
             let parent_ns_view = unsafe { NonNull::new_unchecked(ptr.cast::<NSView>()) };
+            macos_window::disable_window_tabbing(parent_ns_view);
             let raw = RawWindowHandle::AppKit(AppKitWindowHandle::new(ns_view));
             let handle = unsafe { raw_window_handle::WindowHandle::borrow_raw(raw) };
             (handle, parent_ns_view)
@@ -1135,6 +1140,28 @@ fn ensure_gtk_init() {
     }
 }
 
+#[pyfunction]
+fn disable_macos_automatic_window_tabbing() {
+    #[cfg(target_os = "macos")]
+    macos_window::disable_automatic_window_tabbing();
+}
+
+#[pyfunction]
+fn disable_macos_window_tabbing(parent: usize) -> PyResult<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSView;
+        let ptr = parent as *mut NSView;
+        let Some(parent_ns_view) = NonNull::new(ptr) else {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "parent handle is null",
+            ));
+        };
+        macos_window::disable_window_tabbing(parent_ns_view);
+    }
+    Ok(())
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<WebView>()?;
@@ -1143,6 +1170,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<DragDropEvent>()?;
     m.add_function(wrap_pyfunction!(pump_events, m)?)?;
     m.add_function(wrap_pyfunction!(ensure_gtk_init, m)?)?;
+    m.add_function(wrap_pyfunction!(disable_macos_automatic_window_tabbing, m)?)?;
+    m.add_function(wrap_pyfunction!(disable_macos_window_tabbing, m)?)?;
     Ok(())
 }
 
