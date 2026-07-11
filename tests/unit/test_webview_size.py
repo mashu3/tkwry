@@ -7,7 +7,7 @@ import tkinter as tk
 import pytest
 
 from tkwry import WebView
-from tkwry._runtime import GtkPump
+from tkwry._linux import GtkPump
 from tkwry.exceptions import WebViewCreationError, WebViewDestroyedError
 from tkwry.webview import _CREATE_MAX_ATTEMPTS, _FLUSH_LOAD_MAX_ATTEMPTS
 
@@ -18,7 +18,7 @@ _real_gtk_attach = GtkPump.attach
 @pytest.fixture(autouse=True)
 def _isolate_from_native_create(monkeypatch: pytest.MonkeyPatch) -> None:
     """Size heuristics only — never build WebKitGTK in headless Linux CI."""
-    monkeypatch.setattr("tkwry._runtime.GtkPump.attach", lambda _widget: None)
+    monkeypatch.setattr("tkwry._linux.GtkPump.attach", lambda _widget: None)
     monkeypatch.setattr(
         "tkwry._core.pump_events", lambda max_iterations=None: False, raising=False
     )
@@ -601,7 +601,7 @@ def test_unmap_does_not_detach_gtk_pump(
 
     import tkinter as tk
 
-    from tkwry._runtime import GtkPump
+    from tkwry._linux import GtkPump
 
     detach_calls: list[object] = []
     monkeypatch.setattr(

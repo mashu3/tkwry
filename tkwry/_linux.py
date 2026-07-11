@@ -1,4 +1,4 @@
-"""Event-loop helpers for Gtk/WebKitGTK on Linux."""
+"""Linux-specific event-loop helpers for Gtk/WebKitGTK."""
 
 from __future__ import annotations
 

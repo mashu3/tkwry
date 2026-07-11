@@ -22,13 +22,13 @@ from tkwry._core import (
 from tkwry._core import (
     WebView as NativeWebView,
 )
+from tkwry._linux import GtkPump
 from tkwry._parent import (
     check_tk_thread_id,
     require_tk_thread,
     tk_embed_origin,
     tk_embed_parent,
 )
-from tkwry._runtime import GtkPump
 from tkwry._url import _normalize_url, _validate_url
 from tkwry.exceptions import (
     WebViewCreationError,
@@ -1181,7 +1181,7 @@ class WebView:
             if self._should_keep_polling() or self._event_poll_active:
                 self._poll_events()
         if sys.platform == "linux":
-            from tkwry._runtime import pump_gtk_events
+            from tkwry._linux import pump_gtk_events
 
             pump_gtk_events()
         try:
@@ -1545,7 +1545,7 @@ class WebView:
     def _service_linux_events(self, *, gtk_rounds: int = 32) -> None:
         if sys.platform != "linux" or self._destroyed:
             return
-        from tkwry._runtime import pump_gtk_events
+        from tkwry._linux import pump_gtk_events
 
         pump_gtk_events(bursts=gtk_rounds)
         native = self._webview
@@ -1646,7 +1646,7 @@ class WebView:
                 self._event_poll_active = False
             return
         if sys.platform == "linux":
-            from tkwry._runtime import pump_gtk_events
+            from tkwry._linux import pump_gtk_events
 
             pump_gtk_events()
         elif sys.platform == "darwin":
@@ -1731,7 +1731,7 @@ class WebView:
             kwargs["on_new_window"] = self._native_new_window
 
         if sys.platform == "linux":
-            from tkwry._runtime import pump_gtk_events
+            from tkwry._linux import pump_gtk_events
 
             pump_gtk_events(bursts=20)
 

@@ -1,4 +1,4 @@
-"""Tests for Gtk/WebKitGTK runtime helpers."""
+"""Tests for Linux Gtk/WebKitGTK helpers."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from tkwry._runtime import _PUMP_ERROR_LIMIT, GtkPump, _gtk_pump_tick
+from tkwry._linux import _PUMP_ERROR_LIMIT, GtkPump, _gtk_pump_tick
 
 
 @pytest.fixture(autouse=True)
@@ -241,7 +241,7 @@ def test_gtk_pump_tick_keeps_pumping_after_single_pump_error(
             raise RuntimeError("transient")
         return False
 
-    monkeypatch.setattr("tkwry._runtime.pump_gtk_events", flaky_pump, raising=False)
+    monkeypatch.setattr("tkwry._linux.pump_gtk_events", flaky_pump, raising=False)
 
     pump = GtkPump(tk_root)
     GtkPump._by_root_id[pump._root_id] = pump
@@ -271,7 +271,7 @@ def test_gtk_pump_tick_keeps_pumping_after_repeated_pump_errors(
         calls["n"] += 1
         raise RuntimeError("gtk broken")
 
-    monkeypatch.setattr("tkwry._runtime.pump_gtk_events", always_fail, raising=False)
+    monkeypatch.setattr("tkwry._linux.pump_gtk_events", always_fail, raising=False)
 
     pump = GtkPump(tk_root)
     GtkPump._by_root_id[pump._root_id] = pump
@@ -423,7 +423,7 @@ def test_gtk_pump_tick_uses_fast_schedule_when_backlog(
 ) -> None:
     delays: list[int] = []
     monkeypatch.setattr(
-        "tkwry._runtime.pump_gtk_events",
+        "tkwry._linux.pump_gtk_events",
         lambda **_kwargs: True,
         raising=False,
     )
@@ -446,7 +446,7 @@ def test_gtk_pump_tick_uses_fast_schedule_when_backlog(
 def test_pump_gtk_events_scales_bursts_with_refcount(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tkwry._runtime import pump_gtk_events
+    from tkwry._linux import pump_gtk_events
 
     calls: list[int | None] = []
 
@@ -472,7 +472,7 @@ def test_gtk_pump_tick_pumps_multiple_passes_when_backlog(
         return calls["n"] < 3
 
     monkeypatch.setattr(
-        "tkwry._runtime.pump_gtk_events", backlog_then_idle, raising=False
+        "tkwry._linux.pump_gtk_events", backlog_then_idle, raising=False
     )
 
     pump = GtkPump(tk_root)
@@ -497,7 +497,7 @@ def test_gtk_pump_falls_back_to_after_idle_when_after_raises(
     idle_callbacks: list[object] = []
 
     monkeypatch.setattr(
-        "tkwry._runtime.pump_gtk_events",
+        "tkwry._linux.pump_gtk_events",
         lambda **_kwargs: False,
         raising=False,
     )
@@ -534,7 +534,7 @@ def test_gtk_pump_marks_recovery_pending_when_all_schedulers_fail(
     calls: list[int] = []
 
     monkeypatch.setattr(
-        "tkwry._runtime.pump_gtk_events",
+        "tkwry._linux.pump_gtk_events",
         lambda **_kwargs: calls.append(1) or False,
         raising=False,
     )
@@ -578,7 +578,7 @@ def test_attach_resumes_recovery_pending_pump(
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
     monkeypatch.setattr(
-        "tkwry._runtime.pump_gtk_events",
+        "tkwry._linux.pump_gtk_events",
         lambda **_kwargs: False,
         raising=False,
     )
@@ -603,7 +603,7 @@ def test_attach_restarts_paused_pump(tk_root, monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
     monkeypatch.setattr(
-        "tkwry._runtime.pump_gtk_events",
+        "tkwry._linux.pump_gtk_events",
         lambda **_kwargs: False,
         raising=False,
     )
