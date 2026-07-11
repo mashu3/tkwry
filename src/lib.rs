@@ -657,7 +657,8 @@ impl WebView {
             let ns_view = NonNull::new(ptr)
                 .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("parent handle is null"))?;
             let parent_ns_view = unsafe { NonNull::new_unchecked(ptr.cast::<NSView>()) };
-            macos_window::disable_window_tabbing(parent_ns_view);
+            macos_window::disable_window_tabbing(parent_ns_view)
+                .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
             let raw = RawWindowHandle::AppKit(AppKitWindowHandle::new(ns_view));
             let handle = unsafe { raw_window_handle::WindowHandle::borrow_raw(raw) };
             (handle, parent_ns_view)
@@ -1403,9 +1404,13 @@ fn ensure_gtk_init() {
 }
 
 #[pyfunction]
-fn disable_macos_automatic_window_tabbing() {
+fn disable_macos_automatic_window_tabbing() -> PyResult<()> {
     #[cfg(target_os = "macos")]
-    macos_window::disable_automatic_window_tabbing();
+    {
+        macos_window::disable_automatic_window_tabbing()
+            .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+    }
+    Ok(())
 }
 
 #[pyfunction]
@@ -1420,7 +1425,8 @@ fn disable_macos_window_tabbing(parent: usize) -> PyResult<()> {
                 "parent handle is null",
             ));
         };
-        macos_window::disable_window_tabbing(parent_ns_view);
+        macos_window::disable_window_tabbing(parent_ns_view)
+            .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
     }
     Ok(())
 }
