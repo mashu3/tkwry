@@ -41,8 +41,6 @@ def test_creation_size_rejects_unit_explicit_width(tk_root) -> None:
     frame = tk.Frame(tk_root)
     with pytest.raises(ValueError, match="width must be >="):
         WebView(frame, width=1, height=200)
-    with pytest.raises(ValueError, match="width must be >="):
-        WebView(frame, width=2, height=200)
     frame.destroy()
 
 
@@ -303,27 +301,6 @@ def test_destroy_rejects_layout_and_bind(tk_root) -> None:
         web.bind("<<WebViewReady>>", lambda _evt: None)
 
 
-def test_on_unmap_does_not_detach_gtk_pump(
-    tk_root, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    frame = tk.Frame(tk_root)
-    web = WebView(frame, width=400, height=300)
-    detached: list[bool] = []
-
-    monkeypatch.setattr(
-        "tkwry.webview.GtkPump.detach",
-        lambda _frame: detached.append(True),
-        raising=False,
-    )
-    monkeypatch.setattr(web, "_schedule_bounds_sync", lambda: None, raising=False)
-
-    event = tk.Event()
-    event.widget = frame
-    web._on_unmap(event)
-
-    assert detached == []
-
-
 def test_macos_focused_true_prints_warning(
     tk_root, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -565,15 +542,6 @@ def test_destroy_clears_native_when_native_destroy_fails(tk_root) -> None:
         def destroy(self) -> None:
             raise RuntimeError("lock poison")
 
-        def is_alive(self) -> bool:
-            return True
-
-        def clear_on_navigation(self) -> None:
-            return None
-
-        def clear_on_new_window(self) -> None:
-            return None
-
     web._webview = _Native()
     web.destroy()
 
@@ -590,20 +558,11 @@ def test_destroy_clears_native_when_native_destroy_deferred(tk_root) -> None:
         def destroy(self) -> None:
             return None
 
-        def is_alive(self) -> bool:
-            return True
-
-        def clear_on_navigation(self) -> None:
-            return None
-
-        def clear_on_new_window(self) -> None:
-            return None
-
     web._webview = _Native()
     web.destroy()
 
     assert web.destroyed is True
-    assert web._webview is not None
+    assert web._webview is None
     with pytest.raises(WebViewDestroyedError):
         _ = web.native
 

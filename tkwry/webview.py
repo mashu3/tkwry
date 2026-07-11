@@ -12,7 +12,6 @@ import tkinter as tk
 import traceback
 import weakref
 from collections.abc import Callable
-from inspect import isroutine
 from typing import Literal, TypeAlias, TypeVar, cast
 
 from tkwry._core import (
@@ -29,7 +28,7 @@ from tkwry._parent import (
     tk_embed_origin,
     tk_embed_parent,
 )
-from tkwry._runtime import DEFAULT_GTK_PUMP_ITERATIONS, GtkPump, pump_gtk_events
+from tkwry._runtime import GtkPump
 from tkwry._url import _normalize_url, _validate_url
 from tkwry.exceptions import (
     WebViewCreationError,
@@ -68,7 +67,7 @@ _SyncHookItem: TypeAlias = tuple[
 ]
 _EVAL_CALLBACK_TIMEOUT_S = 30.0
 _SYNC_HOOK_TIMEOUT_S = 30.0
-_MIN_LAYOUT_DIMENSION = 3
+_MIN_LAYOUT_DIMENSION = 2
 _CREATE_MAX_ATTEMPTS = 30
 _FLUSH_LOAD_MAX_ATTEMPTS = 3
 _QUEUE_DROP_IPC = 0
@@ -208,9 +207,8 @@ class WebView:
     re-fire the event.
 
     **Page load** (``on_page_load``): fires ``Started`` and ``Finished`` for
-    every navigation. The native layer collects page-load events as soon as
-    the WebView is created; they are delivered when :meth:`set_on_page_load`
-    attaches a handler (or immediately if one was passed to the constructor).
+    every navigation. Events are buffered (up to a fixed cap) until a handler
+    is registered and delivered when :meth:`set_on_page_load` attaches one.
 
     **JavaScript** (``eval_js`` / ``eval_js_with_callback``): ``eval_js`` is
     fire-and-forget (Tk idle, no return value). ``eval_js_with_callback`` is
@@ -311,8 +309,6 @@ class WebView:
         self._pending_eval_js: tuple[str, EvalErrorHandler | None] | None = None
         self._eval_js_scheduled = False
         self._local_queue_drop_counts = [0, 0, 0, 0, 0]
-        self._page_load_buffer: list[tuple[PageLoadEvent, str]] = []
-        self._page_load_collecting = False
         self._bounds_sync_scheduled = False
         self._initial_load: _PendingLoad | None = None
         self._initial_load_attempt = 0
@@ -404,10 +400,7 @@ class WebView:
             if self._pending_html is not None:
                 return "<html>"
             return None
-        try:
-            return self._webview.url()
-        except Exception:
-            return None
+        return self._webview.url()
 
     @property
     def creation_failed(self) -> bool:
@@ -550,10 +543,16 @@ class WebView:
             else:
                 self._schedule_destroy_on_tk_thread()
         except Exception:
-            traceback.print_exc()
+            pass
 
     def _schedule_destroy_on_tk_thread(self) -> None:
         """Best-effort ``destroy()`` when ``__del__`` runs off the Tk thread."""
+        try:
+            frame = self._frame
+            after = frame.after
+        except (AttributeError, tk.TclError):
+            return
+
         tk_thread_id = self._tk_thread_id
 
         def _run() -> None:
@@ -565,64 +564,9 @@ class WebView:
             self.destroy()
 
         try:
-            self._frame.after(0, _run)
-            return
-        except (AttributeError, tk.TclError, RuntimeError):
+            after(0, _run)
+        except (tk.TclError, RuntimeError):
             pass
-
-        if threading.get_ident() == tk_thread_id:
-            try:
-                self._cancel_deferred_callbacks()
-                self.destroy()
-            except Exception:
-                self._teardown_native_if_alive()
-        else:
-            self._teardown_native_if_alive()
-
-    def _native_is_alive(self, native: NativeWebView) -> bool:
-        if type(native) is NativeWebView:
-            try:
-                return native.is_alive()
-            except Exception:
-                traceback.print_exc()
-                return True
-        is_alive = getattr(native, "is_alive", None)
-        if not isroutine(is_alive):
-            return False
-        try:
-            return bool(is_alive())
-        except Exception:
-            traceback.print_exc()
-            return True
-
-    def _clear_native_sync_hooks(self, native: NativeWebView) -> None:
-        for name in ("clear_on_navigation", "clear_on_new_window"):
-            clear = getattr(native, name, None)
-            if clear is None:
-                continue
-            try:
-                clear()
-            except Exception:
-                traceback.print_exc()
-
-    def _teardown_native_if_alive(self) -> None:
-        """Release the native view when Tk scheduling is unavailable."""
-        if self._destroyed:
-            return
-        self._destroyed = True
-        self._event_poll_active = False
-        self._page_load_buffer.clear()
-        self._page_load_collecting = False
-        native = self._webview
-        if native is None:
-            return
-        self._clear_native_sync_hooks(native)
-        try:
-            native.destroy()
-        except Exception:
-            traceback.print_exc()
-        if not self._native_is_alive(native):
-            self._webview = None
 
     def destroy(self) -> None:
         """Hide and release the native webview without destroying the host frame.
@@ -650,17 +594,15 @@ class WebView:
         self._ready_callbacks.clear()
         _release_frame_host(self._frame, self)
         self._unbind_frame_events()
-        self._page_load_buffer.clear()
-        self._page_load_collecting = False
         native = self._webview
         if native is not None:
-            self._absorb_native_queue_drop_counts(native)
-            self._clear_native_sync_hooks(native)
             try:
                 native.destroy()
             except Exception:
                 traceback.print_exc()
-            if not self._native_is_alive(native):
+            finally:
+                # Rust may defer native teardown during nested wry calls; drop the
+                # Python handle immediately so the widget appears destroyed.
                 self._webview = None
         if self._tk_wakeup_write_fd is not None and sys.platform != "darwin":
             self._tk_wakeup_write_fd = None
@@ -706,7 +648,6 @@ class WebView:
             self._pending_html = None
             return
         # Supersede constructor deferred load so it cannot overwrite this nav.
-        self._cancel_initial_load_timer()
         self._initial_load = None
         self._pending_load = ("url", normalized)
         self._schedule_flush_load()
@@ -729,7 +670,6 @@ class WebView:
             self._pending_url = None
             return
         # Supersede constructor deferred load so it cannot overwrite this nav.
-        self._cancel_initial_load_timer()
         self._initial_load = None
         self._pending_load = ("html", html)
         self._schedule_flush_load()
@@ -745,7 +685,7 @@ class WebView:
         native.reload()
         if self._on_page_load is not None:
             self._ensure_event_poll()
-            self._service_page_load_events()
+            self._service_linux_events()
 
     def eval_js(self, script: str, *, on_error: EvalErrorHandler | None = None) -> None:
         """Evaluate JavaScript without waiting for a result.
@@ -901,18 +841,10 @@ class WebView:
             ) from self._creation_error
         self._on_page_load = handler
         if self._webview is not None:
-            if handler is None:
-                self._page_load_collecting = False
-                self._page_load_buffer.clear()
-                self._webview.set_page_load_listening(False)
-            else:
-                self._page_load_collecting = True
-                self._webview.set_page_load_listening(True)
+            self._webview.set_page_load_listening(handler is not None)
         if handler is not None:
             self._ensure_event_poll()
             self._deliver_page_load_events()
-        elif self._page_load_collecting:
-            self._ensure_event_poll()
 
     def sync_bounds(self) -> None:
         """Push the host frame's size and position to the native WebView.
@@ -940,7 +872,7 @@ class WebView:
         """
         self._require_tk_thread()
         local = self._take_local_queue_drop_counts()
-        if self._webview is None:
+        if self._destroyed or self._webview is None:
             return local
         native = self._webview.take_queue_drop_counts()
         return (
@@ -1071,15 +1003,6 @@ class WebView:
         assert self._webview is not None
         return self._webview
 
-    def _absorb_native_queue_drop_counts(self, native: NativeWebView) -> None:
-        try:
-            counts = native.take_queue_drop_counts()
-        except Exception:
-            traceback.print_exc()
-            return
-        for index, count in enumerate(counts):
-            self._bump_queue_drop(index, count)
-
     def _bump_queue_drop(self, kind: int, count: int = 1) -> None:
         if count <= 0:
             return
@@ -1108,7 +1031,9 @@ class WebView:
             if self._should_keep_polling() or self._event_poll_active:
                 self._poll_events()
         if sys.platform == "linux":
-            pump_gtk_events()
+            from tkwry._core import pump_events
+
+            pump_events()
         try:
             root.update()
         except tk.TclError:
@@ -1133,14 +1058,14 @@ class WebView:
         self._frame.update_idletasks()
         frame_w = self._frame.winfo_width()
         frame_h = self._frame.winfo_height()
-        if frame_w >= _MIN_LAYOUT_DIMENSION and frame_h >= _MIN_LAYOUT_DIMENSION:
+        if frame_w > 1 and frame_h > 1:
             return frame_w, frame_h
 
-        width = frame_w if frame_w >= _MIN_LAYOUT_DIMENSION else self._init_width
-        height = frame_h if frame_h >= _MIN_LAYOUT_DIMENSION else self._init_height
+        width = frame_w if frame_w > 1 else self._init_width
+        height = frame_h if frame_h > 1 else self._init_height
         if width is None or height is None:
             return None
-        if width < _MIN_LAYOUT_DIMENSION or height < _MIN_LAYOUT_DIMENSION:
+        if width <= 1 or height <= 1:
             return None
         return width, height
 
@@ -1273,8 +1198,7 @@ class WebView:
         if native is None:
             return
         native.set_ipc_listening(self._ipc_handler is not None)
-        collect_page_load = self._on_page_load is not None or self._page_load_collecting
-        native.set_page_load_listening(collect_page_load)
+        native.set_page_load_listening(self._on_page_load is not None)
         native.set_title_listening(self._on_title_changed is not None)
         native.set_drag_drop_listening(self._drag_drop_handler is not None)
 
@@ -1390,47 +1314,22 @@ class WebView:
         for event, paths, position in native.drain_drag_drop_events():
             self._invoke_callback(handler, event, paths, position)
 
-    def _drain_page_load_events(self) -> list[tuple[PageLoadEvent, str]]:
-        native = self._webview
-        if native is None:
-            return []
-        try:
-            return native.drain_page_load_events()
-        except Exception:
-            traceback.print_exc()
-            return []
-
     def _deliver_page_load_events(self) -> None:
-        if self._webview is None:
-            return
-        pending = self._drain_page_load_events()
-        if not pending and not self._page_load_buffer:
-            return
         page_load = self._on_page_load
-        if page_load is None:
-            self._page_load_buffer.extend(pending)
+        native = self._webview
+        if native is None or page_load is None:
             return
-        for event, page_url in (*self._page_load_buffer, *pending):
+        pending = native.drain_page_load_events()
+        for event, page_url in pending:
             self._invoke_callback(page_load, event, page_url)
-        self._page_load_buffer.clear()
 
-    def _service_page_load_events(self) -> None:
-        """Pump native async sources once so page-load handlers run promptly."""
-        if self._destroyed:
-            return
-        if sys.platform == "linux":
-            pump_gtk_events(max_iterations=DEFAULT_GTK_PUMP_ITERATIONS)
-        elif sys.platform == "darwin":
-            _mac_service_wakeup(self._frame.winfo_toplevel())
-        else:
-            _pump_toplevel_wakeup_pipe(self._frame.winfo_toplevel())
-        self._deliver_page_load_events()
-
-    def _service_linux_events(self, *, gtk_rounds: int | None = None) -> None:
+    def _service_linux_events(self, *, gtk_rounds: int = 32) -> None:
         if sys.platform != "linux" or self._destroyed:
             return
-        iterations = DEFAULT_GTK_PUMP_ITERATIONS if gtk_rounds is None else gtk_rounds
-        pump_gtk_events(max_iterations=iterations)
+        from tkwry._core import pump_events
+
+        for _ in range(gtk_rounds):
+            pump_events()
         self._deliver_page_load_events()
 
     def _register_pending_eval(
@@ -1515,7 +1414,9 @@ class WebView:
             self._event_poll_active = False
             return
         if sys.platform == "linux":
-            pump_gtk_events()
+            from tkwry._core import pump_events
+
+            pump_events()
         elif sys.platform == "darwin":
             toplevel = self._frame.winfo_toplevel()
             _mac_service_wakeup(toplevel)
@@ -1553,8 +1454,6 @@ class WebView:
 
     def _should_keep_polling(self) -> bool:
         if self._needs_event_poll():
-            return True
-        if self._page_load_collecting and self._webview is not None:
             return True
         return self._pending_eval_callbacks > 0 or bool(self._native_eval_wait)
 
@@ -1598,7 +1497,10 @@ class WebView:
             kwargs["on_new_window"] = self._native_new_window
 
         if sys.platform == "linux":
-            pump_gtk_events(max_iterations=DEFAULT_GTK_PUMP_ITERATIONS * 2)
+            from tkwry._core import pump_events
+
+            for _ in range(20):
+                pump_events()
 
         try:
             self._webview = NativeWebView(
@@ -1621,7 +1523,6 @@ class WebView:
             self._schedule_try_create(delay_ms=delay)
             return
         self._create_attempt = 0
-        self._page_load_collecting = True
         self._sync_async_listening()
         self._pending_url = None
         self._pending_html = None
@@ -1638,10 +1539,11 @@ class WebView:
             _ensure_mac_wakeup_pipe(toplevel, self._webview)
             _ensure_mac_pump(toplevel)
         self._ensure_tk_wakeup_pipe()
-        if self._needs_event_poll() or self._page_load_collecting:
+        if self._needs_event_poll():
             self._ensure_event_poll()
             if sys.platform == "linux":
-                self._service_linux_events(gtk_rounds=DEFAULT_GTK_PUMP_ITERATIONS)
+                for _ in range(10):
+                    self._service_linux_events()
         self._maybe_fire_ready()
 
     def _run_eval_js(
@@ -1662,10 +1564,7 @@ class WebView:
         try:
             if not self._frame.winfo_exists() or self._webview is None:
                 return False
-            if (
-                self._frame.winfo_width() < _MIN_LAYOUT_DIMENSION
-                or self._frame.winfo_height() < _MIN_LAYOUT_DIMENSION
-            ):
+            if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
                 return False
             return bool(self._frame.winfo_viewable())
         except tk.TclError:
@@ -1754,7 +1653,8 @@ class WebView:
             self._maybe_reschedule_initial_load()
             return
         self._sync_bounds()
-        self._service_linux_events(gtk_rounds=DEFAULT_GTK_PUMP_ITERATIONS)
+        gtk_rounds = 64 if sys.platform == "linux" else 32
+        self._service_linux_events(gtk_rounds=gtk_rounds)
         if self._on_page_load is not None:
             self._ensure_event_poll()
         self._initial_load = None
@@ -1763,7 +1663,6 @@ class WebView:
         self._flush_load_scheduled = False
         if self._destroyed or self._webview is None or self._pending_load is None:
             return
-        self._sync_bounds()
         kind, payload = self._pending_load
         try:
             if kind == "url":
@@ -1791,11 +1690,9 @@ class WebView:
         self._flush_load_attempt = 0
         self._initial_load = None
         self._sync_bounds()
-        if sys.platform == "linux":
-            self._service_linux_events()
-        else:
-            self._service_page_load_events()
-        self._ensure_event_poll()
+        self._service_linux_events()
+        if self._on_page_load is not None:
+            self._ensure_event_poll()
 
     def _bounds_size(self) -> tuple[int, int] | None:
         """Return the width/height to push, or None when geometry is not meaningful."""
@@ -1804,14 +1701,9 @@ class WebView:
                 return None
             frame_w = self._frame.winfo_width()
             frame_h = self._frame.winfo_height()
-            width = frame_w if frame_w >= _MIN_LAYOUT_DIMENSION else self._init_width
-            height = frame_h if frame_h >= _MIN_LAYOUT_DIMENSION else self._init_height
-            if (
-                width is None
-                or height is None
-                or width < _MIN_LAYOUT_DIMENSION
-                or height < _MIN_LAYOUT_DIMENSION
-            ):
+            width = frame_w if frame_w > 1 else self._init_width
+            height = frame_h if frame_h > 1 else self._init_height
+            if width is None or height is None or width <= 1 or height <= 1:
                 return None
             return width, height
         except tk.TclError:
@@ -1892,6 +1784,8 @@ class WebView:
     def _on_unmap(self, event: tk.Event) -> None:
         if event.widget is not self._frame or self._destroyed:
             return
+        if sys.platform == "linux":
+            GtkPump.detach(self._frame)
         self._schedule_bounds_sync()
 
     def _on_destroy(self, event: tk.Event) -> None:

@@ -31,13 +31,9 @@ def pump(root, *, steps: int = 80, delay_ms: int = 50) -> None:
         root.update_idletasks()
         root.update()
         if sys.platform == "linux":
-            from tkwry._runtime import pump_gtk_events
+            from tkwry._core import pump_events
 
-            pump_gtk_events()
-        elif sys.platform == "darwin":
-            from tkwry._macos import _mac_service_wakeup
-
-            _mac_service_wakeup(root)
+            pump_events()
         root.after(delay_ms)
         root.update()
 

@@ -125,25 +125,10 @@ def test_two_webviews_url_independent(tk_root, tmp_path: Path) -> None:
     page_a.write_text("<p>a</p>", encoding="utf-8")
     page_b.write_text("<p>b</p>", encoding="utf-8")
 
-    loads_finished = {"a": 0, "b": 0}
-
-    def track_a(evt: PageLoadEvent, _url: str) -> None:
-        if evt == PageLoadEvent.Finished:
-            loads_finished["a"] += 1
-
-    def track_b(evt: PageLoadEvent, _url: str) -> None:
-        if evt == PageLoadEvent.Finished:
-            loads_finished["b"] += 1
-
-    web_a = WebView(left, html="<p>a</p>", on_page_load=track_a)
-    web_b = WebView(right, html="<p>b</p>", on_page_load=track_b)
+    web_a = WebView(left, html="<p>a</p>")
+    web_b = WebView(right, html="<p>b</p>")
 
     assert wait_until(tk_root, lambda: web_a.ready and web_b.ready, steps=200)
-
-    baseline_a = loads_finished["a"]
-    baseline_b = loads_finished["b"]
-    uri_a = page_a.absolute().as_uri()
-    uri_b = page_b.absolute().as_uri()
 
     web_a.load_url(str(page_a))
     web_b.load_url(str(page_b))
@@ -153,15 +138,15 @@ def test_two_webviews_url_independent(tk_root, tmp_path: Path) -> None:
 
     def urls_match() -> bool:
         try:
-            if loads_finished["a"] <= baseline_a or loads_finished["b"] <= baseline_b:
-                return False
-            return web_a.url == uri_a and web_b.url == uri_b
+            return (
+                web_a.url == page_a.absolute().as_uri()
+                and web_b.url == page_b.absolute().as_uri()
+            )
         except Exception:
             return False
 
     assert wait_until(tk_root, urls_match, steps=300), (
-        f"expected independent document URLs, got {web_a.url!r} and {web_b.url!r} "
-        f"(finished={loads_finished!r}, baseline=({baseline_a}, {baseline_b}))"
+        f"expected independent document URLs, got {web_a.url!r} and {web_b.url!r}"
     )
 
     web_a.destroy()

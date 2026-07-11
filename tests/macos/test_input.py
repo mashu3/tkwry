@@ -179,6 +179,10 @@ def test_multi_webview_focus_is_exclusive(url_demo_layout) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+@pytest.mark.skipif(
+    is_github_actions(),
+    reason="GHA macOS: Tcl focus drain timing not reliable on virtual runners",
+)
 def test_tcl_unfocus_drains_within_50ms(url_demo_layout) -> None:
     web = WebView(url_demo_layout.web_frame, html="<p>latency</p>")
     try:
