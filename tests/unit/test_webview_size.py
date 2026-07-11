@@ -557,16 +557,70 @@ def test_destroy_clears_native_when_native_destroy_deferred(tk_root) -> None:
     web = WebView(frame, width=400, height=300)
 
     class _Native:
-        def destroy(self) -> None:
-            return None
+        def __init__(self) -> None:
+            self.visible = True
+            self.alive = True
+            self.destroy_calls = 0
 
-    web._webview = _Native()
+        def set_visible(self, visible: bool) -> None:
+            self.visible = visible
+
+        def is_alive(self) -> bool:
+            return self.alive
+
+        def destroy(self) -> None:
+            self.destroy_calls += 1
+            if self.destroy_calls == 1:
+                return
+            self.alive = False
+
+    native = _Native()
+    web._webview = native
     web.destroy()
 
     assert web.destroyed is True
     assert web._webview is None
+    assert native.visible is False
+    assert web._native_teardown_pending is native
+    web._finish_native_teardown()
+    assert web._native_teardown_pending is None
+    assert native.alive is False
     with pytest.raises(WebViewDestroyedError):
         _ = web.native
+
+
+def test_unmap_does_not_detach_gtk_pump(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    if sys.platform != "linux":
+        pytest.skip("Linux-only")
+
+    import tkinter as tk
+
+    from tkwry._runtime import GtkPump
+
+    detach_calls: list[object] = []
+    monkeypatch.setattr(
+        "tkwry.webview.GtkPump.detach",
+        lambda widget: detach_calls.append(widget),
+    )
+    monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
+    monkeypatch.setattr(tk_root, "after", lambda *_a, **_k: "after-id")
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+    GtkPump.attach(frame)
+    assert tk_root.winfo_id() in GtkPump._by_root_id
+
+    frame.event_generate("<Unmap>")
+    tk_root.update_idletasks()
+
+    assert detach_calls == []
+    web.destroy()
+    assert len(detach_calls) == 1
+    GtkPump.detach(frame)
 
 
 def test_reload_clears_pending_flush_load(

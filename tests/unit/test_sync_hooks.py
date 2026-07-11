@@ -114,6 +114,13 @@ def test_sync_hook_timeout_skips_late_handler(tk_root, monkeypatch) -> None:
     monkeypatch.setattr("tkwry.webview._SYNC_HOOK_TIMEOUT_S", 0.05)
     monkeypatch.setattr(web, "_ensure_event_poll", lambda: None, raising=False)
 
+    scheduled: list[object] = []
+    monkeypatch.setattr(
+        web._frame,
+        "after",
+        lambda _delay, callback: scheduled.append(callback) or "after-id",
+    )
+
     result_holder: list[bool] = []
 
     def worker() -> None:
@@ -123,11 +130,40 @@ def test_sync_hook_timeout_skips_late_handler(tk_root, monkeypatch) -> None:
     thread.start()
     thread.join(timeout=1.0)
 
+    for callback in scheduled:
+        callback()
+
     # Drain the cancelled hook once; must not run the slow handler.
     web._drain_sync_hooks()
 
     assert result_holder == [False]
     assert seen == []
+    web.destroy()
+
+
+def test_dispatch_sync_hook_schedules_tk_drain(tk_root, monkeypatch) -> None:
+    _frame, web = _make_web(tk_root)
+    scheduled: list[object] = []
+    monkeypatch.setattr(
+        web._frame,
+        "after",
+        lambda _delay, callback: scheduled.append(callback) or "after-id",
+    )
+    monkeypatch.setattr(web, "_ensure_event_poll", lambda: None, raising=False)
+    monkeypatch.setattr(web, "_wake_tk_for_sync_hook", lambda: None, raising=False)
+
+    result_holder: list[bool] = []
+
+    def worker() -> None:
+        result_holder.append(web._dispatch_sync_hook(lambda: True, default=False))
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    for callback in scheduled:
+        callback()
+    thread.join(timeout=1.0)
+
+    assert result_holder == [True]
     web.destroy()
 
 

@@ -394,10 +394,11 @@ class WebView:
         self._initial_load_attempt = 0
         self._initial_load_after_id: str | None = None
         self._deferred_after_ids: list[str] = []
+        self._native_teardown_pending: NativeWebView | None = None
 
         try:
-            if sys.platform != "linux" or frame.winfo_viewable():
-                GtkPump.ensure_attached(frame)
+            if sys.platform == "linux":
+                self._ensure_gtk_pump_attached()
         except tk.TclError:
             pass
         self._frame_bind_ids: list[tuple[str, str]] = []
@@ -665,11 +666,7 @@ class WebView:
         except Exception:
             pass
         _unregister_sync_hook_webview(self)
-        native = self._webview
-        if native is not None:
-            # Drop the Py handle; Rust Drop tears down without owner-thread checks.
-            self._webview = None
-            del native
+        self._release_native_view(hide=False)
         if sys.platform == "darwin":
             try:
                 _unregister_macos_webview(self)
@@ -686,7 +683,6 @@ class WebView:
         if self._destroyed:
             return
         self._destroyed = True
-        self._event_poll_active = False
         self._cancel_deferred_callbacks()
         self._eval_epoch += 1
         if self._pending_eval_tokens:
@@ -703,16 +699,7 @@ class WebView:
         _release_frame_host(self._frame, self)
         self._unbind_frame_events()
         _unregister_sync_hook_webview(self)
-        native = self._webview
-        if native is not None:
-            try:
-                native.destroy()
-            except Exception:
-                traceback.print_exc()
-            finally:
-                # Rust may defer native teardown during nested wry calls; drop the
-                # Python handle immediately so the widget appears destroyed.
-                self._webview = None
+        self._release_native_view(hide=True)
         if self._tk_wakeup_write_fd is not None and sys.platform != "darwin":
             self._tk_wakeup_write_fd = None
             try:
@@ -723,6 +710,10 @@ class WebView:
             _unregister_macos_webview(self)
         elif sys.platform == "linux":
             GtkPump.detach(self._frame)
+        if self._native_teardown_pending is not None:
+            self._ensure_event_poll()
+        else:
+            self._event_poll_active = False
 
     def _unbind_frame_events(self) -> None:
         """Drop host-frame binds so ``destroy()`` does not pin this instance."""
@@ -732,6 +723,53 @@ class WebView:
             except tk.TclError:
                 pass
         self._frame_bind_ids.clear()
+
+    def _ensure_gtk_pump_attached(self) -> None:
+        if sys.platform == "linux" and not self._destroyed:
+            GtkPump.ensure_attached(self._frame)
+
+    def _native_is_alive(self, native: NativeWebView) -> bool:
+        try:
+            return native.is_alive()
+        except Exception:
+            return False
+
+    def _hide_native_view(self, native: NativeWebView) -> None:
+        try:
+            native.set_visible(False)
+        except Exception:
+            pass
+
+    def _release_native_view(self, *, hide: bool) -> None:
+        native = self._webview
+        if native is None:
+            return
+        if hide:
+            self._hide_native_view(native)
+        try:
+            native.destroy()
+        except Exception:
+            traceback.print_exc()
+        if self._native_is_alive(native):
+            self._native_teardown_pending = native
+        self._webview = None
+        if self._native_teardown_pending is not None:
+            self._ensure_event_poll()
+
+    def _finish_native_teardown(self) -> None:
+        native = self._native_teardown_pending
+        if native is None:
+            return
+        try:
+            if self._native_is_alive(native):
+                self._hide_native_view(native)
+                native.destroy()
+            if not self._native_is_alive(native):
+                self._native_teardown_pending = None
+                if self._destroyed and not self._should_keep_polling():
+                    self._event_poll_active = False
+        except Exception:
+            traceback.print_exc()
 
     def load_url(self, url: str) -> None:
         """Navigate to *url* (``http``/``https``/``file``; scheme optional).
@@ -938,6 +976,7 @@ class WebView:
             else:
                 self._webview.clear_on_navigation()
         if handler is not None:
+            self._ensure_tk_wakeup_pipe()
             self._ensure_event_poll()
 
     def set_on_page_load(self, handler: PageLoadHandler | None) -> None:
@@ -1023,6 +1062,7 @@ class WebView:
             else:
                 self._webview.clear_on_new_window()
         if handler is not None:
+            self._ensure_tk_wakeup_pipe()
             self._ensure_event_poll()
 
     def set_drag_drop_handler(self, handler: DragDropHandler | None) -> None:
@@ -1350,6 +1390,14 @@ class WebView:
         except OSError:
             pass
 
+    def _schedule_sync_hook_drain(self) -> None:
+        """Ask the Tk thread to drain Python-side sync hooks."""
+        self._wake_tk_for_sync_hook()
+        try:
+            self._frame.after(0, self._drain_sync_hooks)
+        except tk.TclError:
+            pass
+
     def _dispatch_sync_hook(self, invoke: Callable[[], _T], default: _T) -> _T:
         if threading.get_ident() == self._tk_thread_id:
             try:
@@ -1375,7 +1423,7 @@ class WebView:
             )
         )
         self._ensure_event_poll()
-        self._wake_tk_for_sync_hook()
+        self._schedule_sync_hook_drain()
         enqueued_at = time.monotonic()
         deadline = enqueued_at + _SYNC_HOOK_TIMEOUT_S
         absolute_deadline = enqueued_at + _SYNC_HOOK_MAX_WAIT_S
@@ -1402,7 +1450,7 @@ class WebView:
                     )
                     return default
                 done.wait(timeout=min(0.05, remaining))
-            self._wake_tk_for_sync_hook()
+            self._schedule_sync_hook_drain()
             native = self._webview
             if native is not None:
                 native.drain_sync_hooks()
@@ -1491,7 +1539,17 @@ class WebView:
         from tkwry._runtime import pump_gtk_events
 
         pump_gtk_events(bursts=gtk_rounds)
+        native = self._webview
+        if native is not None:
+            native.drain_sync_hooks()
+        self._drain_sync_hooks()
+        if self._ipc_handler is not None:
+            self._deliver_ipc_messages()
         self._deliver_page_load_events()
+        if self._on_title_changed is not None:
+            self._deliver_title_events()
+        if self._drag_drop_handler is not None:
+            self._deliver_drag_drop_events()
 
     def _register_pending_eval(
         self,
@@ -1571,8 +1629,12 @@ class WebView:
             self._invoke_callback(expected_cb, result)
 
     def _poll_events(self) -> None:
+        self._finish_native_teardown()
         if self._destroyed:
-            self._event_poll_active = False
+            if self._native_teardown_pending is not None:
+                self._track_after(self._frame.after(1, self._poll_events))
+            else:
+                self._event_poll_active = False
             return
         if sys.platform == "linux":
             from tkwry._runtime import pump_gtk_events
@@ -1614,6 +1676,8 @@ class WebView:
                 self._ensure_event_poll()
 
     def _should_keep_polling(self) -> bool:
+        if self._native_teardown_pending is not None:
+            return True
         if self._needs_event_poll():
             return True
         return self._pending_eval_callbacks > 0 or bool(self._native_eval_wait)
@@ -1684,6 +1748,7 @@ class WebView:
             return
         self._create_attempt = 0
         self._sync_async_listening()
+        self._ensure_gtk_pump_attached()
         self._pending_url = None
         self._pending_html = None
         self._sync_bounds()
@@ -1935,8 +2000,7 @@ class WebView:
     def _on_map(self, event: tk.Event) -> None:
         if event.widget is not self._frame or self._destroyed:
             return
-        if sys.platform == "linux":
-            GtkPump.ensure_attached(self._frame)
+        self._ensure_gtk_pump_attached()
         self._schedule_bounds_sync()
         self._maybe_fire_ready()
         self._track_after(self._frame.after_idle(self._run_initial_load))
@@ -1944,8 +2008,6 @@ class WebView:
     def _on_unmap(self, event: tk.Event) -> None:
         if event.widget is not self._frame or self._destroyed:
             return
-        if sys.platform == "linux":
-            GtkPump.detach(self._frame)
         self._schedule_bounds_sync()
 
     def _on_destroy(self, event: tk.Event) -> None:
