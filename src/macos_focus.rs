@@ -9,34 +9,78 @@
 //! Tk thread via a lightweight ``after`` pump (WKWebView breaks Tcl
 //! ``fileevent`` on the same root).
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSEvent, NSEventMask, NSView, NSWindowDidBecomeKeyNotification};
-use objc2_foundation::{NSNotification, NSNotificationCenter, NSOperationQueue, NSPoint, NSRect};
+use objc2_app_kit::{
+    NSEvent, NSEventMask, NSView, NSWindow, NSWindowDidBecomeKeyNotification,
+};
+use objc2_foundation::{NSNotification, NSNotificationCenter, NSOperationQueue, NSPoint};
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::WebViewExtMacOS;
 
-pub struct FocusSyncGuard {
+const TAB_KEY_CODE: u16 = 48;
+const ESCAPE_KEY_CODE: u16 = 53;
+
+struct FocusEntry {
+    id: u64,
+    inner: Arc<Mutex<Option<wry::WebView>>>,
+    web_wants_keyboard: Arc<AtomicBool>,
+    mac_tk_unfocus: Arc<AtomicBool>,
+    parent_ns_view: NonNull<NSView>,
+}
+
+struct FocusMonitors {
     click_monitor: Retained<AnyObject>,
     keydown_monitor: Retained<AnyObject>,
+    keyup_monitor: Retained<AnyObject>,
     flags_monitor: Retained<AnyObject>,
     key_observer: Retained<AnyObject>,
 }
 
+struct WindowFocusCoordinator {
+    window: Retained<NSWindow>,
+    entries: Vec<FocusEntry>,
+    wakeup_write_fd: Arc<AtomicI32>,
+    monitors: Option<FocusMonitors>,
+}
+
+static NEXT_ENTRY_ID: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    static COORDINATORS: RefCell<HashMap<isize, WindowFocusCoordinator>> =
+        RefCell::new(HashMap::new());
+}
+
+fn window_key(window: &NSWindow) -> isize {
+    window as *const NSWindow as isize
+}
+
+pub struct FocusSyncGuard {
+    window_key: isize,
+    entry_id: u64,
+}
+
 impl Drop for FocusSyncGuard {
     fn drop(&mut self) {
-        unsafe {
-            NSEvent::removeMonitor(&self.click_monitor);
-            NSEvent::removeMonitor(&self.keydown_monitor);
-            NSEvent::removeMonitor(&self.flags_monitor);
-            NSNotificationCenter::defaultCenter().removeObserver(&self.key_observer);
-        }
+        COORDINATORS.with(|map| {
+            let mut map = map.borrow_mut();
+            let Some(coord) = map.get_mut(&self.window_key) else {
+                return;
+            };
+            coord.entries.retain(|entry| entry.id != self.entry_id);
+            if coord.entries.is_empty() {
+                coord.remove_monitors();
+                map.remove(&self.window_key);
+            }
+        });
     }
 }
 
@@ -69,170 +113,388 @@ pub fn install_focus_sync(
         .window()
         .ok_or("macOS focus sync requires an NSWindow")?;
 
-    let click_block = {
-        let inner = inner.clone();
-        let web_wants = web_wants_keyboard.clone();
-        let unfocus = mac_tk_unfocus.clone();
-        let wakeup = wakeup_write_fd.clone();
-        RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
-            let event_ref = unsafe { event.as_ref() };
-            let window_point = event_ref.locationInWindow();
+    let entry_id = NEXT_ENTRY_ID.fetch_add(1, Ordering::Relaxed);
+    let entry = FocusEntry {
+        id: entry_id,
+        inner,
+        web_wants_keyboard,
+        mac_tk_unfocus,
+        parent_ns_view,
+    };
 
-            if let Ok(guard) = inner.lock() {
-                if let Some(ref wv) = *guard {
-                    if window_point_hits_webview(wv, window_point) {
-                        web_wants.store(true, Ordering::SeqCst);
-                        unfocus.store(true, Ordering::SeqCst);
-                        focus_webview(wv, "focus");
-                        notify_wakeup(&wakeup);
-                    } else if web_wants.load(Ordering::SeqCst) {
-                        release_web_focus_locked(wv, &web_wants);
-                    }
-                } else if web_wants.load(Ordering::SeqCst) {
-                    web_wants.store(false, Ordering::SeqCst);
-                }
-            }
-
-            event.as_ptr()
+    let key = window_key(&ns_window);
+    COORDINATORS.with(|map| {
+        let mut map = map.borrow_mut();
+        let coord = map.entry(key).or_insert_with(|| WindowFocusCoordinator {
+            window: ns_window.clone(),
+            entries: Vec::new(),
+            wakeup_write_fd: wakeup_write_fd.clone(),
+            monitors: None,
+        });
+        coord.entries.push(entry);
+        if coord.monitors.is_none() {
+            coord.install_monitors()?;
+        }
+        Ok(FocusSyncGuard {
+            window_key: key,
+            entry_id,
         })
-    };
-
-    let click_mask =
-        NSEventMask::LeftMouseDown | NSEventMask::RightMouseDown | NSEventMask::OtherMouseDown;
-
-    let click_monitor =
-        unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(click_mask, &click_block) }
-            .ok_or("failed to install NSEvent local monitor")?;
-
-    let keydown_block = {
-        let inner = inner.clone();
-        let web_wants = web_wants_keyboard.clone();
-        let unfocus = mac_tk_unfocus.clone();
-        let wakeup = wakeup_write_fd.clone();
-        RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
-            let event_ref = unsafe { event.as_ref() };
-            if !web_wants.load(Ordering::SeqCst) {
-                return event.as_ptr();
-            }
-            // Tab and other navigation keys may not reach Tcl bind_all (VoiceOver, etc.).
-            const TAB_KEY_CODE: u16 = 48;
-            const ESCAPE_KEY_CODE: u16 = 53;
-            let key_code = event_ref.keyCode();
-            if key_code == TAB_KEY_CODE || key_code == ESCAPE_KEY_CODE {
-                if let Ok(guard) = inner.lock() {
-                    if let Some(ref wv) = *guard {
-                        release_web_focus_locked(wv, &web_wants);
-                    }
-                }
-                unfocus.store(true, Ordering::SeqCst);
-                notify_wakeup(&wakeup);
-                return event.as_ptr();
-            }
-            // Re-assert WKWebView first responder for IME / VoiceOver / synthetic keys.
-            if let Ok(guard) = inner.lock() {
-                if let Some(ref wv) = *guard {
-                    focus_webview(wv, "focus on keydown");
-                }
-            }
-            if let Ok(guard) = inner.lock() {
-                if let Some(ref wv) = *guard {
-                    let Some(window_point) = current_window_point(parent_ns_view) else {
-                        unfocus.store(true, Ordering::SeqCst);
-                        notify_wakeup(&wakeup);
-                        return event.as_ptr();
-                    };
-                    if !window_point_hits_webview(wv, window_point) {
-                        unfocus.store(true, Ordering::SeqCst);
-                        notify_wakeup(&wakeup);
-                    }
-                }
-            }
-            event.as_ptr()
-        })
-    };
-
-    let keydown_mask = NSEventMask::KeyDown;
-    let keydown_monitor = unsafe {
-        NSEvent::addLocalMonitorForEventsMatchingMask_handler(keydown_mask, &keydown_block)
-    }
-    .ok_or("failed to install NSEvent keydown monitor")?;
-
-    let flags_block = {
-        let inner = inner.clone();
-        let web_wants = web_wants_keyboard.clone();
-        let unfocus = mac_tk_unfocus.clone();
-        let wakeup = wakeup_write_fd.clone();
-        RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
-            if !web_wants.load(Ordering::SeqCst) {
-                return event.as_ptr();
-            }
-            let event_ref = unsafe { event.as_ref() };
-            const TAB_KEY_CODE: u16 = 48;
-            if event_ref.keyCode() == TAB_KEY_CODE {
-                return event.as_ptr();
-            }
-            if let Ok(guard) = inner.lock() {
-                if let Some(ref wv) = *guard {
-                    focus_webview(wv, "focus on flags changed");
-                    let Some(window_point) = current_window_point(parent_ns_view) else {
-                        unfocus.store(true, Ordering::SeqCst);
-                        notify_wakeup(&wakeup);
-                        return event.as_ptr();
-                    };
-                    if !window_point_hits_webview(wv, window_point) {
-                        unfocus.store(true, Ordering::SeqCst);
-                        notify_wakeup(&wakeup);
-                    }
-                }
-            }
-            event.as_ptr()
-        })
-    };
-
-    let flags_mask = NSEventMask::FlagsChanged;
-    let flags_monitor =
-        unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(flags_mask, &flags_block) }
-            .ok_or("failed to install NSEvent flags monitor")?;
-
-    let key_block = {
-        let inner = inner.clone();
-        let web_wants = web_wants_keyboard.clone();
-        let unfocus = mac_tk_unfocus.clone();
-        let wakeup = wakeup_write_fd.clone();
-        RcBlock::new(move |_notification: NonNull<NSNotification>| {
-            if !web_wants.load(Ordering::SeqCst) {
-                return;
-            }
-            if let Ok(guard) = inner.lock() {
-                if let Some(ref wv) = *guard {
-                    // Keyboard-only window activation (Alt+Tab, etc.): restore web
-                    // input without requiring a mouse hit-test.
-                    focus_webview(wv, "focus on window key");
-                    unfocus.store(true, Ordering::SeqCst);
-                    notify_wakeup(&wakeup);
-                } else {
-                    web_wants.store(false, Ordering::SeqCst);
-                }
-            }
-        })
-    };
-
-    let key_observer = unsafe {
-        NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
-            Some(NSWindowDidBecomeKeyNotification),
-            Some(&ns_window),
-            Some(NSOperationQueue::mainQueue().as_ref()),
-            &key_block,
-        )
-    };
-    let key_observer = unsafe { Retained::cast_unchecked(key_observer) };
-
-    Ok(FocusSyncGuard {
-        click_monitor,
-        keydown_monitor,
-        flags_monitor,
-        key_observer,
     })
+}
+
+impl WindowFocusCoordinator {
+    fn install_monitors(&mut self) -> Result<(), String> {
+        let window = self.window.clone();
+        let wakeup = self.wakeup_write_fd.clone();
+
+        let click_block = {
+            let window = window.clone();
+            let wakeup = wakeup.clone();
+            RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+                let event_ref = unsafe { event.as_ref() };
+                let window_point = event_ref.locationInWindow();
+                with_coordinator(&window, |coord| {
+                    handle_click(&window, &coord.entries, window_point, &wakeup);
+                });
+                event.as_ptr()
+            })
+        };
+
+        let click_mask =
+            NSEventMask::LeftMouseDown | NSEventMask::RightMouseDown | NSEventMask::OtherMouseDown;
+        let click_monitor = unsafe {
+            NSEvent::addLocalMonitorForEventsMatchingMask_handler(click_mask, &click_block)
+        }
+        .ok_or("failed to install NSEvent local monitor")?;
+
+        let keydown_block = {
+            let window = window.clone();
+            let wakeup = wakeup.clone();
+            RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+                let event_ref = unsafe { event.as_ref() };
+                with_coordinator(&window, |coord| {
+                    handle_keydown(&window, &coord.entries, event_ref, &wakeup);
+                });
+                event.as_ptr()
+            })
+        };
+
+        let keydown_mask = NSEventMask::KeyDown;
+        let keydown_monitor = unsafe {
+            NSEvent::addLocalMonitorForEventsMatchingMask_handler(keydown_mask, &keydown_block)
+        }
+        .ok_or("failed to install NSEvent keydown monitor")?;
+
+        let keyup_block = {
+            let window = window.clone();
+            let wakeup = wakeup.clone();
+            RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+                with_coordinator(&window, |coord| {
+                    handle_keyup_or_flags(&window, &coord.entries, &wakeup, "focus on keyup");
+                });
+                event.as_ptr()
+            })
+        };
+
+        let keyup_mask = NSEventMask::KeyUp;
+        let keyup_monitor = unsafe {
+            NSEvent::addLocalMonitorForEventsMatchingMask_handler(keyup_mask, &keyup_block)
+        }
+        .ok_or("failed to install NSEvent keyup monitor")?;
+
+        let flags_block = {
+            let window = window.clone();
+            let wakeup = wakeup.clone();
+            RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+                let event_ref = unsafe { event.as_ref() };
+                if event_ref.keyCode() == TAB_KEY_CODE {
+                    return event.as_ptr();
+                }
+                with_coordinator(&window, |coord| {
+                    handle_keyup_or_flags(
+                        &window,
+                        &coord.entries,
+                        &wakeup,
+                        "focus on flags changed",
+                    );
+                });
+                event.as_ptr()
+            })
+        };
+
+        let flags_mask = NSEventMask::FlagsChanged;
+        let flags_monitor = unsafe {
+            NSEvent::addLocalMonitorForEventsMatchingMask_handler(flags_mask, &flags_block)
+        }
+        .ok_or("failed to install NSEvent flags monitor")?;
+
+        let key_block = {
+            let window = window.clone();
+            let wakeup = wakeup.clone();
+            RcBlock::new(move |_notification: NonNull<NSNotification>| {
+                with_coordinator(&window, |coord| {
+                    handle_window_became_key(&window, &coord.entries, &wakeup);
+                });
+            })
+        };
+
+        let key_observer = unsafe {
+            NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+                Some(NSWindowDidBecomeKeyNotification),
+                Some(&window),
+                Some(NSOperationQueue::mainQueue().as_ref()),
+                &key_block,
+            )
+        };
+        let key_observer = unsafe { Retained::cast_unchecked(key_observer) };
+
+        self.monitors = Some(FocusMonitors {
+            click_monitor,
+            keydown_monitor,
+            keyup_monitor,
+            flags_monitor,
+            key_observer,
+        });
+        Ok(())
+    }
+
+    fn remove_monitors(&mut self) {
+        if let Some(monitors) = self.monitors.take() {
+            unsafe {
+                NSEvent::removeMonitor(&monitors.click_monitor);
+                NSEvent::removeMonitor(&monitors.keydown_monitor);
+                NSEvent::removeMonitor(&monitors.keyup_monitor);
+                NSEvent::removeMonitor(&monitors.flags_monitor);
+                NSNotificationCenter::defaultCenter().removeObserver(&monitors.key_observer);
+            }
+        }
+    }
+}
+
+fn with_coordinator(window: &NSWindow, f: impl FnOnce(&WindowFocusCoordinator)) {
+    COORDINATORS.with(|map| {
+        let map = map.borrow();
+        let key = window_key(window);
+        if let Some(coord) = map.get(&key) {
+            f(coord);
+        }
+    });
+}
+
+fn handle_click(
+    window: &NSWindow,
+    entries: &[FocusEntry],
+    window_point: NSPoint,
+    wakeup: &AtomicI32,
+) {
+    if let Some(idx) = topmost_entry_index(window, entries, window_point) {
+        activate_entry(entries, idx, wakeup);
+    } else {
+        release_all_web_focus(entries);
+    }
+}
+
+fn handle_keydown(
+    window: &NSWindow,
+    entries: &[FocusEntry],
+    event: &NSEvent,
+    wakeup: &AtomicI32,
+) {
+    let Some(active_idx) = active_entry_index(entries) else {
+        return;
+    };
+    let entry = &entries[active_idx];
+    if !entry.web_wants_keyboard.load(Ordering::SeqCst) {
+        return;
+    }
+
+    let key_code = event.keyCode();
+    if key_code == TAB_KEY_CODE || key_code == ESCAPE_KEY_CODE {
+        if let Ok(guard) = entry.inner.lock() {
+            if let Some(ref wv) = *guard {
+                release_web_focus_locked(wv, &entry.web_wants_keyboard);
+            }
+        }
+        entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
+        notify_wakeup(wakeup);
+        return;
+    }
+
+    if let Ok(guard) = entry.inner.lock() {
+        if let Some(ref wv) = *guard {
+            focus_webview(wv, "focus on keydown");
+        }
+    }
+
+    let Some(window_point) = current_window_point(window) else {
+        entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
+        notify_wakeup(wakeup);
+        return;
+    };
+    if topmost_entry_index(window, entries, window_point) != Some(active_idx) {
+        entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
+        notify_wakeup(wakeup);
+    }
+}
+
+fn handle_keyup_or_flags(
+    window: &NSWindow,
+    entries: &[FocusEntry],
+    wakeup: &AtomicI32,
+    label: &str,
+) {
+    let Some(active_idx) = active_entry_index(entries) else {
+        return;
+    };
+    let entry = &entries[active_idx];
+    if !entry.web_wants_keyboard.load(Ordering::SeqCst) {
+        return;
+    }
+
+    if let Ok(guard) = entry.inner.lock() {
+        if let Some(ref wv) = *guard {
+            focus_webview(wv, label);
+        }
+    }
+
+    let Some(window_point) = current_window_point(window) else {
+        entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
+        notify_wakeup(wakeup);
+        return;
+    };
+    if topmost_entry_index(window, entries, window_point) != Some(active_idx) {
+        entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
+        notify_wakeup(wakeup);
+    }
+}
+
+fn handle_window_became_key(window: &NSWindow, entries: &[FocusEntry], wakeup: &AtomicI32) {
+    let Some(active_idx) = active_entry_index(entries) else {
+        return;
+    };
+    let entry = &entries[active_idx];
+    if !entry.web_wants_keyboard.load(Ordering::SeqCst) {
+        return;
+    }
+
+    let Some(window_point) = current_window_point(window) else {
+        if let Ok(guard) = entry.inner.lock() {
+            if let Some(ref wv) = *guard {
+                release_web_focus_locked(wv, &entry.web_wants_keyboard);
+            }
+        }
+        entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
+        notify_wakeup(wakeup);
+        return;
+    };
+
+    match topmost_entry_index(window, entries, window_point) {
+        Some(idx) if idx == active_idx => {
+            if let Ok(guard) = entry.inner.lock() {
+                if let Some(ref wv) = *guard {
+                    focus_webview(wv, "focus on window key");
+                }
+            }
+            entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
+            notify_wakeup(wakeup);
+        }
+        Some(idx) => activate_entry(entries, idx, wakeup),
+        None => {
+            if let Ok(guard) = entry.inner.lock() {
+                if let Some(ref wv) = *guard {
+                    release_web_focus_locked(wv, &entry.web_wants_keyboard);
+                }
+            }
+            entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
+            notify_wakeup(wakeup);
+        }
+    }
+}
+
+fn activate_entry(entries: &[FocusEntry], idx: usize, wakeup: &AtomicI32) {
+    for (i, entry) in entries.iter().enumerate() {
+        if i == idx {
+            if let Ok(guard) = entry.inner.lock() {
+                if let Some(ref wv) = *guard {
+                    entry.web_wants_keyboard.store(true, Ordering::SeqCst);
+                    entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
+                    focus_webview(wv, "focus");
+                }
+            }
+        } else if entry.web_wants_keyboard.swap(false, Ordering::SeqCst) {
+            if let Ok(guard) = entry.inner.lock() {
+                if let Some(ref wv) = *guard {
+                    focus_webview_parent(wv, "focus_parent");
+                }
+            }
+        }
+    }
+    notify_wakeup(wakeup);
+}
+
+fn release_all_web_focus(entries: &[FocusEntry]) {
+    for entry in entries {
+        if !entry.web_wants_keyboard.load(Ordering::SeqCst) {
+            continue;
+        }
+        if let Ok(guard) = entry.inner.lock() {
+            if let Some(ref wv) = *guard {
+                release_web_focus_locked(wv, &entry.web_wants_keyboard);
+            }
+        }
+    }
+}
+
+fn active_entry_index(entries: &[FocusEntry]) -> Option<usize> {
+    entries
+        .iter()
+        .position(|entry| entry.web_wants_keyboard.load(Ordering::SeqCst))
+}
+
+/// Pick the frontmost registered WebView at *window_point* using AppKit hit testing.
+fn topmost_entry_index(
+    window: &NSWindow,
+    entries: &[FocusEntry],
+    window_point: NSPoint,
+) -> Option<usize> {
+    let content = window.contentView()?;
+    let point_in_content = content.convertPoint_fromView(window_point, None);
+    let hit = content.hitTest(point_in_content)?;
+    entry_index_for_hit_view(entries, hit)
+}
+
+fn entry_index_for_hit_view(entries: &[FocusEntry], hit: Retained<NSView>) -> Option<usize> {
+    let mut current = Some(hit);
+    while let Some(view) = current {
+        if let Some(idx) = entry_index_matching_view(entries, view.as_ref()) {
+            return Some(idx);
+        }
+        current = unsafe { view.superview() };
+    }
+    None
+}
+
+fn entry_index_matching_view(entries: &[FocusEntry], view: &NSView) -> Option<usize> {
+    entries
+        .iter()
+        .enumerate()
+        .find_map(|(idx, entry)| view_belongs_to_entry(view, entry).then_some(idx))
+}
+
+fn view_belongs_to_entry(view: &NSView, entry: &FocusEntry) -> bool {
+    unsafe {
+        if std::ptr::eq(view, entry.parent_ns_view.as_ref()) {
+            return true;
+        }
+    }
+    let Ok(guard) = entry.inner.lock() else {
+        return false;
+    };
+    let Some(ref wv) = *guard else {
+        return false;
+    };
+    let wk = wv.webview();
+    std::ptr::eq(view, Retained::as_ptr(&wk).cast::<NSView>())
 }
 
 /// Hit-test using wry top-left coordinates (same space as ``set_bounds``).
@@ -287,33 +549,23 @@ fn point_in_wry_bounds(wv: &wry::WebView, wry_point: NSPoint) -> bool {
     wry_point_in_logical_rect(wry_point, x, y, width, height)
 }
 
-/// Whether *window_point* lies inside the WKWebView using AppKit conversion.
-fn window_point_hits_webview(wv: &wry::WebView, window_point: NSPoint) -> bool {
-    let wk = wv.webview();
-    let local = wk.convertPoint_fromView(window_point, None);
-    point_in_ns_rect(local, wk.bounds())
-}
-
-fn point_in_ns_rect(point: NSPoint, rect: NSRect) -> bool {
-    point.x >= rect.origin.x
-        && point.y >= rect.origin.y
-        && point.x < rect.origin.x + rect.size.width
-        && point.y < rect.origin.y + rect.size.height
-}
-
-fn current_window_point(parent_ns_view: NonNull<NSView>) -> Option<NSPoint> {
+fn current_window_point(window: &NSWindow) -> Option<NSPoint> {
     let _mtm = MainThreadMarker::new()?;
-    unsafe {
-        let parent = parent_ns_view.as_ref();
-        let window = parent.window()?;
-        let screen = NSEvent::mouseLocation();
-        Some(window.convertPointFromScreen(screen))
-    }
+    let screen = NSEvent::mouseLocation();
+    Some(window.convertPointFromScreen(screen))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use objc2_foundation::NSRect;
+
+    fn point_in_ns_rect(point: NSPoint, rect: NSRect) -> bool {
+        point.x >= rect.origin.x
+            && point.y >= rect.origin.y
+            && point.x < rect.origin.x + rect.size.width
+            && point.y < rect.origin.y + rect.size.height
+    }
 
     #[test]
     fn wry_point_in_logical_rect_uses_top_left_space() {
