@@ -82,12 +82,7 @@ fn push_if_listening<T>(
 
 type EvalResultPending = Arc<Mutex<Vec<(u64, Option<String>)>>>;
 
-fn push_eval_result(
-    pending: &EvalResultPending,
-    dropped: &AtomicU64,
-    token: u64,
-    result: String,
-) {
+fn push_eval_result(pending: &EvalResultPending, dropped: &AtomicU64, token: u64, result: String) {
     let mut queue = match pending.lock() {
         Ok(queue) => queue,
         Err(_) => {
