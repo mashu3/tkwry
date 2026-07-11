@@ -339,3 +339,64 @@ def test_focus_in_tags_widget_and_releases_tk_focus_while_web_active(
 
     assert tagged == [entry]
     assert released == [True]
+
+
+def test_install_tabbing_disable_on_main_calls_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[bool] = []
+    _macos._tabbing_disable_done = False
+    monkeypatch.setattr(
+        "tkwry._core.disable_macos_automatic_window_tabbing",
+        lambda: calls.append(True),
+        raising=False,
+    )
+
+    _macos.install_automatic_window_tabbing_disable()
+
+    assert calls == [True]
+
+
+def test_install_tabbing_disable_off_main_defers_to_tk_init(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+    import tkinter as tk
+
+    orig_init = tk.Tk.__init__
+    _macos._tabbing_disable_done = False
+    disable_calls: list[bool] = []
+    init_calls: list[bool] = []
+
+    def fake_disable() -> None:
+        disable_calls.append(True)
+
+    def fake_orig(self, *args, **kwargs) -> None:
+        init_calls.append(True)
+
+    monkeypatch.setattr(
+        "tkwry._core.disable_macos_automatic_window_tabbing",
+        fake_disable,
+        raising=False,
+    )
+    tk.Tk.__init__ = fake_orig  # type: ignore[method-assign]
+
+    done = threading.Event()
+
+    def worker() -> None:
+        _macos.install_automatic_window_tabbing_disable()
+        done.set()
+
+    threading.Thread(target=worker).start()
+    done.wait(timeout=2.0)
+
+    assert disable_calls == []
+    patched_init = tk.Tk.__init__
+    assert getattr(patched_init, _macos._TABBING_PATCH_ATTR, False)
+
+    patched_init(object(), "test")  # type: ignore[call-arg]
+
+    assert disable_calls == [True]
+    assert init_calls == [True]
+
+    tk.Tk.__init__ = orig_init

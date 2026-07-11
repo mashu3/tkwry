@@ -151,10 +151,7 @@ fn wait_sync_hook<T: Copy>(
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             slot.cancelled.store(true, Ordering::SeqCst);
-            eprintln!(
-                "tkwry: {label} timed out after {}s",
-                timeout.as_secs()
-            );
+            eprintln!("tkwry: {label} timed out after {}s", timeout.as_secs());
             return default;
         }
         let (next, _) = match slot.cvar.wait_timeout(guard, remaining) {
@@ -169,10 +166,7 @@ fn wait_sync_hook<T: Copy>(
     guard.unwrap_or(default)
 }
 
-fn resolve_sync_hook<T: Copy>(
-    slot: &SyncHookSlot<T>,
-    value: T,
-) {
+fn resolve_sync_hook<T: Copy>(slot: &SyncHookSlot<T>, value: T) {
     if let Ok(mut guard) = slot.result.lock() {
         *guard = Some(value);
         slot.cvar.notify_one();
@@ -578,13 +572,7 @@ impl WebView {
                 if current == owner_thread_for_nav {
                     return Python::attach(|py| {
                         if let Some(func) = clone_py_callback(py, &nav_cb_clone) {
-                            call_sync_bool_callback(
-                                py,
-                                &func,
-                                url.as_str(),
-                                "on_navigation",
-                                false,
-                            )
+                            call_sync_bool_callback(py, &func, url.as_str(), "on_navigation", false)
                         } else {
                             true
                         }
@@ -639,56 +627,55 @@ impl WebView {
         let newwin_sync_pending_clone = newwin_sync_pending.clone();
         let wakeup_fd_for_newwin = wakeup_write_fd.clone();
         let owner_thread_for_newwin = owner_thread;
-        let newwin_handler =
-            move |url: String, _features: wry::NewWindowFeatures| -> wry::NewWindowResponse {
-                if let Some(current) = Python::attach(|_py| python_thread_id().ok()) {
-                    if current == owner_thread_for_newwin {
-                        return Python::attach(|py| {
-                            if let Some(func) = clone_py_callback(py, &newwin_cb_clone) {
-                                match func.call1(py, (url.as_str(),)) {
-                                    Ok(result) => {
-                                        if let Some(resp) = extract_new_window_response(
-                                            result.bind(py),
-                                            "on_new_window",
-                                        ) {
-                                            return match resp {
-                                                NewWindowResponse::Deny => {
-                                                    wry::NewWindowResponse::Deny
-                                                }
-                                                NewWindowResponse::Allow => {
-                                                    wry::NewWindowResponse::Allow
-                                                }
-                                            };
-                                        }
-                                        return wry::NewWindowResponse::Deny;
+        let newwin_handler = move |url: String,
+                                   _features: wry::NewWindowFeatures|
+              -> wry::NewWindowResponse {
+            if let Some(current) = Python::attach(|_py| python_thread_id().ok()) {
+                if current == owner_thread_for_newwin {
+                    return Python::attach(|py| {
+                        if let Some(func) = clone_py_callback(py, &newwin_cb_clone) {
+                            match func.call1(py, (url.as_str(),)) {
+                                Ok(result) => {
+                                    if let Some(resp) = extract_new_window_response(
+                                        result.bind(py),
+                                        "on_new_window",
+                                    ) {
+                                        return match resp {
+                                            NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
+                                            NewWindowResponse::Allow => {
+                                                wry::NewWindowResponse::Allow
+                                            }
+                                        };
                                     }
-                                    Err(err) => report_py_error(py, err),
+                                    return wry::NewWindowResponse::Deny;
                                 }
+                                Err(err) => report_py_error(py, err),
                             }
-                            wry::NewWindowResponse::Allow
-                        });
-                    }
+                        }
+                        wry::NewWindowResponse::Allow
+                    });
                 }
-                let slot = Arc::new(SyncHookSlot::new());
-                match newwin_sync_pending_clone.lock() {
-                    Ok(mut queue) => queue.push((url, slot.clone())),
-                    Err(_) => {
-                        eprintln!("tkwry: new-window hook dropped (queue lock poisoned)");
-                        return wry::NewWindowResponse::Deny;
-                    }
+            }
+            let slot = Arc::new(SyncHookSlot::new());
+            match newwin_sync_pending_clone.lock() {
+                Ok(mut queue) => queue.push((url, slot.clone())),
+                Err(_) => {
+                    eprintln!("tkwry: new-window hook dropped (queue lock poisoned)");
+                    return wry::NewWindowResponse::Deny;
                 }
-                notify_wakeup(&wakeup_fd_for_newwin);
-                let resp = wait_sync_hook(
-                    &slot,
-                    SYNC_HOOK_TIMEOUT,
-                    "on_new_window",
-                    NewWindowResponse::Deny,
-                );
-                match resp {
-                    NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
-                    NewWindowResponse::Allow => wry::NewWindowResponse::Allow,
-                }
-            };
+            }
+            notify_wakeup(&wakeup_fd_for_newwin);
+            let resp = wait_sync_hook(
+                &slot,
+                SYNC_HOOK_TIMEOUT,
+                "on_new_window",
+                NewWindowResponse::Deny,
+            );
+            match resp {
+                NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
+                NewWindowResponse::Allow => wry::NewWindowResponse::Allow,
+            }
+        };
 
         let drag_drop_pending_clone = drag_drop_pending.clone();
         let drag_drop_listening_clone = drag_drop_listening.clone();
@@ -1386,9 +1373,6 @@ mod tests {
         let queue = pending.lock().unwrap();
         assert_eq!(queue.len(), MAX_EVAL_PENDING + 1);
         assert_eq!(queue.last(), Some(&(999, None)));
-        assert_eq!(
-            queue[MAX_EVAL_PENDING - 1],
-            (255, Some("r255".to_string()))
-        );
+        assert_eq!(queue[MAX_EVAL_PENDING - 1], (255, Some("r255".to_string())));
     }
 }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import tkinter as tk
 import weakref
 from typing import TYPE_CHECKING
@@ -427,6 +428,45 @@ def _set_mac_webviews_input_active(
         if native is not None:
             native.set_mac_web_input_active(web is active_web)
     _sync_mac_web_input_cache(toplevel)
+
+
+_TABBING_PATCH_ATTR = "_tkwry_tabbing_patched"
+_tabbing_disable_done = False
+
+
+def install_automatic_window_tabbing_disable() -> None:
+    """Disable macOS automatic window tabbing on the AppKit main thread.
+
+    Called at package import. When import happens off the main thread (before
+    ``Tk()``), ``tk.Tk.__init__`` is patched so the process-wide opt-out still
+    runs on the main thread before the first root window is created.
+    """
+    global _tabbing_disable_done
+
+    def _disable_once() -> None:
+        global _tabbing_disable_done
+        if _tabbing_disable_done:
+            return
+        _tabbing_disable_done = True
+        from tkwry._core import disable_macos_automatic_window_tabbing
+
+        disable_macos_automatic_window_tabbing()
+
+    if threading.current_thread() is threading.main_thread():
+        _disable_once()
+        return
+
+    if getattr(tk.Tk.__init__, _TABBING_PATCH_ATTR, False):
+        return
+
+    orig_init = tk.Tk.__init__
+
+    def _tk_init_with_tabbing_disabled(self, *args, **kwargs):
+        _disable_once()
+        return orig_init(self, *args, **kwargs)
+
+    setattr(_tk_init_with_tabbing_disabled, _TABBING_PATCH_ATTR, True)
+    tk.Tk.__init__ = _tk_init_with_tabbing_disabled  # type: ignore[method-assign]
 
 
 def _ensure_mac_window_tabbing_disabled(toplevel: tk.Misc) -> None:
