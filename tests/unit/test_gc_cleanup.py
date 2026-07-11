@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import gc
+import os
+import sys
 import tkinter as tk
 
 import pytest
@@ -50,3 +52,74 @@ def test_del_calls_destroy_on_tk_thread(
     web.__del__()
 
     assert destroyed == [True]
+
+
+def test_schedule_destroy_on_tk_thread_runs_destroy(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    destroyed: list[bool] = []
+    original_destroy = web.destroy
+
+    def track_destroy() -> None:
+        destroyed.append(True)
+        original_destroy()
+
+    monkeypatch.setattr(web, "destroy", track_destroy, raising=False)
+    web._unbind_frame_events()
+
+    web._schedule_destroy_on_tk_thread()
+    assert destroyed == []
+
+    for _ in range(20):
+        tk_root.update_idletasks()
+        tk_root.update()
+        if destroyed:
+            break
+
+    assert destroyed == [True]
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="macOS uses a separate pipe")
+def test_destroy_closes_wakeup_pipe_when_last_user(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    web._ensure_tk_wakeup_pipe()
+
+    read_fd = tk_root._tkwry_wake_read_fd
+    write_fd = tk_root._tkwry_wake_write_fd
+    assert read_fd is not None
+    assert write_fd is not None
+
+    web.destroy()
+
+    assert not hasattr(tk_root, "_tkwry_wake_read_fd")
+    assert not hasattr(tk_root, "_tkwry_wake_write_fd")
+    with pytest.raises(OSError):
+        os.fstat(read_fd)
+    with pytest.raises(OSError):
+        os.fstat(write_fd)
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="macOS uses a separate pipe")
+def test_destroy_keeps_wakeup_pipe_while_other_users_remain(tk_root) -> None:
+    frame_a = tk.Frame(tk_root)
+    frame_b = tk.Frame(tk_root)
+    frame_a.pack()
+    frame_b.pack()
+    web_a = WebView(frame_a, width=200, height=200)
+    web_b = WebView(frame_b, width=200, height=200)
+    web_a._ensure_tk_wakeup_pipe()
+    web_b._ensure_tk_wakeup_pipe()
+
+    read_fd = tk_root._tkwry_wake_read_fd
+    web_a.destroy()
+
+    assert tk_root._tkwry_wake_read_fd == read_fd
+    assert tk_root._tkwry_wake_pipe_users == 1
+
+    web_b.destroy()
+    assert not hasattr(tk_root, "_tkwry_wake_read_fd")

@@ -550,6 +550,23 @@ def test_destroy_clears_native_when_native_destroy_fails(tk_root) -> None:
         _ = web.native
 
 
+def test_destroy_clears_native_when_native_destroy_deferred(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+
+    class _Native:
+        def destroy(self) -> None:
+            return None
+
+    web._webview = _Native()
+    web.destroy()
+
+    assert web.destroyed is True
+    assert web._webview is None
+    with pytest.raises(WebViewDestroyedError):
+        _ = web.native
+
+
 def test_reload_clears_pending_flush_load(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

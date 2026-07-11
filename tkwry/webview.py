@@ -150,6 +150,33 @@ def _pump_toplevel_wakeup_pipe(toplevel: tk.Misc) -> None:
         pass
 
 
+def _release_tk_wakeup_pipe(toplevel: tk.Misc) -> None:
+    """Close the Win/Linux sync-hook wakeup pipe when the last user is gone."""
+    users = getattr(toplevel, "_tkwry_wake_pipe_users", None)
+    if users is None:
+        return
+    users -= 1
+    if users > 0:
+        toplevel._tkwry_wake_pipe_users = users
+        return
+    for fd in (
+        getattr(toplevel, "_tkwry_wake_read_fd", None),
+        getattr(toplevel, "_tkwry_wake_write_fd", None),
+    ):
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+    for attr in (
+        "_tkwry_wake_read_fd",
+        "_tkwry_wake_write_fd",
+        "_tkwry_wake_pipe_users",
+    ):
+        if hasattr(toplevel, attr):
+            delattr(toplevel, attr)
+
+
 def _noop_native_eval_callback(_result: str) -> None:
     """Stub passed to Rust; Python delivers via ``_native_eval_wait``."""
 
@@ -510,12 +537,35 @@ class WebView:
         try:
             if self._destroyed:
                 return
-            if sys.platform == "darwin":
-                _unregister_macos_webview(self)
             if threading.get_ident() == self._tk_thread_id:
                 self._cancel_deferred_callbacks()
                 self.destroy()
+            else:
+                self._schedule_destroy_on_tk_thread()
         except Exception:
+            pass
+
+    def _schedule_destroy_on_tk_thread(self) -> None:
+        """Best-effort ``destroy()`` when ``__del__`` runs off the Tk thread."""
+        try:
+            frame = self._frame
+            after = frame.after
+        except (AttributeError, tk.TclError):
+            return
+
+        tk_thread_id = self._tk_thread_id
+
+        def _run() -> None:
+            if threading.get_ident() != tk_thread_id:
+                return
+            if self._destroyed:
+                return
+            self._cancel_deferred_callbacks()
+            self.destroy()
+
+        try:
+            after(0, _run)
+        except (tk.TclError, RuntimeError):
             pass
 
     def destroy(self) -> None:
@@ -544,14 +594,22 @@ class WebView:
         self._ready_callbacks.clear()
         _release_frame_host(self._frame, self)
         self._unbind_frame_events()
-        if self._webview is not None:
-            native = self._webview
+        native = self._webview
+        if native is not None:
             try:
                 native.destroy()
             except Exception:
                 traceback.print_exc()
             finally:
+                # Rust may defer native teardown during nested wry calls; drop the
+                # Python handle immediately so the widget appears destroyed.
                 self._webview = None
+        if self._tk_wakeup_write_fd is not None and sys.platform != "darwin":
+            self._tk_wakeup_write_fd = None
+            try:
+                _release_tk_wakeup_pipe(self._frame.winfo_toplevel())
+            except tk.TclError:
+                pass
         if sys.platform == "darwin":
             _unregister_macos_webview(self)
         elif sys.platform == "linux":
@@ -1160,6 +1218,10 @@ class WebView:
                 read_fd, write_fd = os.pipe()
                 setattr(toplevel, "_tkwry_wake_read_fd", read_fd)
                 setattr(toplevel, "_tkwry_wake_write_fd", write_fd)
+                setattr(toplevel, "_tkwry_wake_pipe_users", 0)
+            toplevel._tkwry_wake_pipe_users = (
+                getattr(toplevel, "_tkwry_wake_pipe_users", 0) + 1
+            )
         self._tk_wakeup_write_fd = write_fd
         native = self._webview
         if native is not None:
