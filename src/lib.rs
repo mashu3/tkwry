@@ -255,8 +255,6 @@ struct WebView {
     drag_drop_overflow_dropped: Arc<AtomicU64>,
     eval_overflow_dropped: Arc<AtomicU64>,
     #[cfg(target_os = "macos")]
-    parent_ns_view: std::ptr::NonNull<objc2_app_kit::NSView>,
-    #[cfg(target_os = "macos")]
     _focus_sync: Mutex<Option<macos_focus::FocusSyncGuard>>,
     #[cfg(target_os = "macos")]
     web_wants_keyboard: Arc<AtomicBool>,
@@ -676,8 +674,6 @@ impl WebView {
             drag_drop_overflow_dropped,
             eval_overflow_dropped,
             #[cfg(target_os = "macos")]
-            parent_ns_view,
-            #[cfg(target_os = "macos")]
             _focus_sync,
             #[cfg(target_os = "macos")]
             web_wants_keyboard,
@@ -1048,7 +1044,7 @@ impl WebView {
         #[cfg(target_os = "macos")]
         {
             return with_webview(self, |wv| {
-                match macos_document_url::read_document_url(wv, self.parent_ns_view) {
+                match macos_document_url::read_document_url(wv) {
                     Ok(url) => Ok(normalize_document_url(url)),
                     Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(err)),
                 }

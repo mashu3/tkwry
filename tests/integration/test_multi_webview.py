@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 import pytest
 from support.layout import attach_bounds_recorder, bounds_close, expected_bounds
@@ -108,6 +109,44 @@ def test_two_webviews_both_ready_and_independent_eval(tk_root) -> None:
 
     assert wait_until(tk_root, both_evaluated, steps=200), (
         f"expected independent eval results, got {results!r}"
+    )
+
+    web_a.destroy()
+    web_b.destroy()
+    row.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+def test_two_webviews_url_independent(tk_root, tmp_path: Path) -> None:
+    row, left, right = _two_pane_row(tk_root)
+
+    page_a = tmp_path / "pane-a.html"
+    page_b = tmp_path / "pane-b.html"
+    page_a.write_text("<p>a</p>", encoding="utf-8")
+    page_b.write_text("<p>b</p>", encoding="utf-8")
+
+    web_a = WebView(left, html="<p>a</p>")
+    web_b = WebView(right, html="<p>b</p>")
+
+    assert wait_until(tk_root, lambda: web_a.ready and web_b.ready, steps=200)
+
+    web_a.load_url(str(page_a))
+    web_b.load_url(str(page_b))
+    pump(tk_root, steps=60)
+
+    assert web_a.native is not None and web_b.native is not None
+
+    def urls_match() -> bool:
+        try:
+            return (
+                web_a.url == page_a.absolute().as_uri()
+                and web_b.url == page_b.absolute().as_uri()
+            )
+        except Exception:
+            return False
+
+    assert wait_until(tk_root, urls_match, steps=300), (
+        f"expected independent document URLs, got {web_a.url!r} and {web_b.url!r}"
     )
 
     web_a.destroy()
