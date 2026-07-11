@@ -1704,7 +1704,7 @@ fn disable_macos_window_tabbing(parent: usize) -> PyResult<()> {
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[cfg(target_os = "macos")]
     {
-        if let Err(err) = macos_window::disable_automatic_window_tabbing() {
+        if let Err(err) = macos_window::disable_process_automatic_window_tabbing() {
             // Off the AppKit main thread; Python retries before the first Tk().
             if !err.contains("main thread") {
                 eprintln!("tkwry: disable automatic window tabbing failed: {err}");

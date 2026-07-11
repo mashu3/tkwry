@@ -110,13 +110,9 @@ def test_teardown_native_if_alive_drops_native_without_destroy(
     frame = tk.Frame(tk_root)
     frame.pack()
     web = WebView(frame, width=400, height=300)
-    native = object()
-    web._webview = native  # type: ignore[assignment]
-    destroy_calls: list[bool] = []
 
     class FakeNative:
-        def destroy(self) -> None:
-            destroy_calls.append(True)
+        """Native stand-in without ``destroy``; teardown drops the reference only."""
 
     web._webview = FakeNative()  # type: ignore[assignment]
 
@@ -124,7 +120,6 @@ def test_teardown_native_if_alive_drops_native_without_destroy(
 
     assert web._destroyed is True
     assert web._webview is None
-    assert destroy_calls == []
 
 
 @pytest.mark.skipif(sys.platform == "darwin", reason="macOS uses a separate pipe")

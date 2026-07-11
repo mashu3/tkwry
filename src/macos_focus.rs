@@ -19,9 +19,7 @@ use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{
-    NSEvent, NSEventMask, NSView, NSWindow, NSWindowDidBecomeKeyNotification,
-};
+use objc2_app_kit::{NSEvent, NSEventMask, NSView, NSWindow, NSWindowDidBecomeKeyNotification};
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSOperationQueue, NSPoint};
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::WebViewExtMacOS;
@@ -294,12 +292,7 @@ fn handle_click(
     }
 }
 
-fn handle_keydown(
-    window: &NSWindow,
-    entries: &[FocusEntry],
-    event: &NSEvent,
-    wakeup: &AtomicI32,
-) {
+fn handle_keydown(window: &NSWindow, entries: &[FocusEntry], event: &NSEvent, wakeup: &AtomicI32) {
     let Some(active_idx) = active_entry_index(entries) else {
         return;
     };

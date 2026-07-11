@@ -17,17 +17,26 @@ fn disable_tabbing_on_existing_windows(mtm: MainThreadMarker) {
     }
 }
 
+/// Process-wide opt-out safe before the first ``Tk()`` call.
+///
+/// Does not touch ``NSApplication`` so AppKit is not initialized before Tk.
+pub fn disable_process_automatic_window_tabbing() -> Result<(), String> {
+    let mtm = MainThreadMarker::new().ok_or(MAIN_THREAD_ERROR)?;
+
+    if !AUTOMATIC_WINDOW_TABBING_DISABLED.swap(true, Ordering::SeqCst) {
+        NSWindow::setAllowsAutomaticWindowTabbing(false, mtm);
+    }
+    Ok(())
+}
+
 /// Opt out of macOS automatic window tabs process-wide.
 ///
 /// Must run before the first ``Tk()`` call; otherwise AppKit may reserve a tab
 /// bar in the titlebar chrome (double title strip) for the process.  When that
 /// happens, existing ``NSWindow`` instances are still repaired on every call.
 pub fn disable_automatic_window_tabbing() -> Result<(), String> {
+    disable_process_automatic_window_tabbing()?;
     let mtm = MainThreadMarker::new().ok_or(MAIN_THREAD_ERROR)?;
-
-    if !AUTOMATIC_WINDOW_TABBING_DISABLED.swap(true, Ordering::SeqCst) {
-        NSWindow::setAllowsAutomaticWindowTabbing(false, mtm);
-    }
     disable_tabbing_on_existing_windows(mtm);
     Ok(())
 }
@@ -51,6 +60,12 @@ mod tests {
     #[test]
     fn disable_automatic_window_tabbing_requires_main_thread() {
         let result = std::thread::spawn(disable_automatic_window_tabbing).join();
+        assert!(result.unwrap().is_err());
+    }
+
+    #[test]
+    fn disable_process_automatic_window_tabbing_requires_main_thread() {
+        let result = std::thread::spawn(disable_process_automatic_window_tabbing).join();
         assert!(result.unwrap().is_err());
     }
 }
