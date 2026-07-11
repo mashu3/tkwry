@@ -38,6 +38,9 @@ const MAX_IPC_MESSAGE_BYTES: usize = 10 * 1024 * 1024;
 /// them; cap wait time so a stuck handler cannot freeze the page indefinitely.
 const SYNC_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// ``eval_js_with_callback`` registrations older than this are pruned on drain.
+const EVAL_CALLBACK_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Print a Python exception (with traceback) to stderr from a Rust callback.
 fn report_py_error(py: Python<'_>, err: PyErr) {
     err.print(py);
@@ -57,6 +60,7 @@ fn push_if_listening<T>(
 ) -> Result<(), ()> {
     // Fast path: avoid taking the queue lock when clearly not listening.
     if !listening.load(Ordering::SeqCst) {
+        dropped.fetch_add(1, Ordering::SeqCst);
         return Ok(());
     }
     let mut queue = match pending.lock() {
@@ -69,6 +73,7 @@ fn push_if_listening<T>(
     // Re-check under the queue lock so disable+clear cannot interleave a push
     // (TOCTOU: load(true) → clear → push would otherwise resurrect stale events).
     if !listening.load(Ordering::SeqCst) {
+        dropped.fetch_add(1, Ordering::SeqCst);
         return Ok(());
     }
     if queue.len() >= max {
@@ -108,7 +113,13 @@ fn notify_wakeup(fd: &AtomicI32) {
         return;
     }
     let byte = 1u8;
-    let _ = unsafe { libc::write(fd, &byte as *const u8 as *const libc::c_void, 1) };
+    let wrote = unsafe { libc::write(fd, &byte as *const u8 as *const libc::c_void, 1) };
+    if wrote < 0 {
+        eprintln!(
+            "tkwry: wakeup pipe write failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
 }
 
 struct SyncHookSlot<T> {
@@ -196,6 +207,80 @@ fn abort_newwin_sync_hooks(pending: &NewWinSyncPending) {
         slot.cancelled.store(true, Ordering::SeqCst);
         resolve_sync_hook(&slot, NewWindowResponse::Deny);
     }
+}
+
+fn drain_nav_sync_hooks(nav_cb: &PyCallback, pending: &NavSyncPending, default_when_missing: bool) {
+    let requests = match pending.lock() {
+        Ok(mut queue) => std::mem::take(&mut *queue),
+        Err(_) => {
+            eprintln!("tkwry: navigation sync hook queue dropped (lock poisoned)");
+            return;
+        }
+    };
+    for (url, slot) in requests {
+        if slot.cancelled.load(Ordering::SeqCst) {
+            resolve_sync_hook(&slot, false);
+            continue;
+        }
+        let allowed = Python::attach(|py| {
+            if let Some(func) = clone_py_callback(py, nav_cb) {
+                call_sync_bool_callback(py, &func, url.as_str(), "on_navigation", false)
+            } else {
+                default_when_missing
+            }
+        });
+        resolve_sync_hook(&slot, allowed);
+    }
+}
+
+fn drain_newwin_sync_hooks(
+    newwin_cb: &PyCallback,
+    pending: &NewWinSyncPending,
+    default_when_missing: NewWindowResponse,
+) {
+    let requests = match pending.lock() {
+        Ok(mut queue) => std::mem::take(&mut *queue),
+        Err(_) => {
+            eprintln!("tkwry: new-window sync hook queue dropped (lock poisoned)");
+            return;
+        }
+    };
+    for (url, slot) in requests {
+        if slot.cancelled.load(Ordering::SeqCst) {
+            resolve_sync_hook(&slot, NewWindowResponse::Deny);
+            continue;
+        }
+        let resp = Python::attach(|py| {
+            if let Some(func) = clone_py_callback(py, newwin_cb) {
+                match func.call1(py, (url.as_str(),)) {
+                    Ok(result) => extract_new_window_response(result.bind(py), "on_new_window")
+                        .unwrap_or(NewWindowResponse::Deny),
+                    Err(err) => {
+                        report_py_error(py, err);
+                        NewWindowResponse::Deny
+                    }
+                }
+            } else {
+                default_when_missing
+            }
+        });
+        resolve_sync_hook(&slot, resp);
+    }
+}
+
+fn prune_stale_eval_callbacks(
+    callbacks: &mut HashMap<u64, EvalCallbackEntry>,
+    dropped: &AtomicU64,
+) {
+    let now = Instant::now();
+    callbacks.retain(|_, (_, registered)| {
+        if now.duration_since(*registered) > EVAL_CALLBACK_TIMEOUT {
+            dropped.fetch_add(1, Ordering::SeqCst);
+            false
+        } else {
+            true
+        }
+    });
 }
 
 fn set_listening_and_clear_queue<T>(
@@ -294,7 +379,8 @@ type IpcPending = Arc<Mutex<Vec<String>>>;
 type TitlePending = Arc<Mutex<Vec<String>>>;
 type DragDropPendingItem = (DragDropEvent, Vec<String>, (i32, i32));
 type DragDropPending = Arc<Mutex<Vec<DragDropPendingItem>>>;
-type EvalCallbackMap = Arc<Mutex<HashMap<u64, Py<PyAny>>>>;
+type EvalCallbackEntry = (Py<PyAny>, Instant);
+type EvalCallbackMap = Arc<Mutex<HashMap<u64, EvalCallbackEntry>>>;
 type DrainedEvalCallback = (u64, Py<PyAny>, Option<String>);
 type NavSyncPending = Arc<Mutex<Vec<(String, Arc<SyncHookSlot<bool>>)>>>;
 type NewWinSyncPending = Arc<Mutex<Vec<(String, Arc<SyncHookSlot<NewWindowResponse>>)>>>;
@@ -430,7 +516,10 @@ impl WebView {
             .lock()
             .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned"))?;
         if let Some(wv) = guard.take() {
-            let _ = wv.set_visible(false);
+            if let Err(err) = wv.set_visible(false) {
+                eprintln!("tkwry: set_visible(false) failed during destroy: {err}");
+            }
+            drop(wv);
         }
         Ok(())
     }
@@ -543,6 +632,7 @@ impl WebView {
         let ipc_handler_wry = move |req: wry::http::Request<String>| {
             let body = req.body().clone();
             if body.len() > MAX_IPC_MESSAGE_BYTES {
+                ipc_overflow_clone.fetch_add(1, Ordering::SeqCst);
                 eprintln!(
                     "tkwry: IPC message dropped ({} bytes exceeds {} byte limit)",
                     body.len(),
@@ -565,17 +655,6 @@ impl WebView {
         let wakeup_fd_clone = wakeup_write_fd.clone();
         let owner_thread_for_nav = owner_thread;
         let nav_handler = move |url: String| -> bool {
-            if let Some(current) = Python::attach(|_py| python_thread_id().ok()) {
-                if current == owner_thread_for_nav {
-                    return Python::attach(|py| {
-                        if let Some(func) = clone_py_callback(py, &nav_cb_clone) {
-                            call_sync_bool_callback(py, &func, url.as_str(), "on_navigation", false)
-                        } else {
-                            true
-                        }
-                    });
-                }
-            }
             let slot = Arc::new(SyncHookSlot::new());
             match nav_sync_pending_clone.lock() {
                 Ok(mut queue) => queue.push((url, slot.clone())),
@@ -585,6 +664,9 @@ impl WebView {
                 }
             }
             notify_wakeup(&wakeup_fd_clone);
+            if Python::attach(|_py| python_thread_id().ok()) == Some(owner_thread_for_nav) {
+                drain_nav_sync_hooks(&nav_cb_clone, &nav_sync_pending_clone, true);
+            }
             wait_sync_hook(&slot, SYNC_HOOK_TIMEOUT, "on_navigation", false)
         };
 
@@ -624,55 +706,35 @@ impl WebView {
         let newwin_sync_pending_clone = newwin_sync_pending.clone();
         let wakeup_fd_for_newwin = wakeup_write_fd.clone();
         let owner_thread_for_newwin = owner_thread;
-        let newwin_handler = move |url: String,
-                                   _features: wry::NewWindowFeatures|
-              -> wry::NewWindowResponse {
-            if let Some(current) = Python::attach(|_py| python_thread_id().ok()) {
-                if current == owner_thread_for_newwin {
-                    return Python::attach(|py| {
-                        if let Some(func) = clone_py_callback(py, &newwin_cb_clone) {
-                            match func.call1(py, (url.as_str(),)) {
-                                Ok(result) => {
-                                    if let Some(resp) = extract_new_window_response(
-                                        result.bind(py),
-                                        "on_new_window",
-                                    ) {
-                                        return match resp {
-                                            NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
-                                            NewWindowResponse::Allow => {
-                                                wry::NewWindowResponse::Allow
-                                            }
-                                        };
-                                    }
-                                    return wry::NewWindowResponse::Deny;
-                                }
-                                Err(err) => report_py_error(py, err),
-                            }
-                        }
-                        wry::NewWindowResponse::Allow
-                    });
+        let newwin_handler =
+            move |url: String, _features: wry::NewWindowFeatures| -> wry::NewWindowResponse {
+                let slot = Arc::new(SyncHookSlot::new());
+                match newwin_sync_pending_clone.lock() {
+                    Ok(mut queue) => queue.push((url, slot.clone())),
+                    Err(_) => {
+                        eprintln!("tkwry: new-window hook dropped (queue lock poisoned)");
+                        return wry::NewWindowResponse::Deny;
+                    }
                 }
-            }
-            let slot = Arc::new(SyncHookSlot::new());
-            match newwin_sync_pending_clone.lock() {
-                Ok(mut queue) => queue.push((url, slot.clone())),
-                Err(_) => {
-                    eprintln!("tkwry: new-window hook dropped (queue lock poisoned)");
-                    return wry::NewWindowResponse::Deny;
+                notify_wakeup(&wakeup_fd_for_newwin);
+                if Python::attach(|_py| python_thread_id().ok()) == Some(owner_thread_for_newwin) {
+                    drain_newwin_sync_hooks(
+                        &newwin_cb_clone,
+                        &newwin_sync_pending_clone,
+                        NewWindowResponse::Allow,
+                    );
                 }
-            }
-            notify_wakeup(&wakeup_fd_for_newwin);
-            let resp = wait_sync_hook(
-                &slot,
-                SYNC_HOOK_TIMEOUT,
-                "on_new_window",
-                NewWindowResponse::Deny,
-            );
-            match resp {
-                NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
-                NewWindowResponse::Allow => wry::NewWindowResponse::Allow,
-            }
-        };
+                let resp = wait_sync_hook(
+                    &slot,
+                    SYNC_HOOK_TIMEOUT,
+                    "on_new_window",
+                    NewWindowResponse::Deny,
+                );
+                match resp {
+                    NewWindowResponse::Deny => wry::NewWindowResponse::Deny,
+                    NewWindowResponse::Allow => wry::NewWindowResponse::Allow,
+                }
+            };
 
         let drag_drop_pending_clone = drag_drop_pending.clone();
         let drag_drop_listening_clone = drag_drop_listening.clone();
@@ -856,7 +918,7 @@ impl WebView {
                 .eval_callbacks
                 .lock()
                 .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
-            callbacks.insert(token, callback);
+            callbacks.insert(token, (callback, Instant::now()));
         }
         let pending = self.eval_result_pending.clone();
         let dropped = self.eval_overflow_dropped.clone();
@@ -882,68 +944,27 @@ impl WebView {
             .eval_callbacks
             .lock()
             .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
-        Ok(items
+        prune_stale_eval_callbacks(&mut callbacks, &self.eval_overflow_dropped);
+        let drained = items
             .into_iter()
             .filter_map(|(token, result)| {
                 callbacks
                     .remove(&token)
-                    .map(|callback| (token, callback, result))
+                    .map(|(callback, _)| (token, callback, result))
             })
-            .collect())
+            .collect();
+        prune_stale_eval_callbacks(&mut callbacks, &self.eval_overflow_dropped);
+        Ok(drained)
     }
 
     fn drain_sync_hooks(&self) -> PyResult<()> {
         self.require_owner_thread()?;
-        let nav_requests = {
-            let mut queue = self
-                .nav_sync_pending
-                .lock()
-                .map_err(|_| queue_lock_poisoned())?;
-            std::mem::take(&mut *queue)
-        };
-        for (url, slot) in nav_requests {
-            if slot.cancelled.load(Ordering::SeqCst) {
-                resolve_sync_hook(&slot, false);
-                continue;
-            }
-            let allowed = Python::attach(|py| {
-                if let Some(func) = clone_py_callback(py, &self.nav_cb) {
-                    call_sync_bool_callback(py, &func, url.as_str(), "on_navigation", false)
-                } else {
-                    true
-                }
-            });
-            resolve_sync_hook(&slot, allowed);
-        }
-
-        let newwin_requests = {
-            let mut queue = self
-                .newwin_sync_pending
-                .lock()
-                .map_err(|_| queue_lock_poisoned())?;
-            std::mem::take(&mut *queue)
-        };
-        for (url, slot) in newwin_requests {
-            if slot.cancelled.load(Ordering::SeqCst) {
-                resolve_sync_hook(&slot, NewWindowResponse::Deny);
-                continue;
-            }
-            let resp = Python::attach(|py| {
-                if let Some(func) = clone_py_callback(py, &self.newwin_cb) {
-                    match func.call1(py, (url.as_str(),)) {
-                        Ok(result) => extract_new_window_response(result.bind(py), "on_new_window")
-                            .unwrap_or(NewWindowResponse::Deny),
-                        Err(err) => {
-                            report_py_error(py, err);
-                            NewWindowResponse::Deny
-                        }
-                    }
-                } else {
-                    NewWindowResponse::Allow
-                }
-            });
-            resolve_sync_hook(&slot, resp);
-        }
+        drain_nav_sync_hooks(&self.nav_cb, &self.nav_sync_pending, false);
+        drain_newwin_sync_hooks(
+            &self.newwin_cb,
+            &self.newwin_sync_pending,
+            NewWindowResponse::Deny,
+        );
         Ok(())
     }
 
@@ -980,6 +1001,7 @@ impl WebView {
             .lock()
             .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
         *guard = None;
+        abort_nav_sync_hooks(&self.nav_sync_pending);
         Ok(())
     }
 
@@ -1077,6 +1099,7 @@ impl WebView {
             .lock()
             .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
         *guard = None;
+        abort_newwin_sync_hooks(&self.newwin_sync_pending);
         Ok(())
     }
 
@@ -1372,5 +1395,37 @@ mod tests {
         assert_eq!(queue.len(), MAX_EVAL_PENDING + 1);
         assert_eq!(queue.last(), Some(&(999, None)));
         assert_eq!(queue[MAX_EVAL_PENDING - 1], (255, Some("r255".to_string())));
+    }
+
+    #[test]
+    fn push_if_listening_counts_drop_when_not_listening() {
+        let listening = AtomicBool::new(false);
+        let pending: Arc<Mutex<Vec<i32>>> = Arc::new(Mutex::new(Vec::new()));
+        let dropped = AtomicU64::new(0);
+        assert!(push_if_listening(&listening, &pending, &dropped, 1, 4, "test").is_ok());
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn prune_stale_eval_callbacks_removes_old_entries() {
+        Python::initialize();
+        let mut callbacks = HashMap::new();
+        let dropped = AtomicU64::new(0);
+        Python::attach(|py| {
+            let cb = py.None().into();
+            callbacks.insert(
+                1,
+                (
+                    cb,
+                    Instant::now() - EVAL_CALLBACK_TIMEOUT - Duration::from_secs(1),
+                ),
+            );
+            callbacks.insert(2, (py.None().into(), Instant::now()));
+        });
+        prune_stale_eval_callbacks(&mut callbacks, &dropped);
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        assert_eq!(callbacks.len(), 1);
+        assert!(callbacks.contains_key(&2));
     }
 }

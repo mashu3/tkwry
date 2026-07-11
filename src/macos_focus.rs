@@ -42,7 +42,13 @@ pub fn notify_wakeup(fd: &AtomicI32) {
         return;
     }
     let byte = 1u8;
-    let _ = unsafe { libc::write(fd, &byte as *const u8 as *const libc::c_void, 1) };
+    let wrote = unsafe { libc::write(fd, &byte as *const u8 as *const libc::c_void, 1) };
+    if wrote < 0 {
+        eprintln!(
+            "tkwry: wakeup pipe write failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
 }
 
 pub fn install_focus_sync(

@@ -1226,7 +1226,7 @@ class WebView:
             )
         self._tk_wakeup_write_fd = write_fd
         native = self._webview
-        if native is not None:
+        if native is not None and write_fd is not None:
             native.set_mac_wakeup_write_fd(write_fd)
 
     def _wake_tk_for_sync_hook(self) -> None:
