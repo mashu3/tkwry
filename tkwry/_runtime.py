@@ -12,12 +12,13 @@ if TYPE_CHECKING:
 
 _PUMP_ITERATIONS = 512
 _PUMP_BURST_BASE = 1
-_PUMP_BURST_MAX = 4
+_PUMP_BURST_MAX = 8
+_PUMP_BACKLOG_MAX_PASSES = 8
 _PUMP_TICK_IDLE_MS = 10
-_PUMP_TICK_BUSY_MS = 1
+_PUMP_TICK_BUSY_MS = 0
 _PUMP_ERROR_LIMIT = 5
-_PUMP_ERROR_RECOVERY_BASE_MS = 100
-_PUMP_ERROR_RECOVERY_MAX_MS = 2000
+_PUMP_ERROR_RECOVERY_BASE_MS = 10
+_PUMP_ERROR_RECOVERY_MAX_MS = 200
 
 
 def pump_gtk_events(
@@ -37,7 +38,7 @@ def pump_gtk_events(
         if pump_events(max_iterations):
             backlog = True
         else:
-            return False
+            break
     return backlog
 
 
@@ -55,8 +56,13 @@ def _gtk_pump_tick(root_id: int) -> None:
         pump.stop()
         return
     pump._clear_tick_after_id()
+    backlog = False
     try:
-        backlog = pump_gtk_events(refcount=pump._refcount)
+        for _ in range(_PUMP_BACKLOG_MAX_PASSES):
+            if pump_gtk_events(refcount=pump._refcount):
+                backlog = True
+                continue
+            break
     except Exception:
         traceback.print_exc()
         pump._handle_pump_error()
@@ -81,8 +87,22 @@ class GtkPump:
         self._active = False
         self._refcount = 0
         self._consecutive_errors = 0
+        self._recovery_pending = False
         self._destroy_bind_id: str | None = None
         self._tick_after_id: str | None = None
+
+    def _schedule_callback(self, delay_ms: int, callback) -> str | None:
+        try:
+            return self._root.after(delay_ms, callback)
+        except tk.TclError:
+            return None
+
+    def _schedule_idle(self, callback) -> bool:
+        try:
+            self._root.after_idle(callback)
+            return True
+        except tk.TclError:
+            return False
 
     def _schedule_tick(self, delay_ms: int) -> None:
         self._cancel_tick()
@@ -91,7 +111,21 @@ class GtkPump:
         def _tick() -> None:
             _gtk_pump_tick(root_id)
 
-        self._tick_after_id = self._root.after(delay_ms, _tick)
+        after_id = self._schedule_callback(delay_ms, _tick)
+        if after_id is None and delay_ms > 0:
+            after_id = self._schedule_callback(0, _tick)
+        if after_id is not None:
+            self._tick_after_id = after_id
+            return
+        if self._schedule_idle(_tick):
+            return
+        try:
+            if self._root.winfo_exists():
+                _tick()
+                return
+        except tk.TclError:
+            pass
+        self._recovery_pending = True
 
     def _cancel_tick(self) -> None:
         after_id = self._tick_after_id
@@ -122,28 +156,18 @@ class GtkPump:
             f"times; retrying in {delay}ms",
             file=sys.stderr,
         )
-        self._pause_for_recovery(delay)
+        if self._active:
+            self._schedule_tick(delay)
 
-    def _pause_for_recovery(self, delay_ms: int) -> None:
-        self._active = False
-        self._cancel_tick()
-        if self._refcount <= 0:
-            self.stop()
+    def _resume_if_recovery_pending(self) -> None:
+        if not self._recovery_pending or self._refcount <= 0:
             return
-        root_id = self._root_id
-
-        def _recover() -> None:
-            pump = GtkPump._by_root_id.get(root_id)
-            if pump is None or pump._refcount <= 0:
-                return
-            pump._consecutive_errors = 0
-            pump._active = True
-            pump._schedule_tick(0)
-
-        try:
-            self._root.after(delay_ms, _recover)
-        except tk.TclError:
-            pass
+        self._recovery_pending = False
+        self._consecutive_errors = 0
+        if not self._active:
+            self.start()
+        else:
+            self._schedule_tick(0)
 
     @classmethod
     def _resolve_root_id(cls, widget: tk.Misc) -> int | None:
@@ -238,9 +262,11 @@ class GtkPump:
             if entry[0] != root_id:
                 cls._transfer_widget_to_root(widget, root_id)
             pump = cls._by_root_id.get(root_id)
-            if pump is not None and not pump._active and pump._refcount > 0:
-                pump._consecutive_errors = 0
-                pump.start()
+            if pump is not None:
+                pump._resume_if_recovery_pending()
+                if not pump._active and pump._refcount > 0:
+                    pump._consecutive_errors = 0
+                    pump.start()
             return
         cls._widget_attachments[widget_id] = (root_id, 1)
         cls._increment_root_refcount(widget, root_id, 1)
@@ -266,6 +292,7 @@ class GtkPump:
         ensure_gtk_init()
         self._active = True
         self._consecutive_errors = 0
+        self._recovery_pending = False
         self._destroy_bind_id = self._root.bind("<Destroy>", self._on_destroy, add="+")
         self._schedule_tick(0)
 
