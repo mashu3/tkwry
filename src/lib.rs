@@ -30,6 +30,13 @@ const MAX_IPC_PENDING: usize = 256;
 const MAX_TITLE_PENDING: usize = 256;
 const MAX_DRAG_DROP_PENDING: usize = 256;
 const MAX_EVAL_PENDING: usize = 256;
+const MAX_SYNC_HOOK_PENDING: usize = 256;
+
+/// Default sync-hook result when no Python handler is registered.
+const NAV_SYNC_DEFAULT_MISSING: bool = true;
+
+/// Drag-drop events without a position from the platform (e.g. Leave).
+const DRAG_DROP_NO_POSITION: (i32, i32) = (-1, -1);
 
 /// Maximum IPC message size (10 MiB). Messages exceeding this are dropped.
 const MAX_IPC_MESSAGE_BYTES: usize = 10 * 1024 * 1024;
@@ -57,6 +64,7 @@ fn push_if_listening<T>(
     item: T,
     max: usize,
     label: &str,
+    wakeup: Option<&Arc<AtomicI32>>,
 ) -> Result<(), ()> {
     // Fast path: avoid taking the queue lock when clearly not listening.
     if !listening.load(Ordering::SeqCst) {
@@ -78,10 +86,13 @@ fn push_if_listening<T>(
     }
     if queue.len() >= max {
         dropped.fetch_add(1, Ordering::SeqCst);
-        eprintln!("tkwry: dropping newest {label} event (pending queue full at {max} events)");
-        return Ok(());
+        queue.remove(0);
+        eprintln!("tkwry: dropping oldest {label} event (pending queue full at {max} events)");
     }
     queue.push(item);
+    if let Some(fd) = wakeup {
+        notify_wakeup(fd);
+    }
     Ok(())
 }
 
@@ -97,7 +108,10 @@ fn push_eval_result(pending: &EvalResultPending, dropped: &AtomicU64, token: u64
     };
     if queue.len() >= MAX_EVAL_PENDING {
         dropped.fetch_add(1, Ordering::SeqCst);
-        eprintln!("tkwry: dropping eval result (pending queue full at {MAX_EVAL_PENDING} events)");
+        queue.remove(0);
+        eprintln!(
+            "tkwry: dropping oldest eval result (pending queue full at {MAX_EVAL_PENDING} events)"
+        );
         // Queue a dropped sentinel so drain_eval_callbacks can pair with the
         // registered callback without conflating overflow with an empty JS value.
         queue.push((token, None));
@@ -209,7 +223,55 @@ fn abort_newwin_sync_hooks(pending: &NewWinSyncPending) {
     }
 }
 
-fn drain_nav_sync_hooks(nav_cb: &PyCallback, pending: &NavSyncPending, default_when_missing: bool) {
+fn enqueue_nav_sync_hook(
+    pending: &NavSyncPending,
+    url: String,
+    slot: Arc<SyncHookSlot<bool>>,
+) -> bool {
+    let mut queue = match pending.lock() {
+        Ok(queue) => queue,
+        Err(_) => {
+            eprintln!("tkwry: navigation hook dropped (queue lock poisoned)");
+            return false;
+        }
+    };
+    while queue.len() >= MAX_SYNC_HOOK_PENDING {
+        let (_, old_slot) = queue.remove(0);
+        old_slot.cancelled.store(true, Ordering::SeqCst);
+        resolve_sync_hook(&old_slot, false);
+        eprintln!(
+            "tkwry: dropping oldest navigation sync hook (queue full at {MAX_SYNC_HOOK_PENDING})"
+        );
+    }
+    queue.push((url, slot));
+    true
+}
+
+fn enqueue_newwin_sync_hook(
+    pending: &NewWinSyncPending,
+    url: String,
+    slot: Arc<SyncHookSlot<NewWindowResponse>>,
+) -> bool {
+    let mut queue = match pending.lock() {
+        Ok(queue) => queue,
+        Err(_) => {
+            eprintln!("tkwry: new-window hook dropped (queue lock poisoned)");
+            return false;
+        }
+    };
+    while queue.len() >= MAX_SYNC_HOOK_PENDING {
+        let (_, old_slot) = queue.remove(0);
+        old_slot.cancelled.store(true, Ordering::SeqCst);
+        resolve_sync_hook(&old_slot, NewWindowResponse::Deny);
+        eprintln!(
+            "tkwry: dropping oldest new-window sync hook (queue full at {MAX_SYNC_HOOK_PENDING})"
+        );
+    }
+    queue.push((url, slot));
+    true
+}
+
+fn drain_nav_sync_hooks(nav_cb: &PyCallback, pending: &NavSyncPending) {
     let requests = match pending.lock() {
         Ok(mut queue) => std::mem::take(&mut *queue),
         Err(_) => {
@@ -226,18 +288,14 @@ fn drain_nav_sync_hooks(nav_cb: &PyCallback, pending: &NavSyncPending, default_w
             if let Some(func) = clone_py_callback(py, nav_cb) {
                 call_sync_bool_callback(py, &func, url.as_str(), "on_navigation", false)
             } else {
-                default_when_missing
+                NAV_SYNC_DEFAULT_MISSING
             }
         });
         resolve_sync_hook(&slot, allowed);
     }
 }
 
-fn drain_newwin_sync_hooks(
-    newwin_cb: &PyCallback,
-    pending: &NewWinSyncPending,
-    default_when_missing: NewWindowResponse,
-) {
+fn drain_newwin_sync_hooks(newwin_cb: &PyCallback, pending: &NewWinSyncPending) {
     let requests = match pending.lock() {
         Ok(mut queue) => std::mem::take(&mut *queue),
         Err(_) => {
@@ -261,7 +319,7 @@ fn drain_newwin_sync_hooks(
                     }
                 }
             } else {
-                default_when_missing
+                NewWindowResponse::Allow
             }
         });
         resolve_sync_hook(&slot, resp);
@@ -313,8 +371,21 @@ fn push_listening_py<T>(
     max: usize,
     label: &str,
 ) -> PyResult<()> {
-    push_if_listening(listening, pending, dropped, item, max, label)
+    push_if_listening(listening, pending, dropped, item, max, label, None)
         .map_err(|()| queue_lock_poisoned())
+}
+
+fn alloc_eval_token(counter: &AtomicU64, callbacks: &mut HashMap<u64, EvalCallbackEntry>) -> u64 {
+    loop {
+        let token = counter.fetch_add(1, Ordering::SeqCst);
+        if token == 0 {
+            continue;
+        }
+        if callbacks.remove(&token).is_some() {
+            eprintln!("tkwry: recycled eval token {token} after counter wrap");
+        }
+        return token;
+    }
 }
 
 fn extract_py_bool(result: &Bound<'_, PyAny>, context: &str) -> Option<bool> {
@@ -629,6 +700,7 @@ impl WebView {
         let ipc_pending_clone = ipc_pending.clone();
         let ipc_listening_clone = ipc_listening.clone();
         let ipc_overflow_clone = ipc_overflow_dropped.clone();
+        let wakeup_for_ipc = wakeup_write_fd.clone();
         let ipc_handler_wry = move |req: wry::http::Request<String>| {
             let body = req.body().clone();
             if body.len() > MAX_IPC_MESSAGE_BYTES {
@@ -647,6 +719,7 @@ impl WebView {
                 body,
                 MAX_IPC_PENDING,
                 "IPC",
+                Some(&wakeup_for_ipc),
             );
         };
 
@@ -656,16 +729,12 @@ impl WebView {
         let owner_thread_for_nav = owner_thread;
         let nav_handler = move |url: String| -> bool {
             let slot = Arc::new(SyncHookSlot::new());
-            match nav_sync_pending_clone.lock() {
-                Ok(mut queue) => queue.push((url, slot.clone())),
-                Err(_) => {
-                    eprintln!("tkwry: navigation hook dropped (queue lock poisoned)");
-                    return false;
-                }
+            if !enqueue_nav_sync_hook(&nav_sync_pending_clone, url, slot.clone()) {
+                return false;
             }
             notify_wakeup(&wakeup_fd_clone);
             if Python::attach(|_py| python_thread_id().ok()) == Some(owner_thread_for_nav) {
-                drain_nav_sync_hooks(&nav_cb_clone, &nav_sync_pending_clone, true);
+                drain_nav_sync_hooks(&nav_cb_clone, &nav_sync_pending_clone);
             }
             wait_sync_hook(&slot, SYNC_HOOK_TIMEOUT, "on_navigation", false)
         };
@@ -673,6 +742,7 @@ impl WebView {
         let page_load_pending_clone = page_load_pending.clone();
         let page_load_listening_clone = page_load_listening.clone();
         let page_load_overflow_clone = page_load_overflow_dropped.clone();
+        let wakeup_for_page_load = wakeup_write_fd.clone();
         let pageload_handler = move |event: wry::PageLoadEvent, url: String| {
             let evt = match event {
                 wry::PageLoadEvent::Started => PageLoadEvent::Started,
@@ -685,12 +755,14 @@ impl WebView {
                 (evt, url),
                 MAX_PAGE_LOAD_PENDING,
                 "page-load",
+                Some(&wakeup_for_page_load),
             );
         };
 
         let title_pending_clone = title_pending.clone();
         let title_listening_clone = title_listening.clone();
         let title_overflow_clone = title_overflow_dropped.clone();
+        let wakeup_for_title = wakeup_write_fd.clone();
         let title_handler = move |title: String| {
             let _ = push_if_listening(
                 &title_listening_clone,
@@ -699,6 +771,7 @@ impl WebView {
                 title,
                 MAX_TITLE_PENDING,
                 "title-changed",
+                Some(&wakeup_for_title),
             );
         };
 
@@ -709,20 +782,12 @@ impl WebView {
         let newwin_handler =
             move |url: String, _features: wry::NewWindowFeatures| -> wry::NewWindowResponse {
                 let slot = Arc::new(SyncHookSlot::new());
-                match newwin_sync_pending_clone.lock() {
-                    Ok(mut queue) => queue.push((url, slot.clone())),
-                    Err(_) => {
-                        eprintln!("tkwry: new-window hook dropped (queue lock poisoned)");
-                        return wry::NewWindowResponse::Deny;
-                    }
+                if !enqueue_newwin_sync_hook(&newwin_sync_pending_clone, url, slot.clone()) {
+                    return wry::NewWindowResponse::Deny;
                 }
                 notify_wakeup(&wakeup_fd_for_newwin);
                 if Python::attach(|_py| python_thread_id().ok()) == Some(owner_thread_for_newwin) {
-                    drain_newwin_sync_hooks(
-                        &newwin_cb_clone,
-                        &newwin_sync_pending_clone,
-                        NewWindowResponse::Allow,
-                    );
+                    drain_newwin_sync_hooks(&newwin_cb_clone, &newwin_sync_pending_clone);
                 }
                 let resp = wait_sync_hook(
                     &slot,
@@ -739,6 +804,7 @@ impl WebView {
         let drag_drop_pending_clone = drag_drop_pending.clone();
         let drag_drop_listening_clone = drag_drop_listening.clone();
         let drag_drop_overflow_clone = drag_drop_overflow_dropped.clone();
+        let wakeup_for_drag_drop = wakeup_write_fd.clone();
         // Always accept the OS drop. Python receives notify-only events on the
         // Tk thread, so a bool return from the handler cannot gate this path.
         let drag_drop_handler = move |event: wry::DragDropEvent| -> bool {
@@ -750,8 +816,8 @@ impl WebView {
                 wry::DragDropEvent::Drop { paths, position } => {
                     (DragDropEvent::Drop, paths.clone(), *position)
                 }
-                wry::DragDropEvent::Leave => (DragDropEvent::Leave, vec![], (0, 0)),
-                _ => (DragDropEvent::Unknown, vec![], (0, 0)),
+                wry::DragDropEvent::Leave => (DragDropEvent::Leave, vec![], DRAG_DROP_NO_POSITION),
+                _ => (DragDropEvent::Unknown, vec![], DRAG_DROP_NO_POSITION),
             };
             let paths_str: Vec<String> = paths
                 .iter()
@@ -765,6 +831,7 @@ impl WebView {
                 (evt_type, paths_str, pos),
                 MAX_DRAG_DROP_PENDING,
                 "drag-drop",
+                Some(&wakeup_for_drag_drop),
             );
             true
         };
@@ -912,14 +979,15 @@ impl WebView {
 
     fn eval_js_with_callback(&self, script: &str, callback: Py<PyAny>) -> PyResult<u64> {
         self.require_owner_thread()?;
-        let token = self.eval_next_token.fetch_add(1, Ordering::SeqCst);
-        {
+        let token = {
             let mut callbacks = self
                 .eval_callbacks
                 .lock()
                 .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+            let token = alloc_eval_token(&self.eval_next_token, &mut callbacks);
             callbacks.insert(token, (callback, Instant::now()));
-        }
+            token
+        };
         let pending = self.eval_result_pending.clone();
         let dropped = self.eval_overflow_dropped.clone();
         let eval_result = with_webview(self, |wv| {
@@ -945,26 +1013,25 @@ impl WebView {
             .lock()
             .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
         prune_stale_eval_callbacks(&mut callbacks, &self.eval_overflow_dropped);
-        let drained = items
-            .into_iter()
-            .filter_map(|(token, result)| {
-                callbacks
-                    .remove(&token)
-                    .map(|(callback, _)| (token, callback, result))
-            })
-            .collect();
+        let mut drained = Vec::with_capacity(items.len());
+        for (token, result) in items {
+            if let Some((callback, _)) = callbacks.remove(&token) {
+                drained.push((token, callback, result));
+            } else {
+                self.eval_overflow_dropped.fetch_add(1, Ordering::SeqCst);
+                eprintln!(
+                    "tkwry: eval result dropped (callback expired or missing for token {token})"
+                );
+            }
+        }
         prune_stale_eval_callbacks(&mut callbacks, &self.eval_overflow_dropped);
         Ok(drained)
     }
 
     fn drain_sync_hooks(&self) -> PyResult<()> {
         self.require_owner_thread()?;
-        drain_nav_sync_hooks(&self.nav_cb, &self.nav_sync_pending, false);
-        drain_newwin_sync_hooks(
-            &self.newwin_cb,
-            &self.newwin_sync_pending,
-            NewWindowResponse::Deny,
-        );
+        drain_nav_sync_hooks(&self.nav_cb, &self.nav_sync_pending);
+        drain_newwin_sync_hooks(&self.newwin_cb, &self.newwin_sync_pending);
         Ok(())
     }
 
@@ -1281,23 +1348,16 @@ where
     this.require_owner_thread()?;
     this.enter_wry_call();
     let result = (|| -> PyResult<T> {
-        let wv_ptr = {
-            let guard = this
-                .inner
-                .lock()
-                .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned"))?;
-            match guard.as_ref() {
-                Some(wv) => wv as *const wry::WebView,
-                None => {
-                    return Err(pyo3::exceptions::PyRuntimeError::new_err(
-                        "webview already destroyed",
-                    ));
-                }
-            }
-        };
-        // SAFETY: ``destroy_inner`` is deferred while ``wry_call_depth > 0``, so the
-        // native webview stays alive for the duration of nested wry calls.
-        unsafe { f(&*wv_ptr) }
+        let guard = this
+            .inner
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned"))?;
+        match guard.as_ref() {
+            Some(wv) => f(wv),
+            None => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "webview already destroyed",
+            )),
+        }
     })();
     this.leave_wry_call()?;
     result
@@ -1392,9 +1452,24 @@ mod tests {
         push_eval_result(&pending, &dropped, 999, "lost".into());
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
         let queue = pending.lock().unwrap();
-        assert_eq!(queue.len(), MAX_EVAL_PENDING + 1);
+        assert_eq!(queue.len(), MAX_EVAL_PENDING);
         assert_eq!(queue.last(), Some(&(999, None)));
-        assert_eq!(queue[MAX_EVAL_PENDING - 1], (255, Some("r255".to_string())));
+        assert_eq!(queue[MAX_EVAL_PENDING - 1], (999, None));
+        assert_eq!(queue[0], (1, Some("r1".to_string())));
+    }
+
+    #[test]
+    fn push_if_listening_drops_oldest_when_full() {
+        let listening = AtomicBool::new(true);
+        let pending: Arc<Mutex<Vec<i32>>> = Arc::new(Mutex::new(Vec::new()));
+        let dropped = AtomicU64::new(0);
+        for value in 0..=4_i32 {
+            assert!(
+                push_if_listening(&listening, &pending, &dropped, value, 4, "test", None).is_ok()
+            );
+        }
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        assert_eq!(*pending.lock().unwrap(), vec![1, 2, 3, 4]);
     }
 
     #[test]
@@ -1402,7 +1477,7 @@ mod tests {
         let listening = AtomicBool::new(false);
         let pending: Arc<Mutex<Vec<i32>>> = Arc::new(Mutex::new(Vec::new()));
         let dropped = AtomicU64::new(0);
-        assert!(push_if_listening(&listening, &pending, &dropped, 1, 4, "test").is_ok());
+        assert!(push_if_listening(&listening, &pending, &dropped, 1, 4, "test", None).is_ok());
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
         assert!(pending.lock().unwrap().is_empty());
     }
