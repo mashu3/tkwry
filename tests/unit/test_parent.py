@@ -267,7 +267,8 @@ def test_mac_drawable_from_tk_window_probes_offsets(
         == full
     )
     assert calls == [1020, 1024]
-    assert lookup_calls == [full]
+    assert lookup_calls[0] == wid
+    assert lookup_calls[-1] == full
 
 
 def test_mac_drawable_from_tk_window_rejects_low32_without_native_view(
@@ -285,6 +286,39 @@ def test_mac_drawable_from_tk_window_rejects_low32_without_native_view(
     monkeypatch.setattr(_parent, "sizeof", lambda _type: 4)
     monkeypatch.setattr(_parent.c_void_p, "from_address", fake_from_address)
     monkeypatch.setattr(_parent, "_mac_nsview_lookup", lambda _dylib: lambda _d: 0)
+    monkeypatch.setattr(_parent, "_mac_drawable_lookup_candidates", lambda _w, _l: None)
 
     with pytest.raises(RuntimeError, match="Drawable sanity check failed"):
         _parent._mac_drawable_from_tk_window(1000, wid, object(), cache_key=None)
+
+
+def test_mac_drawable_from_tk_window_accepts_matching_nsview_without_low32(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ctypes import c_void_p
+
+    wid = 0x0000_00AB
+    stored = 0x1234_0000_00AB
+    nsview = 0xDEAD_BEEF
+
+    def fake_from_address(addr: int) -> c_void_p:
+        offset = addr - 1000
+        return c_void_p(stored if offset == 24 else 0)
+
+    def fake_lookup(drawable: c_void_p) -> int:
+        value = drawable.value or 0
+        if value == wid:
+            return nsview
+        if value == stored:
+            return nsview
+        return 0
+
+    monkeypatch.setattr(_parent, "sizeof", lambda _type: 8)
+    monkeypatch.setattr(_parent.c_void_p, "from_address", fake_from_address)
+    monkeypatch.setattr(_parent, "_mac_nsview_lookup", lambda _dylib: fake_lookup)
+    monkeypatch.setattr(_parent, "_mac_drawable_lookup_candidates", lambda _w, _l: None)
+
+    assert (
+        _parent._mac_drawable_from_tk_window(1000, wid, object(), cache_key=None)
+        == stored
+    )

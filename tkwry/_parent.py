@@ -6,7 +6,7 @@ import os
 import sys
 import threading
 import weakref
-from ctypes import CDLL, c_char_p, c_void_p, sizeof
+from ctypes import CDLL, Structure, byref, c_char_p, c_short, c_void_p, sizeof
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -191,7 +191,7 @@ def _tk_window_drawable_offset_candidates() -> tuple[int, ...]:
             seen.add(offset)
             ordered.append(offset)
     # Non-standard Tk builds may place ``window`` elsewhere in the header.
-    for offset in range(0, 16 * ptr_size + 1, ptr_size):
+    for offset in range(0, 32 * ptr_size + 1, ptr_size):
         if offset > 0 and offset not in seen:
             seen.add(offset)
             ordered.append(offset)
@@ -229,11 +229,55 @@ def _mac_drawable_lookup_candidates(wid: int, lookup) -> int | None:
 _mac_drawable_offset_cache: dict[tuple[str, tuple[int, ...]], int] = {}
 
 
-def _mac_root_relative(*, handle: int, top_ns: int) -> bool:
-    """Return whether bounds should be positioned relative to the toplevel."""
-    # When the toplevel lookup fails we still need root-relative offsets for
-    # child frames that share the toplevel NSView.
-    return not top_ns or handle == top_ns
+class _MacQuickDrawRect(Structure):
+    _fields_ = [
+        ("top", c_short),
+        ("left", c_short),
+        ("bottom", c_short),
+        ("right", c_short),
+    ]
+
+
+def _mac_tk_interp_ptr(widget: tk.Misc) -> c_void_p:
+    return c_void_p(widget.tk.interpaddr())
+
+
+def _mac_tk_window_ptr(widget: tk.Misc, dylib: CDLL) -> int:
+    """Return the ``TkWindow*`` for *widget*, or ``0`` when lookup fails."""
+    interp = _mac_tk_interp_ptr(widget)
+    main_win_fn = dylib.Tk_MainWindow
+    main_win_fn.restype = c_void_p
+    main_win_fn.argtypes = (c_void_p,)
+    main_win = main_win_fn(interp)
+    if not main_win:
+        return 0
+
+    name_to_win = dylib.Tk_NameToWindow
+    name_to_win.restype = c_void_p
+    name_to_win.argtypes = (c_void_p, c_char_p, c_void_p)
+    tk_win = name_to_win(interp, str(widget).encode(), c_void_p(main_win))
+    return int(tk_win or 0)
+
+
+def _mac_ensure_tkwindow_real(tk_win: int, dylib: CDLL) -> None:
+    if not tk_win:
+        return
+    make_real = dylib.TkMacOSXMakeRealWindowExist
+    make_real.argtypes = (c_void_p,)
+    make_real(c_void_p(tk_win))
+
+
+def _mac_nsview_ids_for_wid(wid: int, lookup) -> set[int]:
+    ids: set[int] = set()
+    for candidate in _mac_winfo_id_pointer_candidates(wid):
+        nsview = lookup(c_void_p(candidate))
+        if nsview:
+            ids.add(int(nsview))
+    return ids
+
+
+def _mac_read_drawable_at(tk_win: int, offset: int) -> int:
+    return c_void_p.from_address(tk_win + offset).value or 0
 
 
 def _mac_drawable_from_tk_window(
@@ -242,6 +286,7 @@ def _mac_drawable_from_tk_window(
     """Read the Drawable field, probing offsets validated via native Tk."""
     lookup = _mac_nsview_lookup(dylib)
     low32 = wid & 0xFFFFFFFF
+    wid_ns_ids = _mac_nsview_ids_for_wid(wid, lookup)
     tried: list[int] = []
     candidates = _tk_window_drawable_offset_candidates()
     if cache_key is not None:
@@ -251,17 +296,38 @@ def _mac_drawable_from_tk_window(
                 cached,
                 *(offset for offset in candidates if offset != cached),
             )
+
+    def _accept(offset: int, full: int) -> int:
+        if cache_key is not None:
+            _mac_drawable_offset_cache[cache_key] = offset
+        return full
+
     for offset in candidates:
         tried.append(offset)
-        full = c_void_p.from_address(tk_win + offset).value
-        if full is None or full == 0:
+        full = _mac_read_drawable_at(tk_win, offset)
+        if not full:
             continue
         if (full & 0xFFFFFFFF) != low32:
             continue
         if lookup(c_void_p(full)):
-            if cache_key is not None:
-                _mac_drawable_offset_cache[cache_key] = offset
-            return full
+            return _accept(offset, full)
+
+    if wid_ns_ids:
+        for offset in candidates:
+            full = _mac_read_drawable_at(tk_win, offset)
+            if not full:
+                continue
+            nsview = lookup(c_void_p(full))
+            if nsview and int(nsview) in wid_ns_ids:
+                return _accept(offset, full)
+
+    for offset in candidates:
+        full = _mac_read_drawable_at(tk_win, offset)
+        if not full:
+            continue
+        if lookup(c_void_p(full)):
+            return _accept(offset, full)
+
     direct = _mac_drawable_lookup_candidates(wid, lookup)
     if direct is not None:
         return direct
@@ -279,34 +345,71 @@ def _mac_drawable(widget: tk.Misc, dylib: CDLL) -> int:
     directly from the C ``TkWindow`` struct.
     """
     wid = widget.winfo_id()
-    if _mac_tk_version(widget) >= (8, 6):
-        return wid
-
-    tcl_lib = widget.tk.call("info", "library")
-    dylib = _mac_tk_dylib(tcl_lib)
     lookup = _mac_nsview_lookup(dylib)
     direct = _mac_drawable_lookup_candidates(wid, lookup)
     if direct is not None:
         return direct
+    if _mac_tk_version(widget) >= (8, 6) and lookup(c_void_p(wid)):
+        return wid
 
-    interp = c_void_p(widget.tk.interpaddr())
-
-    main_win_fn = dylib.Tk_MainWindow
-    main_win_fn.restype = c_void_p
-    main_win_fn.argtypes = (c_void_p,)
-    main_win = main_win_fn(interp)
-    if not main_win:
-        raise RuntimeError("Tk_MainWindow returned NULL")
-
-    name_to_win = dylib.Tk_NameToWindow
-    name_to_win.restype = c_void_p
-    name_to_win.argtypes = (c_void_p, c_char_p, c_void_p)
-    tk_win = name_to_win(interp, str(widget).encode(), c_void_p(main_win))
+    tk_win = _mac_tk_window_ptr(widget, dylib)
     if not tk_win:
         raise RuntimeError(f"Tk_NameToWindow failed for {widget!r}")
 
+    tcl_lib = widget.tk.call("info", "library")
     cache_key = (tcl_lib, _mac_tk_version(widget))
     return _mac_drawable_from_tk_window(tk_win, wid, dylib, cache_key=cache_key)
+
+
+def _mac_root_relative(*, handle: int, top_ns: int) -> bool:
+    """Return whether bounds should be positioned relative to the toplevel."""
+    # When the toplevel lookup fails we still need root-relative offsets for
+    # child frames that share the toplevel NSView.
+    return not top_ns or handle == top_ns
+
+
+def _mac_widget_ready_for_native_bounds(widget: tk.Misc) -> bool:
+    try:
+        return bool(widget.winfo_ismapped()) and widget.winfo_width() > 0
+    except tk.TclError:
+        return False
+
+
+def _mac_win_bounds(widget: tk.Misc, dylib: CDLL) -> tuple[int, int, int, int] | None:
+    """Return ``(x, y, width, height)`` in the host toplevel coordinate space."""
+    if not _mac_widget_ready_for_native_bounds(widget):
+        return None
+    tk_win = _mac_tk_window_ptr(widget, dylib)
+    if not tk_win:
+        return None
+
+    bounds_fn = dylib.TkMacOSXWinBounds
+    bounds_fn.argtypes = (c_void_p, c_void_p)
+    rect = _MacQuickDrawRect()
+
+    def _read() -> tuple[int, int, int, int]:
+        bounds_fn(c_void_p(tk_win), byref(rect))
+        width = int(rect.right) - int(rect.left)
+        height = int(rect.bottom) - int(rect.top)
+        return int(rect.left), int(rect.top), width, height
+
+    x, y, width, height = _read()
+    if width <= 0 or height <= 0:
+        _mac_ensure_tkwindow_real(tk_win, dylib)
+        x, y, width, height = _read()
+    if width <= 0 or height <= 0:
+        return None
+    return x, y, width, height
+
+
+def _mac_embed_origin(widget: tk.Misc) -> tuple[int, int] | None:
+    """Return root-relative bounds origin using Tk's native macOS layout state."""
+    tcl_lib = widget.tk.call("info", "library")
+    dylib = _mac_tk_dylib(tcl_lib)
+    bounds = _mac_win_bounds(widget, dylib)
+    if bounds is None:
+        return None
+    return bounds[0], bounds[1]
 
 
 _mac_tk_dylib_cache: dict[str, CDLL] = {}
@@ -367,8 +470,29 @@ def tk_embed_origin(widget: tk.Misc, *, root_relative: bool) -> tuple[int, int]:
     require_tk_thread(widget)
     if not root_relative:
         return (0, 0)
+    if sys.platform == "darwin":
+        widget.update_idletasks()
+        origin = _mac_embed_origin(widget)
+        if origin is not None:
+            return origin
     toplevel = widget.winfo_toplevel()
     return (
         widget.winfo_rootx() - toplevel.winfo_rootx(),
         widget.winfo_rooty() - toplevel.winfo_rooty(),
     )
+
+
+def tk_embed_bounds(
+    widget: tk.Misc, *, root_relative: bool
+) -> tuple[int, int, int, int]:
+    """Return ``(x, y, width, height)`` for ``set_bounds`` in embed-parent space."""
+    require_tk_thread(widget)
+    widget.update_idletasks()
+    if sys.platform == "darwin" and root_relative:
+        tcl_lib = widget.tk.call("info", "library")
+        dylib = _mac_tk_dylib(tcl_lib)
+        bounds = _mac_win_bounds(widget, dylib)
+        if bounds is not None:
+            return bounds
+    x, y = tk_embed_origin(widget, root_relative=root_relative)
+    return x, y, max(widget.winfo_width(), 1), max(widget.winfo_height(), 1)
