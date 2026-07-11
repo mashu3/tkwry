@@ -13,13 +13,13 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.28", features = ["abi3-py310"] }
 wry = { version = "0.55", features = ["devtools"] }
 raw-window-handle = "0.6"
+libc = "0.2"
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 gtk = "0.18"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
-libc = "0.2"
 objc2 = { version = "0.6", features = ["exception"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "std",

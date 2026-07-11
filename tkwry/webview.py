@@ -1161,6 +1161,9 @@ class WebView:
                 setattr(toplevel, "_tkwry_wake_read_fd", read_fd)
                 setattr(toplevel, "_tkwry_wake_write_fd", write_fd)
         self._tk_wakeup_write_fd = write_fd
+        native = self._webview
+        if native is not None:
+            native.set_mac_wakeup_write_fd(write_fd)
 
     def _wake_tk_for_sync_hook(self) -> None:
         write_fd = self._tk_wakeup_write_fd
@@ -1326,11 +1329,19 @@ class WebView:
             wait = self._native_eval_wait.pop(native_token, None)
             if wait is None:
                 continue
-            wait_epoch, py_token, expected_cb, _on_error = wait
+            wait_epoch, py_token, expected_cb, on_error = wait
             if py_token not in self._pending_eval_tokens:
                 continue
             self._release_pending_eval(py_token)
             if wait_epoch != self._eval_epoch:
+                continue
+            if result is None:
+                self._bump_queue_drop(_QUEUE_DROP_EVAL)
+                if on_error is not None:
+                    self._invoke_callback(
+                        on_error,
+                        RuntimeError("eval result dropped (pending queue full)"),
+                    )
                 continue
             self._invoke_callback(expected_cb, result)
 
@@ -1348,6 +1359,9 @@ class WebView:
         else:
             _pump_toplevel_wakeup_pipe(self._frame.winfo_toplevel())
 
+        native = self._webview
+        if native is not None:
+            native.drain_sync_hooks()
         self._drain_sync_hooks()
 
         handler = self._ipc_handler
