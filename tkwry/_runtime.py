@@ -10,7 +10,27 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pass
 
-_PUMP_ERROR_LIMIT = 3
+DEFAULT_GTK_PUMP_ITERATIONS = 128
+MAX_GTK_PUMP_ITERATIONS = 512
+_PUMP_ERROR_WARN_AFTER = 3
+_PUMP_TICK_MS = 10
+_PUMP_ERROR_BACKOFF_MS = (10, 50, 100, 200, 500, 1000)
+
+
+def pump_gtk_events(*, max_iterations: int | None = None) -> None:
+    """Drain GTK main-loop iterations (Linux only; no-op elsewhere)."""
+    if sys.platform != "linux":
+        return
+    from tkwry._core import pump_events
+
+    pump_events(max_iterations=max_iterations)
+
+
+def _pump_tick_delay_ms(consecutive_errors: int) -> int:
+    if consecutive_errors <= 0:
+        return _PUMP_TICK_MS
+    index = min(consecutive_errors - 1, len(_PUMP_ERROR_BACKOFF_MS) - 1)
+    return _PUMP_ERROR_BACKOFF_MS[index]
 
 
 def _gtk_pump_tick(root_id: int) -> None:
@@ -27,25 +47,22 @@ def _gtk_pump_tick(root_id: int) -> None:
         pump.stop()
         return
     pump._clear_tick_after_id()
-    from tkwry._core import pump_events
-
     try:
-        pump_events()
+        pump_gtk_events()
     except Exception:
         traceback.print_exc()
         pump._consecutive_errors += 1
-        if pump._consecutive_errors >= _PUMP_ERROR_LIMIT:
+        if pump._consecutive_errors == _PUMP_ERROR_WARN_AFTER:
             print(
-                f"tkwry: GTK event pump failed {pump._consecutive_errors} "
-                "times; stopping",
+                "tkwry: GTK event pump errors persisted; continuing with backoff",
                 file=sys.stderr,
             )
-            pump.stop()
-            return
-    else:
-        pump._consecutive_errors = 0
+        if pump._active and pump._refcount > 0:
+            pump._schedule_tick(_pump_tick_delay_ms(pump._consecutive_errors))
+        return
+    pump._consecutive_errors = 0
     if pump._active:
-        pump._schedule_tick(10)
+        pump._schedule_tick(_PUMP_TICK_MS)
 
 
 class GtkPump:

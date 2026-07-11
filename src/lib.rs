@@ -1401,17 +1401,25 @@ enum DragDropEvent {
 }
 
 #[pyfunction]
-fn pump_events() {
+#[pyo3(signature = (max_iterations=None))]
+fn pump_events(max_iterations: Option<usize>) {
     #[cfg(all(unix, not(target_os = "macos")))]
     {
+        const DEFAULT_ITERATIONS: usize = 128;
+        const MAX_ITERATIONS: usize = 512;
         // Bound work per Tk tick — WebKitGTK can enqueue continuously and
         // an unbounded drain would hang nested inside Tcl's update().
-        for _ in 0..32 {
+        let limit = max_iterations
+            .unwrap_or(DEFAULT_ITERATIONS)
+            .clamp(1, MAX_ITERATIONS);
+        for _ in 0..limit {
             if !gtk::main_iteration_do(false) {
                 break;
             }
         }
     }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    let _ = max_iterations;
 }
 
 #[pyfunction]

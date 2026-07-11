@@ -29,7 +29,7 @@ from tkwry._parent import (
     tk_embed_origin,
     tk_embed_parent,
 )
-from tkwry._runtime import GtkPump
+from tkwry._runtime import DEFAULT_GTK_PUMP_ITERATIONS, GtkPump, pump_gtk_events
 from tkwry._url import _normalize_url, _validate_url
 from tkwry.exceptions import (
     WebViewCreationError,
@@ -1106,9 +1106,7 @@ class WebView:
             if self._should_keep_polling() or self._event_poll_active:
                 self._poll_events()
         if sys.platform == "linux":
-            from tkwry._core import pump_events
-
-            pump_events()
+            pump_gtk_events()
         try:
             root.update()
         except tk.TclError:
@@ -1419,23 +1417,18 @@ class WebView:
         if self._destroyed:
             return
         if sys.platform == "linux":
-            from tkwry._core import pump_events
-
-            for _ in range(32):
-                pump_events()
+            pump_gtk_events(max_iterations=DEFAULT_GTK_PUMP_ITERATIONS)
         elif sys.platform == "darwin":
             _mac_service_wakeup(self._frame.winfo_toplevel())
         else:
             _pump_toplevel_wakeup_pipe(self._frame.winfo_toplevel())
         self._deliver_page_load_events()
 
-    def _service_linux_events(self, *, gtk_rounds: int = 32) -> None:
+    def _service_linux_events(self, *, gtk_rounds: int | None = None) -> None:
         if sys.platform != "linux" or self._destroyed:
             return
-        from tkwry._core import pump_events
-
-        for _ in range(gtk_rounds):
-            pump_events()
+        iterations = DEFAULT_GTK_PUMP_ITERATIONS if gtk_rounds is None else gtk_rounds
+        pump_gtk_events(max_iterations=iterations)
         self._deliver_page_load_events()
 
     def _register_pending_eval(
@@ -1520,9 +1513,7 @@ class WebView:
             self._event_poll_active = False
             return
         if sys.platform == "linux":
-            from tkwry._core import pump_events
-
-            pump_events()
+            pump_gtk_events()
         elif sys.platform == "darwin":
             toplevel = self._frame.winfo_toplevel()
             _mac_service_wakeup(toplevel)
@@ -1605,10 +1596,7 @@ class WebView:
             kwargs["on_new_window"] = self._native_new_window
 
         if sys.platform == "linux":
-            from tkwry._core import pump_events
-
-            for _ in range(20):
-                pump_events()
+            pump_gtk_events(max_iterations=DEFAULT_GTK_PUMP_ITERATIONS * 2)
 
         try:
             self._webview = NativeWebView(
@@ -1651,8 +1639,7 @@ class WebView:
         if self._needs_event_poll() or self._page_load_collecting:
             self._ensure_event_poll()
             if sys.platform == "linux":
-                for _ in range(10):
-                    self._service_linux_events()
+                self._service_linux_events(gtk_rounds=DEFAULT_GTK_PUMP_ITERATIONS)
         self._maybe_fire_ready()
 
     def _run_eval_js(
@@ -1765,8 +1752,7 @@ class WebView:
             self._maybe_reschedule_initial_load()
             return
         self._sync_bounds()
-        gtk_rounds = 64 if sys.platform == "linux" else 32
-        self._service_linux_events(gtk_rounds=gtk_rounds)
+        self._service_linux_events(gtk_rounds=DEFAULT_GTK_PUMP_ITERATIONS)
         if self._on_page_load is not None:
             self._ensure_event_poll()
         self._initial_load = None
