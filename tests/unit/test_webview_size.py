@@ -676,3 +676,102 @@ def test_flush_load_retries_then_clears_pending_on_failure(
     web._flush_load()
     assert web._pending_load is None
     assert web._flush_load_attempt == 0
+
+
+def _web_with_creation_failure(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> tuple[tk.Frame, WebView]:
+    frame = tk.Frame(tk_root, width=400, height=300)
+    frame.pack_propagate(False)
+    frame.pack()
+    tk_root.update_idletasks()
+    monkeypatch.setattr(frame, "after_idle", lambda _fn: None)
+    web = WebView(frame, width=400, height=300, url="https://example.com/initial")
+    scheduled: list[int] = []
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("native create failed")
+
+    monkeypatch.setattr("tkwry.webview.NativeWebView", boom)
+    monkeypatch.setattr(WebView, "_try_create", _real_try_create)
+    monkeypatch.setattr(
+        web, "_schedule_try_create", lambda **_k: scheduled.append(1), raising=False
+    )
+    web._create_attempt = _CREATE_MAX_ATTEMPTS - 1
+    web._try_create()
+    assert web._creation_error is not None
+    assert web._webview is None
+    return frame, web
+
+
+def test_creation_failure_raises_on_load_url(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _web_with_creation_failure(tk_root, monkeypatch)
+    with pytest.raises(WebViewCreationError, match="load_url"):
+        web.load_url("https://example.com/new")
+    assert web._pending_url == "https://example.com/initial"
+
+
+def test_creation_failure_raises_on_load_html(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _web_with_creation_failure(tk_root, monkeypatch)
+    with pytest.raises(WebViewCreationError, match="load_html"):
+        web.load_html("<p>new</p>")
+    assert web._pending_html is None
+
+
+def test_creation_failure_raises_on_sync_bounds(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _web_with_creation_failure(tk_root, monkeypatch)
+    with pytest.raises(WebViewCreationError, match="sync_bounds"):
+        web.sync_bounds()
+
+
+def test_creation_failure_raises_on_handler_setters(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _web_with_creation_failure(tk_root, monkeypatch)
+    with pytest.raises(WebViewCreationError, match="set_ipc_handler"):
+        web.set_ipc_handler(lambda _msg: None)
+    with pytest.raises(WebViewCreationError, match="set_on_navigation"):
+        web.set_on_navigation(lambda _url: True)
+    with pytest.raises(WebViewCreationError, match="set_on_page_load"):
+        web.set_on_page_load(lambda _evt, _url: None)
+    with pytest.raises(WebViewCreationError, match="set_on_title_changed"):
+        web.set_on_title_changed(lambda _title: None)
+    with pytest.raises(WebViewCreationError, match="set_on_new_window"):
+        web.set_on_new_window(lambda _url: None)
+    with pytest.raises(WebViewCreationError, match="set_drag_drop_handler"):
+        web.set_drag_drop_handler(lambda *_args: None)
+    web.set_ipc_handler(None)
+    web.set_on_navigation(None)
+
+
+def test_creation_failed_public_api(tk_root, monkeypatch: pytest.MonkeyPatch) -> None:
+    _frame, web = _web_with_creation_failure(tk_root, monkeypatch)
+    assert web.creation_failed is True
+    assert isinstance(web.creation_error, RuntimeError)
+    assert str(web.creation_error) == "native create failed"
+
+
+def test_url_property_reports_pending_html(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>hi</p>")
+    assert web.url == "<html>"
+    assert "<html>" in repr(web)
+
+
+def test_configure_does_not_retry_after_creation_failure(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame, web = _web_with_creation_failure(tk_root, monkeypatch)
+    tries: list[int] = []
+    monkeypatch.setattr(web, "_try_create", lambda: tries.append(1), raising=False)
+    event = tk.Event()
+    event.widget = frame
+    web._on_configure(event)
+    tk_root.update_idletasks()
+    assert tries == []

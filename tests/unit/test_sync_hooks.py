@@ -94,3 +94,43 @@ def test_needs_event_poll_when_navigation_handler_set(tk_root) -> None:
     assert web._needs_event_poll() is False
     web.set_on_navigation(lambda _url: True)
     assert web._needs_event_poll() is True
+
+
+def test_sync_hook_timeout_skips_late_handler(tk_root, monkeypatch) -> None:
+    import time
+
+    _frame, web = _make_web(tk_root)
+    started = threading.Event()
+    finished = threading.Event()
+    seen: list[str] = []
+
+    def slow_handler(url: str) -> bool:
+        started.set()
+        time.sleep(0.2)
+        seen.append(url)
+        finished.set()
+        return True
+
+    web.set_on_navigation(slow_handler)
+    web._ensure_tk_wakeup_pipe()
+    web._ensure_event_poll()
+    monkeypatch.setattr("tkwry.webview._SYNC_HOOK_TIMEOUT_S", 0.05)
+
+    result_holder: list[bool] = []
+
+    def worker() -> None:
+        result_holder.append(web._native_navigation("https://example.com/late"))
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=2.0)
+
+    for _ in range(200):
+        tk_root.update_idletasks()
+        tk_root.update()
+        web._poll_events()
+        if finished.is_set():
+            break
+
+    assert result_holder == [False]
+    assert seen == []

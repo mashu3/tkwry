@@ -62,7 +62,14 @@ WEBVIEW_METHODS = (
     "wait_until_ready",
 )
 
-WEBVIEW_PROPERTIES = ("url", "native", "destroyed", "ready")
+WEBVIEW_PROPERTIES = (
+    "url",
+    "native",
+    "destroyed",
+    "ready",
+    "creation_failed",
+    "creation_error",
+)
 
 
 def _cargo_version() -> str:

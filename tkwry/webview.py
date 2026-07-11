@@ -59,7 +59,11 @@ _PendingLoad: TypeAlias = tuple[Literal["url"], str] | tuple[Literal["html"], st
 _PendingEval: TypeAlias = tuple[float, EvalCallback, EvalErrorHandler | None]
 _NativeEvalWait: TypeAlias = tuple[int, int, EvalCallback, EvalErrorHandler | None]
 _SyncHookItem: TypeAlias = tuple[
-    Callable[[], object], list[object], object, threading.Event
+    Callable[[], object],
+    list[object],
+    object,
+    threading.Event,
+    list[bool],
 ]
 _EVAL_CALLBACK_TIMEOUT_S = 30.0
 _SYNC_HOOK_TIMEOUT_S = 30.0
@@ -343,8 +347,28 @@ class WebView:
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
         if self._webview is None:
-            return self._pending_url
+            if self._pending_url is not None:
+                return self._pending_url
+            if self._pending_html is not None:
+                return "<html>"
+            return None
         return self._webview.url()
+
+    @property
+    def creation_failed(self) -> bool:
+        """``True`` when native creation was abandoned after all retries."""
+        self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
+        return self._creation_error is not None
+
+    @property
+    def creation_error(self) -> BaseException | None:
+        """The exception from the final failed creation attempt, if any."""
+        self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
+        return self._creation_error
 
     @property
     def native(self) -> NativeWebView | None:
@@ -529,6 +553,10 @@ class WebView:
             raise WebViewDestroyedError("WebView.destroy() was called")
         normalized = _normalize_url(url)
         _validate_url(normalized)
+        if self._webview is None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call load_url()"
+            ) from self._creation_error
         if self._webview is None:
             self._pending_url = normalized
             self._pending_html = None
@@ -547,6 +575,10 @@ class WebView:
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
+        if self._webview is None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call load_html()"
+            ) from self._creation_error
         if self._webview is None:
             self._pending_html = html
             self._pending_url = None
@@ -684,6 +716,10 @@ class WebView:
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
+        if handler is not None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call set_ipc_handler()"
+            ) from self._creation_error
         self._ipc_handler = handler
         if self._webview is not None:
             self._webview.set_ipc_listening(handler is not None)
@@ -695,6 +731,10 @@ class WebView:
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
+        if handler is not None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call set_on_navigation()"
+            ) from self._creation_error
         self._on_navigation = handler
         if self._webview is not None:
             if handler is not None:
@@ -708,6 +748,10 @@ class WebView:
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
+        if handler is not None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call set_on_page_load()"
+            ) from self._creation_error
         self._on_page_load = handler
         if self._webview is not None:
             self._webview.set_page_load_listening(handler is not None)
@@ -726,6 +770,10 @@ class WebView:
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
+        if self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call sync_bounds()"
+            ) from self._creation_error
         self._sync_bounds()
 
     def take_queue_drop_counts(self) -> tuple[int, int, int, int, int]:
@@ -746,6 +794,10 @@ class WebView:
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
+        if handler is not None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call set_on_title_changed()"
+            ) from self._creation_error
         self._on_title_changed = handler
         if self._webview is not None:
             self._webview.set_title_listening(handler is not None)
@@ -757,6 +809,10 @@ class WebView:
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
+        if handler is not None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call set_on_new_window()"
+            ) from self._creation_error
         self._on_new_window = handler
         if self._webview is not None:
             if handler is not None:
@@ -775,6 +831,10 @@ class WebView:
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
+        if handler is not None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call set_drag_drop_handler()"
+            ) from self._creation_error
         self._drag_drop_handler = handler
         if self._webview is not None:
             self._webview.set_drag_drop_listening(handler is not None)
@@ -782,7 +842,12 @@ class WebView:
             self._ensure_event_poll()
 
     def _schedule_try_create(self, *, delay_ms: int | None = None) -> None:
-        if self._destroyed or self._webview is not None or self._create_pending:
+        if (
+            self._destroyed
+            or self._webview is not None
+            or self._create_pending
+            or self._creation_error is not None
+        ):
             return
         self._create_pending = True
         if delay_ms is None:
@@ -1008,9 +1073,11 @@ class WebView:
 
         done = threading.Event()
         result: list[object] = [default]
-        self._sync_hook_queue.put((invoke, result, default, done))
+        cancelled = [False]
+        self._sync_hook_queue.put((invoke, result, default, done, cancelled))
         self._wake_tk_for_sync_hook()
         if not done.wait(timeout=_SYNC_HOOK_TIMEOUT_S):
+            cancelled[0] = True
             print(
                 f"tkwry: sync hook timed out after {_SYNC_HOOK_TIMEOUT_S:g}s",
                 file=sys.stderr,
@@ -1021,10 +1088,12 @@ class WebView:
     def _drain_sync_hooks(self) -> None:
         while True:
             try:
-                invoke, result, default, done = self._sync_hook_queue.get_nowait()
+                invoke, result, default, done, cancelled = (
+                    self._sync_hook_queue.get_nowait()
+                )
             except queue.Empty:
                 break
-            if self._destroyed:
+            if cancelled[0] or self._destroyed:
                 result[0] = default
             else:
                 try:
@@ -1037,9 +1106,12 @@ class WebView:
     def _abort_sync_hooks(self) -> None:
         while True:
             try:
-                _invoke, result, default, done = self._sync_hook_queue.get_nowait()
+                _invoke, result, default, done, cancelled = (
+                    self._sync_hook_queue.get_nowait()
+                )
             except queue.Empty:
                 break
+            cancelled[0] = True
             result[0] = default
             done.set()
 
@@ -1199,7 +1271,11 @@ class WebView:
         return self._pending_eval_callbacks > 0 or bool(self._native_eval_wait)
 
     def _try_create(self) -> None:
-        if self._destroyed or self._webview is not None:
+        if (
+            self._destroyed
+            or self._webview is not None
+            or self._creation_error is not None
+        ):
             return
 
         size = self._creation_size()
