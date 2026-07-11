@@ -169,9 +169,14 @@ def test_file_url_requires_path() -> None:
         _normalize_url("file://server")
     with pytest.raises(ValueError, match="path"):
         _validate_url("file://server")
-    # UNC-style with a share path remains allowed.
-    assert _normalize_url("file://server/share/x") == "file://server/share/x"
-    _validate_url("file://server/share/x")
+    import os
+
+    if os.name != "nt":
+        with pytest.raises(ValueError, match="UNC file URLs"):
+            _normalize_url("file://server/share/x")
+    else:
+        with pytest.raises(ValueError, match="does not exist"):
+            _normalize_url("file://server/share/x")
 
 
 def test_normalize_relative_path_still_file_uri(
@@ -290,3 +295,35 @@ def test_normalize_windows_file_uri_three_slash_form(
     )
     assert len(seen) == 1
     assert _paths_equal(seen[0], "C:/Users/foo/index.html")
+
+
+def test_validate_rejects_out_of_range_port() -> None:
+    with pytest.raises(ValueError, match="invalid URL port"):
+        _validate_url("https://example.com:999999")
+
+
+def test_normalize_rejects_unsupported_scheme_before_https_rewrite() -> None:
+    for url in (
+        "javascript:alert(1)",
+        "javascript:8080",
+        "data:text/html,<p>x</p>",
+        "data:8080",
+        "blob:https://example.com/uuid",
+        "blob:8080",
+    ):
+        with pytest.raises(ValueError, match="unsupported URL scheme"):
+            _normalize_url(url)
+
+
+def test_normalize_ipv6_link_local_with_zone_id() -> None:
+    assert _normalize_url("fe80::1%en0") == "https://[fe80::1%25en0]"
+    assert _normalize_url("fe80::1%en0:8080") == "https://[fe80::1%25en0]:8080"
+    assert _normalize_url("[fe80::1%en0]") == "https://[fe80::1%25en0]"
+    _validate_url(_normalize_url("fe80::1%en0"))
+
+
+def test_validate_accepts_underscore_hostname() -> None:
+    url = _normalize_url("my_host.example.com")
+    assert url == "https://my_host.example.com"
+    _validate_url(url)
+    _validate_url("https://my_host.example.com")

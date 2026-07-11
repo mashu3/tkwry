@@ -10,6 +10,11 @@ from urllib.parse import unquote, urlparse, urlunparse
 from urllib.request import url2pathname
 
 _SUPPORTED_SCHEMES = frozenset({"http", "https", "file"})
+_UNSUPPORTED_NAV_SCHEMES = frozenset(
+    {"about", "blob", "data", "javascript", "mailto", "vbscript"}
+)
+_MIN_TCP_PORT = 1
+_MAX_TCP_PORT = 65535
 
 _FILE_EXTENSIONS = frozenset(
     {
@@ -47,8 +52,8 @@ _FILE_EXTENSIONS = frozenset(
 )
 
 _HOSTNAME_RE = re.compile(
-    r"^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*"
-    r"[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$"
+    r"^([a-zA-Z0-9_]([a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?\.)*"
+    r"[a-zA-Z0-9_]([a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?$"
 )
 _WINDOWS_DRIVE_ONLY_RE = re.compile(r"^[A-Za-z]:$")
 
@@ -57,12 +62,84 @@ def _contains_non_ascii(value: str) -> bool:
     return not value.isascii()
 
 
+def _strip_ipv6_zone(host: str) -> str:
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    zone_idx = host.find("%")
+    if zone_idx >= 0:
+        host = host[:zone_idx]
+    return host
+
+
 def _is_ipv6_literal(host: str) -> bool:
     try:
-        ipaddress.IPv6Address(host)
+        ipaddress.IPv6Address(_strip_ipv6_zone(host))
     except ValueError:
         return False
     return True
+
+
+def _encode_ipv6_zone_suffix(zone_suffix: str) -> str:
+    if not zone_suffix:
+        return ""
+    if not zone_suffix.startswith("%"):
+        zone_suffix = f"%{zone_suffix}"
+    if zone_suffix.lower().startswith("%25"):
+        return zone_suffix
+    return f"%25{zone_suffix[1:]}"
+
+
+def _split_ipv6_with_zone(url: str) -> tuple[str, str, str] | None:
+    """Parse bare ``[ipv6%zone]:port``, ``ipv6%zone:port``, or ``ipv6%zone``."""
+    if "://" in url or " " in url:
+        return None
+
+    slash_pos = url.find("/")
+    authority = url if slash_pos < 0 else url[:slash_pos]
+    path_suffix = url[slash_pos:] if slash_pos >= 0 else ""
+
+    if authority.startswith("["):
+        end = authority.find("]")
+        if end < 0:
+            return None
+        inner = authority[1:end]
+        zone_idx = inner.find("%")
+        host = inner[:zone_idx] if zone_idx >= 0 else inner
+        zone = inner[zone_idx:] if zone_idx >= 0 else ""
+        if not _is_ipv6_literal(host):
+            return None
+        bracketed = f"[{host}{_encode_ipv6_zone_suffix(zone)}]"
+        rest = authority[end + 1 :]
+        if rest.startswith(":"):
+            port = rest[1:]
+            if port and not port.isdigit():
+                return None
+            return bracketed, port, path_suffix
+        if not rest:
+            return bracketed, "", path_suffix
+        return None
+
+    if "%" not in authority or "::" not in authority.split("%", 1)[0]:
+        return None
+
+    percent_idx = authority.index("%")
+    host_part = authority[:percent_idx]
+    after_percent = authority[percent_idx:]
+    if not _is_ipv6_literal(host_part):
+        return None
+
+    colon_after_zone = after_percent.find(":")
+    if colon_after_zone < 0:
+        zone_suffix = after_percent
+        port = ""
+    else:
+        zone_suffix = after_percent[:colon_after_zone]
+        port = after_percent[colon_after_zone + 1 :]
+        if port and not port.isdigit():
+            return None
+
+    bracketed = f"[{host_part}{_encode_ipv6_zone_suffix(zone_suffix)}]"
+    return bracketed, port, path_suffix
 
 
 def _split_ipv6_host_port(url: str) -> tuple[str, str, str] | None:
@@ -80,9 +157,9 @@ def _split_ipv6_host_port(url: str) -> tuple[str, str, str] | None:
             if port and not port.isdigit():
                 return None
             path_suffix = f"/{path}" if path else ""
-            return f"[{addr}]", port, path_suffix
+            return f"[{_strip_ipv6_zone(addr)}]", port, path_suffix
         if rest.startswith("/") or not rest:
-            return f"[{addr}]", "", rest
+            return f"[{_strip_ipv6_zone(addr)}]", "", rest
         return None
 
     if url.count(":") < 2:
@@ -96,9 +173,9 @@ def _split_ipv6_host_port(url: str) -> tuple[str, str, str] | None:
     maybe_port = authority[last_colon + 1 :]
     maybe_host = authority[:last_colon]
     if maybe_port.isdigit() and _is_ipv6_literal(maybe_host):
-        return f"[{maybe_host}]", maybe_port, path_suffix
+        return f"[{_strip_ipv6_zone(maybe_host)}]", maybe_port, path_suffix
     if _is_ipv6_literal(authority):
-        return f"[{authority}]", "", path_suffix
+        return f"[{_strip_ipv6_zone(authority)}]", "", path_suffix
     return None
 
 
@@ -188,11 +265,18 @@ def _looks_like_filename(name: str) -> bool:
     return ext in _FILE_EXTENSIONS
 
 
+def _reject_unsupported_scheme(scheme: str) -> None:
+    if scheme and scheme.lower() in _UNSUPPORTED_NAV_SCHEMES:
+        raise ValueError(f"unsupported URL scheme: {scheme!r}")
+
+
 def _is_misparsed_host_port(parsed) -> bool:
     """urlparse treats ``host:port`` as ``scheme='host', path='port'``."""
     if not parsed.scheme or parsed.netloc:
         return False
     if parsed.scheme in _SUPPORTED_SCHEMES:
+        return False
+    if parsed.scheme.lower() in _UNSUPPORTED_NAV_SCHEMES:
         return False
     if not parsed.path:
         return False
@@ -207,6 +291,9 @@ def _looks_like_url_without_scheme(url: str) -> bool:
     """Heuristic: host, host:port, or host/path without an explicit scheme."""
     if "://" in url or " " in url:
         return False
+
+    if _split_ipv6_with_zone(url) is not None:
+        return True
 
     if _split_ipv6_host_port(url) is not None:
         return True
@@ -300,6 +387,21 @@ def _file_uri_from_path(path: str) -> str:
     return Path(expanded).absolute().as_uri()
 
 
+def _normalize_unc_file_url(parsed) -> str:
+    server = parsed.netloc
+    path = unquote(parsed.path)
+    if not path or path == "/":
+        raise ValueError("file URL must include a path")
+    if os.name != "nt":
+        raise ValueError(
+            f"UNC file URLs (file://{server}/...) are not supported on this platform"
+        )
+    unc = f"\\\\{server}{path.replace('/', os.sep)}"
+    if not os.path.exists(unc):
+        raise ValueError(f"file URL path does not exist: file://{server}{parsed.path}")
+    return urlunparse(parsed)
+
+
 def _normalize_file_url(url: str) -> str:
     parsed = urlparse(url)
     if parsed.netloc:
@@ -312,10 +414,7 @@ def _normalize_file_url(url: str) -> str:
                 raise ValueError("file URL must include a path")
             return _file_uri_from_path(pathname)
         else:
-            # UNC-style ``file://server/share`` requires a non-empty path.
-            if not parsed.path or parsed.path == "/":
-                raise ValueError("file URL must include a path")
-            return url
+            return _normalize_unc_file_url(parsed)
     pathname = url2pathname(unquote(parsed.path))
     pathname = _strip_leading_slash_from_windows_path(pathname)
     pathname = _windows_drive_root_path(pathname)
@@ -332,7 +431,13 @@ def _normalize_url(url: str) -> str:
         raise ValueError("URL is empty")
     if _is_windows_drive_path(cleaned):
         return _file_uri_from_path(cleaned)
+    if "://" not in cleaned:
+        ipv6_zone = _split_ipv6_with_zone(cleaned)
+        if ipv6_zone is not None:
+            host, port, path = ipv6_zone
+            return _https_url_from_ipv6_parts(host, port, path)
     parsed = urlparse(cleaned)
+    _reject_unsupported_scheme(parsed.scheme)
     if (
         parsed.scheme
         and parsed.scheme not in _SUPPORTED_SCHEMES
@@ -347,6 +452,10 @@ def _normalize_url(url: str) -> str:
     if not parsed.scheme:
         if " " in cleaned:
             raise ValueError("URL must not contain spaces")
+        ipv6_zone = _split_ipv6_with_zone(cleaned)
+        if ipv6_zone is not None:
+            host, port, path = ipv6_zone
+            return _https_url_from_ipv6_parts(host, port, path)
         ipv6 = _split_ipv6_host_port(cleaned)
         if ipv6 is not None:
             host, port, path = ipv6
@@ -371,6 +480,19 @@ def _is_valid_http_host(host: str) -> bool:
     return _looks_like_hostname(host)
 
 
+def _validate_http_port(parsed) -> None:
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(
+            f"invalid URL port: {parsed.netloc.rpartition(':')[-1]!r}"
+        ) from exc
+    if port is None:
+        return
+    if not (_MIN_TCP_PORT <= port <= _MAX_TCP_PORT):
+        raise ValueError(f"invalid URL port: {port}")
+
+
 def _validate_http_url(parsed) -> None:
     host = parsed.hostname
     if not host:
@@ -379,6 +501,7 @@ def _validate_http_url(parsed) -> None:
         raise ValueError("URL must include a host, e.g. https://example.com")
     if not _is_valid_http_host(host):
         raise ValueError(f"invalid URL host: {host!r}")
+    _validate_http_port(parsed)
 
 
 def _validate_url(url: str) -> None:
@@ -387,6 +510,7 @@ def _validate_url(url: str) -> None:
     if " " in url:
         raise ValueError("URL must not contain spaces")
     parsed = urlparse(url)
+    _reject_unsupported_scheme(parsed.scheme)
     if parsed.scheme not in _SUPPORTED_SCHEMES:
         raise ValueError(f"unsupported URL scheme: {parsed.scheme!r}")
     if parsed.scheme in {"http", "https"}:
