@@ -842,7 +842,12 @@ impl WebView {
                 .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("parent handle is null"))?;
             let parent_ns_view = unsafe { NonNull::new_unchecked(ptr.cast::<NSView>()) };
             macos_window::disable_window_tabbing(parent_ns_view)
-                .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+                .map_err(|err| {
+                    eprintln!(
+                        "tkwry: disable_window_tabbing failed at create (will retry): {err}"
+                    );
+                })
+                .ok();
             let raw = RawWindowHandle::AppKit(AppKitWindowHandle::new(ns_view));
             let handle = unsafe { raw_window_handle::WindowHandle::borrow_raw(raw) };
             (handle, parent_ns_view)

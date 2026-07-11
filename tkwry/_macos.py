@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import tkinter as tk
 import weakref
@@ -34,6 +35,8 @@ _MAC_TEXT_CLASS_SUFFIXES = (
     "Edit",
 )
 _MAC_KEY_GUARD_TAG = "TkwryMacWebKeyGuard"
+_TAB_TRAVERSAL_KEYS = frozenset({"Tab", "ISO_Left_Tab"})
+_TABBING_DISABLE_MAX_ATTEMPTS = 8
 
 
 def _toplevel_alive(toplevel: tk.Misc) -> bool:
@@ -293,11 +296,32 @@ def _mac_focus_in_handler(event: tk.Event) -> None:
 
 def _mac_web_key_guard(event: tk.Event) -> str | None:
     toplevel = event.widget.winfo_toplevel()
-    if _mac_web_input_active(toplevel):
-        if _mac_unfocus_pending(toplevel):
-            _mac_after(toplevel, 1, _mac_service_wakeup, toplevel)
-        return "break"
-    return None
+    if not _mac_web_input_active(toplevel):
+        return None
+    keysym = getattr(event, "keysym", "")
+    if keysym in _TAB_TRAVERSAL_KEYS:
+        _release_web_input_for_tk_traversal(toplevel)
+        return None
+    if keysym == "Escape":
+        _release_web_input_for_tk_traversal(toplevel)
+        return None
+    if _mac_unfocus_pending(toplevel):
+        _mac_after(toplevel, 1, _mac_service_wakeup, toplevel)
+    return "break"
+
+
+def _release_web_input_for_tk_traversal(toplevel: tk.Misc) -> None:
+    for web in _mac_webviews(toplevel):
+        native = web.native
+        if native is None or not native.mac_web_input_active():
+            continue
+        native.mac_request_tk_unfocus()
+        try:
+            web.focus_parent()
+        except Exception:
+            pass
+        break
+    _mac_service_wakeup(toplevel)
 
 
 def _ensure_mac_wakeup_pipe(toplevel: tk.Misc, native: NativeWebViewType) -> None:
@@ -365,8 +389,24 @@ def _ensure_mac_key_guard(toplevel: tk.Misc) -> None:
     toplevel._tkwry_mac_focusin_bind_id = bind_root.bind_all(
         "<FocusIn>", _mac_focus_in_handler, add="+"
     )
+    toplevel._tkwry_mac_tab_bind_id = bind_root.bind_all(
+        "<Tab>", _mac_tab_traversal_handler, add="+"
+    )
+    toplevel._tkwry_mac_shift_tab_bind_id = bind_root.bind_all(
+        "<Shift-Tab>", _mac_tab_traversal_handler, add="+"
+    )
     _prepend_mac_key_guard(toplevel)
     _tag_mac_text_widgets(toplevel)
+
+
+def _mac_tab_traversal_handler(event: tk.Event) -> str | None:
+    toplevel = event.widget.winfo_toplevel()
+    if not getattr(toplevel, "_tkwry_mac_webviews", None):
+        return None
+    if not _mac_web_input_active(toplevel):
+        return None
+    _release_web_input_for_tk_traversal(toplevel)
+    return None
 
 
 def _teardown_mac_key_guard(toplevel: tk.Misc) -> None:
@@ -379,6 +419,8 @@ def _teardown_mac_key_guard(toplevel: tk.Misc) -> None:
         ("<Button-1>", "_tkwry_mac_button1_bind_id"),
         ("<Map>", "_tkwry_mac_map_bind_id"),
         ("<FocusIn>", "_tkwry_mac_focusin_bind_id"),
+        ("<Tab>", "_tkwry_mac_tab_bind_id"),
+        ("<Shift-Tab>", "_tkwry_mac_shift_tab_bind_id"),
     ):
         funcid = getattr(toplevel, attr, None)
         _unbind_mac_global(bind_root, toplevel, sequence, funcid)
@@ -472,7 +514,19 @@ def install_automatic_window_tabbing_disable() -> None:
 def _ensure_mac_window_tabbing_disabled(toplevel: tk.Misc) -> None:
     if getattr(toplevel, "_tkwry_mac_window_tabbing", False):
         return
-    toplevel._tkwry_mac_window_tabbing = True
+    if getattr(toplevel, "_tkwry_mac_tabbing_scheduled", False):
+        return
+    toplevel._tkwry_mac_tabbing_scheduled = True
+    _schedule_mac_window_tabbing_disable(toplevel, attempt=0)
+
+
+def _schedule_mac_window_tabbing_disable(toplevel: tk.Misc, *, attempt: int) -> None:
+    if getattr(toplevel, "_tkwry_mac_window_tabbing", False):
+        toplevel._tkwry_mac_tabbing_scheduled = False
+        return
+    if not _toplevel_alive(toplevel):
+        toplevel._tkwry_mac_tabbing_scheduled = False
+        return
     try:
         from tkwry._core import disable_macos_window_tabbing
         from tkwry._parent import tk_parent_handle
@@ -480,7 +534,41 @@ def _ensure_mac_window_tabbing_disabled(toplevel: tk.Misc) -> None:
         toplevel.update_idletasks()
         disable_macos_window_tabbing(tk_parent_handle(toplevel))
     except Exception:
-        pass
+        if attempt + 1 >= _TABBING_DISABLE_MAX_ATTEMPTS:
+            print(
+                "tkwry: disable_macos_window_tabbing failed after "
+                f"{_TABBING_DISABLE_MAX_ATTEMPTS} attempts",
+                file=sys.stderr,
+            )
+            toplevel._tkwry_mac_tabbing_scheduled = False
+            return
+        delay = min(500, 50 * (2 ** min(attempt, 4)))
+        next_attempt = attempt + 1
+        _mac_after(
+            toplevel,
+            delay,
+            lambda t=toplevel, a=next_attempt: _schedule_mac_window_tabbing_disable(
+                t, attempt=a
+            ),
+        )
+        return
+    toplevel._tkwry_mac_window_tabbing = True
+    toplevel._tkwry_mac_tabbing_scheduled = False
+
+
+def _mac_toplevel_mapped(event: tk.Event) -> None:
+    """Retry window tabbing disable once the NSWindow is mapped."""
+    widget = event.widget
+    try:
+        toplevel = widget.winfo_toplevel()
+    except tk.TclError:
+        return
+    if widget is not toplevel:
+        return
+    if getattr(toplevel, "_tkwry_mac_window_tabbing", False):
+        return
+    toplevel._tkwry_mac_tabbing_scheduled = False
+    _ensure_mac_window_tabbing_disabled(toplevel)
 
 
 def _register_macos_webview(web: WebView) -> None:
@@ -500,6 +588,10 @@ def _register_macos_webview(web: WebView) -> None:
         if not getattr(toplevel, "_tkwry_mac_destroy_bind_id", None):
             toplevel._tkwry_mac_destroy_bind_id = toplevel.bind(
                 "<Destroy>", _mac_toplevel_destroy, add="+"
+            )
+        if not getattr(toplevel, "_tkwry_mac_map_tabbing_bind_id", None):
+            toplevel._tkwry_mac_map_tabbing_bind_id = toplevel.bind(
+                "<Map>", _mac_toplevel_mapped, add="+"
             )
     _ensure_mac_window_tabbing_disabled(toplevel)
     views.append(weakref.ref(web))

@@ -25,6 +25,7 @@ use wry::WebViewExtMacOS;
 pub struct FocusSyncGuard {
     click_monitor: Retained<AnyObject>,
     keydown_monitor: Retained<AnyObject>,
+    flags_monitor: Retained<AnyObject>,
     key_observer: Retained<AnyObject>,
 }
 
@@ -33,6 +34,7 @@ impl Drop for FocusSyncGuard {
         unsafe {
             NSEvent::removeMonitor(&self.click_monitor);
             NSEvent::removeMonitor(&self.keydown_monitor);
+            NSEvent::removeMonitor(&self.flags_monitor);
             NSNotificationCenter::defaultCenter().removeObserver(&self.key_observer);
         }
     }
@@ -114,11 +116,23 @@ pub fn install_focus_sync(
             }
             // Tab and other navigation keys may not reach Tcl bind_all (VoiceOver, etc.).
             const TAB_KEY_CODE: u16 = 48;
+            const ESCAPE_KEY_CODE: u16 = 53;
             let key_code = event_ref.keyCode();
-            if key_code == TAB_KEY_CODE {
+            if key_code == TAB_KEY_CODE || key_code == ESCAPE_KEY_CODE {
+                if let Ok(guard) = inner.lock() {
+                    if let Some(ref wv) = *guard {
+                        release_web_focus_locked(wv, &web_wants);
+                    }
+                }
                 unfocus.store(true, Ordering::SeqCst);
                 notify_wakeup(&wakeup);
                 return event.as_ptr();
+            }
+            // Re-assert WKWebView first responder for IME / VoiceOver / synthetic keys.
+            if let Ok(guard) = inner.lock() {
+                if let Some(ref wv) = *guard {
+                    focus_webview(wv, "focus on keydown");
+                }
             }
             if let Ok(guard) = inner.lock() {
                 if let Some(ref wv) = *guard {
@@ -142,6 +156,44 @@ pub fn install_focus_sync(
         NSEvent::addLocalMonitorForEventsMatchingMask_handler(keydown_mask, &keydown_block)
     }
     .ok_or("failed to install NSEvent keydown monitor")?;
+
+    let flags_block = {
+        let inner = inner.clone();
+        let web_wants = web_wants_keyboard.clone();
+        let unfocus = mac_tk_unfocus.clone();
+        let wakeup = wakeup_write_fd.clone();
+        RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+            if !web_wants.load(Ordering::SeqCst) {
+                return event.as_ptr();
+            }
+            let event_ref = unsafe { event.as_ref() };
+            const TAB_KEY_CODE: u16 = 48;
+            if event_ref.keyCode() == TAB_KEY_CODE {
+                return event.as_ptr();
+            }
+            if let Ok(guard) = inner.lock() {
+                if let Some(ref wv) = *guard {
+                    focus_webview(wv, "focus on flags changed");
+                    let Some(window_point) = current_window_point(parent_ns_view) else {
+                        unfocus.store(true, Ordering::SeqCst);
+                        notify_wakeup(&wakeup);
+                        return event.as_ptr();
+                    };
+                    if !window_point_hits_webview(wv, window_point) {
+                        unfocus.store(true, Ordering::SeqCst);
+                        notify_wakeup(&wakeup);
+                    }
+                }
+            }
+            event.as_ptr()
+        })
+    };
+
+    let flags_mask = NSEventMask::FlagsChanged;
+    let flags_monitor = unsafe {
+        NSEvent::addLocalMonitorForEventsMatchingMask_handler(flags_mask, &flags_block)
+    }
+    .ok_or("failed to install NSEvent flags monitor")?;
 
     let key_block = {
         let inner = inner.clone();
@@ -179,6 +231,7 @@ pub fn install_focus_sync(
     Ok(FocusSyncGuard {
         click_monitor,
         keydown_monitor,
+        flags_monitor,
         key_observer,
     })
 }

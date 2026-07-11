@@ -191,11 +191,42 @@ def _tk_window_drawable_offset_candidates() -> tuple[int, ...]:
             seen.add(offset)
             ordered.append(offset)
     # Non-standard Tk builds may place ``window`` elsewhere in the header.
-    for offset in range(0, 12 * ptr_size + 1, ptr_size):
+    for offset in range(0, 16 * ptr_size + 1, ptr_size):
         if offset > 0 and offset not in seen:
             seen.add(offset)
             ordered.append(offset)
     return tuple(ordered)
+
+
+def _mac_winfo_id_pointer_candidates(wid: int) -> tuple[int, ...]:
+    """Reconstruct full pointers from Tk 8.5's truncated ``winfo id`` values."""
+    seen: set[int] = set()
+    ordered: list[int] = []
+
+    def add(value: int) -> None:
+        if value and value not in seen:
+            seen.add(value)
+            ordered.append(value)
+
+    add(wid)
+    low32 = wid & 0xFFFFFFFF
+    add(low32)
+    if sizeof(c_void_p) >= 8:
+        if low32 & 0x80000000:
+            add(low32 | 0xFFFFFFFF00000000)
+        high_tag = (low32 & 0xFFFFFFFF) | 0x0000000100000000
+        add(high_tag)
+    return tuple(ordered)
+
+
+def _mac_drawable_lookup_candidates(wid: int, lookup) -> int | None:
+    for candidate in _mac_winfo_id_pointer_candidates(wid):
+        if lookup(c_void_p(candidate)):
+            return candidate
+    return None
+
+
+_mac_drawable_offset_cache: dict[tuple[str, tuple[int, ...]], int] = {}
 
 
 def _mac_root_relative(*, handle: int, top_ns: int) -> bool:
@@ -205,12 +236,22 @@ def _mac_root_relative(*, handle: int, top_ns: int) -> bool:
     return not top_ns or handle == top_ns
 
 
-def _mac_drawable_from_tk_window(tk_win: int, wid: int, dylib: CDLL) -> int:
+def _mac_drawable_from_tk_window(
+    tk_win: int, wid: int, dylib: CDLL, *, cache_key: tuple[str, tuple[int, ...]] | None
+) -> int:
     """Read the Drawable field, probing offsets validated via native Tk."""
     lookup = _mac_nsview_lookup(dylib)
     low32 = wid & 0xFFFFFFFF
     tried: list[int] = []
-    for offset in _tk_window_drawable_offset_candidates():
+    candidates = _tk_window_drawable_offset_candidates()
+    if cache_key is not None:
+        cached = _mac_drawable_offset_cache.get(cache_key)
+        if cached is not None:
+            candidates = (
+                cached,
+                *(offset for offset in candidates if offset != cached),
+            )
+    for offset in candidates:
         tried.append(offset)
         full = c_void_p.from_address(tk_win + offset).value
         if full is None or full == 0:
@@ -218,7 +259,12 @@ def _mac_drawable_from_tk_window(tk_win: int, wid: int, dylib: CDLL) -> int:
         if (full & 0xFFFFFFFF) != low32:
             continue
         if lookup(c_void_p(full)):
+            if cache_key is not None:
+                _mac_drawable_offset_cache[cache_key] = offset
             return full
+    direct = _mac_drawable_lookup_candidates(wid, lookup)
+    if direct is not None:
+        return direct
     raise RuntimeError(
         "Drawable sanity check failed for TkWindow struct "
         f"(tried offsets {tried!r}, winfo_id returned {wid:#x})"
@@ -236,6 +282,13 @@ def _mac_drawable(widget: tk.Misc, dylib: CDLL) -> int:
     if _mac_tk_version(widget) >= (8, 6):
         return wid
 
+    tcl_lib = widget.tk.call("info", "library")
+    dylib = _mac_tk_dylib(tcl_lib)
+    lookup = _mac_nsview_lookup(dylib)
+    direct = _mac_drawable_lookup_candidates(wid, lookup)
+    if direct is not None:
+        return direct
+
     interp = c_void_p(widget.tk.interpaddr())
 
     main_win_fn = dylib.Tk_MainWindow
@@ -252,7 +305,8 @@ def _mac_drawable(widget: tk.Misc, dylib: CDLL) -> int:
     if not tk_win:
         raise RuntimeError(f"Tk_NameToWindow failed for {widget!r}")
 
-    return _mac_drawable_from_tk_window(tk_win, wid, dylib)
+    cache_key = (tcl_lib, _mac_tk_version(widget))
+    return _mac_drawable_from_tk_window(tk_win, wid, dylib, cache_key=cache_key)
 
 
 _mac_tk_dylib_cache: dict[str, CDLL] = {}

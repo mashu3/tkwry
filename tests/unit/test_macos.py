@@ -56,6 +56,8 @@ def test_teardown_unbinds_using_stored_bind_root(
         (tk_root, tk_root, "<Button-1>", "bind-id"),
         (tk_root, tk_root, "<Map>", "bind-id"),
         (tk_root, tk_root, "<FocusIn>", "bind-id"),
+        (tk_root, tk_root, "<Tab>", "bind-id"),
+        (tk_root, tk_root, "<Shift-Tab>", "bind-id"),
     ]
     assert not getattr(tk_root, "_tkwry_mac_key_guard", False)
 
@@ -93,6 +95,8 @@ def test_teardown_unbinds_via_toplevel_when_bind_root_differs(
         (("bind", "all", "<Button-1>"), "bind-id"),
         (("bind", "all", "<Map>"), "bind-id"),
         (("bind", "all", "<FocusIn>"), "bind-id"),
+        (("bind", "all", "<Tab>"), "bind-id"),
+        (("bind", "all", "<Shift-Tab>"), "bind-id"),
     ]
 
 
@@ -339,6 +343,67 @@ def test_focus_in_tags_widget_and_releases_tk_focus_while_web_active(
 
     assert tagged == [entry]
     assert released == [True]
+
+
+def test_mac_web_key_guard_allows_tab_traversal(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    released: list[bool] = []
+
+    def track_release(_toplevel: object) -> None:
+        released.append(True)
+
+    monkeypatch.setattr(_macos, "_mac_web_input_active", lambda _t: True)
+    monkeypatch.setattr(_macos, "_release_web_input_for_tk_traversal", track_release)
+    monkeypatch.setattr(_macos, "_mac_unfocus_pending", lambda _t: False)
+
+    tk_root._tkwry_mac_webviews = [SimpleNamespace()]  # type: ignore[list-item]
+    event = SimpleNamespace(widget=tk_root, keysym="Tab")
+
+    assert _macos._mac_web_key_guard(event) is None  # type: ignore[arg-type]
+    assert released == [True]
+
+
+def test_schedule_mac_window_tabbing_disable_retries_then_succeeds(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempts: list[int] = []
+    after_calls: list[tuple[int, object]] = []
+
+    def fake_disable(_handle: int) -> None:
+        attempts.append(len(attempts) + 1)
+        if len(attempts) < 3:
+            raise RuntimeError("NSWindow not ready")
+
+    monkeypatch.setattr(
+        "tkwry._core.disable_macos_window_tabbing",
+        fake_disable,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "tkwry._parent.tk_parent_handle",
+        lambda _toplevel: 1,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        _macos,
+        "_mac_after",
+        lambda _toplevel, delay, callback: after_calls.append((delay, callback)),
+    )
+
+    _macos._schedule_mac_window_tabbing_disable(tk_root, attempt=0)
+    assert attempts == [1]
+    assert len(after_calls) == 1
+
+    after_calls[0][1]()
+    assert attempts == [1, 2]
+    assert len(after_calls) == 2
+
+    after_calls[1][1]()
+    assert attempts == [1, 2, 3]
+    assert tk_root._tkwry_mac_window_tabbing is True
 
 
 def test_install_tabbing_disable_on_main_calls_immediately(
