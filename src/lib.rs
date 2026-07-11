@@ -201,7 +201,7 @@ fn wait_sync_hook<T: Copy>(
     };
     let enqueued_at = Instant::now();
     let absolute_deadline = enqueued_at + SYNC_HOOK_MAX_WAIT;
-    let mut deadline = enqueued_at + timeout;
+    let deadline = enqueued_at + timeout;
     while guard.is_none() {
         if slot.cancelled.load(Ordering::SeqCst) {
             return default;
