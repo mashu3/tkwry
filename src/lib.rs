@@ -1331,11 +1331,12 @@ fn disable_macos_automatic_window_tabbing() {
 }
 
 #[pyfunction]
-fn disable_macos_window_tabbing(_parent: usize) -> PyResult<()> {
+#[allow(unused_variables)]
+fn disable_macos_window_tabbing(parent: usize) -> PyResult<()> {
     #[cfg(target_os = "macos")]
     {
         use objc2_app_kit::NSView;
-        let ptr = _parent as *mut NSView;
+        let ptr = parent as *mut NSView;
         let Some(parent_ns_view) = NonNull::new(ptr) else {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "parent handle is null",
