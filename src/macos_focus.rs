@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn logical_bounds_normalizes_physical_values() {
-    use wry::dpi::{PhysicalPosition, PhysicalSize, Position, Size};
+        use wry::dpi::{PhysicalPosition, PhysicalSize, Position, Size};
 
         let bounds = wry::Rect {
             position: Position::Physical(PhysicalPosition::new(20, 40)),
