@@ -143,14 +143,7 @@ def test_sync_hook_timeout_skips_late_handler(tk_root, monkeypatch) -> None:
 
 def test_dispatch_sync_hook_schedules_tk_drain(tk_root, monkeypatch) -> None:
     _frame, web = _make_web(tk_root)
-    scheduled: list[object] = []
-    monkeypatch.setattr(
-        web._frame,
-        "after",
-        lambda _delay, callback: scheduled.append(callback) or "after-id",
-    )
     monkeypatch.setattr(web, "_ensure_event_poll", lambda: None, raising=False)
-    monkeypatch.setattr(web, "_wake_tk_for_sync_hook", lambda: None, raising=False)
 
     result_holder: list[bool] = []
 
@@ -159,8 +152,12 @@ def test_dispatch_sync_hook_schedules_tk_drain(tk_root, monkeypatch) -> None:
 
     thread = threading.Thread(target=worker)
     thread.start()
-    for callback in scheduled:
-        callback()
+    for _ in range(200):
+        tk_root.update_idletasks()
+        tk_root.update()
+        web._drain_sync_hooks()
+        if not thread.is_alive():
+            break
     thread.join(timeout=1.0)
 
     assert result_holder == [True]

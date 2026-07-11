@@ -1393,9 +1393,11 @@ class WebView:
     def _schedule_sync_hook_drain(self) -> None:
         """Ask the Tk thread to drain Python-side sync hooks."""
         self._wake_tk_for_sync_hook()
+        if threading.get_ident() != self._tk_thread_id:
+            return
         try:
             self._frame.after(0, self._drain_sync_hooks)
-        except tk.TclError:
+        except (tk.TclError, RuntimeError):
             pass
 
     def _dispatch_sync_hook(self, invoke: Callable[[], _T], default: _T) -> _T:

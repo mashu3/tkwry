@@ -7,10 +7,12 @@ import tkinter as tk
 import pytest
 
 from tkwry import WebView
+from tkwry._runtime import GtkPump
 from tkwry.exceptions import WebViewCreationError, WebViewDestroyedError
 from tkwry.webview import _CREATE_MAX_ATTEMPTS, _FLUSH_LOAD_MAX_ATTEMPTS
 
 _real_try_create = WebView._try_create
+_real_gtk_attach = GtkPump.attach
 
 
 @pytest.fixture(autouse=True)
@@ -608,6 +610,7 @@ def test_unmap_does_not_detach_gtk_pump(
     )
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
     monkeypatch.setattr(tk_root, "after", lambda *_a, **_k: "after-id")
+    monkeypatch.setattr(GtkPump, "attach", _real_gtk_attach)
 
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)
