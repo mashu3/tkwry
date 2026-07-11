@@ -11,7 +11,9 @@ from tkwry import WebView
 
 @pytest.fixture(autouse=True)
 def _noop_gtk_pumps(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("tkwry._core.pump_events", lambda: None, raising=False)
+    monkeypatch.setattr(
+        "tkwry._core.pump_events", lambda max_iterations=None: False, raising=False
+    )
     monkeypatch.setattr("tkwry._runtime.GtkPump.attach", lambda _widget: None)
 
 

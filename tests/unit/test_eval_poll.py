@@ -13,7 +13,9 @@ from tkwry import WebView
 @pytest.fixture(autouse=True)
 def _noop_gtk_pumps(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep eval-poll unit tests off GTK/WebKitGTK in headless Linux CI."""
-    monkeypatch.setattr("tkwry._core.pump_events", lambda: None, raising=False)
+    monkeypatch.setattr(
+        "tkwry._core.pump_events", lambda max_iterations=None: False, raising=False
+    )
     monkeypatch.setattr("tkwry._runtime.GtkPump.attach", lambda _widget: None)
 
 
@@ -35,7 +37,9 @@ def _stub_native_ready(
 
 def _configure_poll_test(web: WebView, monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate poll logic from GTK pumps and rescheduling timers."""
-    monkeypatch.setattr("tkwry._core.pump_events", lambda: None, raising=False)
+    monkeypatch.setattr(
+        "tkwry._core.pump_events", lambda max_iterations=None: False, raising=False
+    )
     original = web._frame.after
 
     def after(delay, func=None, *args):
@@ -112,7 +116,9 @@ def test_poll_events_rearms_if_eval_pending_arrives_during_stop(
         original_ensure()
 
     monkeypatch.setattr(web, "_ensure_event_poll", tracking_ensure)
-    monkeypatch.setattr("tkwry._core.pump_events", lambda: None, raising=False)
+    monkeypatch.setattr(
+        "tkwry._core.pump_events", lambda max_iterations=None: False, raising=False
+    )
 
     check_count = {"n": 0}
 
