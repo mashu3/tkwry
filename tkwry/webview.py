@@ -157,7 +157,7 @@ def _release_tk_wakeup_pipe(toplevel: tk.Misc) -> None:
         return
     users -= 1
     if users > 0:
-        toplevel._tkwry_wake_pipe_users = users
+        setattr(toplevel, "_tkwry_wake_pipe_users", users)
         return
     for fd in (
         getattr(toplevel, "_tkwry_wake_read_fd", None),
@@ -1219,8 +1219,10 @@ class WebView:
                 setattr(toplevel, "_tkwry_wake_read_fd", read_fd)
                 setattr(toplevel, "_tkwry_wake_write_fd", write_fd)
                 setattr(toplevel, "_tkwry_wake_pipe_users", 0)
-            toplevel._tkwry_wake_pipe_users = (
-                getattr(toplevel, "_tkwry_wake_pipe_users", 0) + 1
+            setattr(
+                toplevel,
+                "_tkwry_wake_pipe_users",
+                getattr(toplevel, "_tkwry_wake_pipe_users", 0) + 1,
             )
         self._tk_wakeup_write_fd = write_fd
         native = self._webview
