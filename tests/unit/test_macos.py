@@ -248,6 +248,24 @@ def test_toplevel_destroy_closes_wakeup_pipe(tk_root) -> None:
         os.write(write_fd, b"x")
 
 
+def test_mac_toplevel_destroy_ignores_child_destroy(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    teardown_calls: list[tk.Misc] = []
+    monkeypatch.setattr(
+        _macos,
+        "_teardown_macos_toplevel",
+        lambda toplevel, **kwargs: teardown_calls.append(toplevel),
+    )
+
+    frame = tk.Frame(tk_root)
+    _macos._mac_toplevel_destroy(SimpleNamespace(widget=frame))  # type: ignore[arg-type]
+
+    assert teardown_calls == []
+
+
 def test_unregister_tears_down_when_toplevel_already_destroyed(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

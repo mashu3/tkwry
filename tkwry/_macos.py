@@ -393,12 +393,21 @@ def _teardown_mac_key_guard(toplevel: tk.Misc) -> None:
 
 
 def _mac_toplevel_destroy(event: tk.Event) -> None:
-    _teardown_macos_toplevel(event.widget)
+    widget = event.widget
+    try:
+        toplevel = widget.winfo_toplevel()
+    except tk.TclError:
+        return
+    if widget is not toplevel:
+        return
+    _teardown_macos_toplevel(toplevel, unbind_destroy=False)
 
 
-def _teardown_macos_toplevel(toplevel: tk.Misc) -> None:
+def _teardown_macos_toplevel(toplevel: tk.Misc, *, unbind_destroy: bool = True) -> None:
     _teardown_mac_wakeup_pipe(toplevel)
     _teardown_mac_key_guard(toplevel)
+    if not unbind_destroy:
+        return
     destroy_bind_id = getattr(toplevel, "_tkwry_mac_destroy_bind_id", None)
     if destroy_bind_id is not None:
         try:
