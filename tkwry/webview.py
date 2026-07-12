@@ -515,6 +515,7 @@ class WebView:
         self._eval_js_scheduled = False
         self._local_queue_drop_counts = [0, 0, 0, 0, 0]
         self._bounds_sync_scheduled = False
+        self._stacking_sync_scheduled = False
         self._initial_load: _PendingLoad | None = None
         self._initial_load_attempt = 0
         self._initial_load_after_id: str | None = None
@@ -561,7 +562,7 @@ class WebView:
     def place(self, **kwargs) -> None:
         self._require_not_destroyed("place")
         self._frame.place(**kwargs)
-        self._sync_bounds_and_stacking()
+        self._schedule_bounds_sync()
         self._schedule_try_create()
         self._maybe_fire_ready()
 
@@ -742,7 +743,7 @@ class WebView:
 
     def __del__(self) -> None:
         try:
-            if self._destroyed:
+            if not hasattr(self, "_destroyed") or self._destroyed:
                 return
             if threading.get_ident() == self._tk_thread_id:
                 self._cancel_deferred_callbacks()
@@ -750,7 +751,7 @@ class WebView:
             else:
                 self._schedule_destroy_on_tk_thread()
         except Exception:
-            if not self._destroyed:
+            if hasattr(self, "_destroyed") and not self._destroyed:
                 try:
                     self._teardown_native_if_alive()
                 except Exception:
@@ -1320,6 +1321,7 @@ class WebView:
         self._flush_load_scheduled = False
         self._eval_js_scheduled = False
         self._bounds_sync_scheduled = False
+        self._stacking_sync_scheduled = False
         self._pending_eval_js = None
         after_ids = self._deferred_after_ids
         self._deferred_after_ids = []
@@ -2192,8 +2194,24 @@ class WebView:
 
     def _sync_bounds_and_stacking(self) -> bool:
         synced = self._sync_bounds()
-        self._sync_tk_stacking_order()
+        if synced:
+            self._schedule_stacking_sync()
         return synced
+
+    def _schedule_stacking_sync(self) -> None:
+        if sys.platform != "win32" or self._webview is None or self._destroyed:
+            return
+        if self._stacking_sync_scheduled:
+            return
+        self._stacking_sync_scheduled = True
+        try:
+            self._track_after(self._frame.after_idle(self._deferred_sync_stacking))
+        except tk.TclError:
+            self._stacking_sync_scheduled = False
+
+    def _deferred_sync_stacking(self) -> None:
+        self._stacking_sync_scheduled = False
+        self._sync_tk_stacking_order()
 
     def _sync_tk_stacking_order(self) -> None:
         if sys.platform != "win32" or self._webview is None or self._destroyed:
@@ -2250,8 +2268,11 @@ class WebView:
             return
         if self._webview is None:
             self._schedule_try_create()
-        else:
+        elif self._bounds_size() is not None:
             self._sync_bounds_and_stacking()
+            self._maybe_fire_ready()
+        else:
+            self._schedule_bounds_sync()
             self._maybe_fire_ready()
 
     def _on_map(self, event: tk.Event) -> None:
