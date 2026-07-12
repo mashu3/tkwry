@@ -489,20 +489,6 @@ def test_layout_ready_false_for_init_size_before_map_on_win32(
     assert web.ready is False
 
 
-def test_layout_ready_ignores_viewable_on_win32_place(tk_root, monkeypatch) -> None:
-    frame = tk.Frame(tk_root)
-    web = WebView(frame, width=300, height=200)
-    web._webview = object()
-    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
-    monkeypatch.setattr(frame, "winfo_width", lambda: 400)
-    monkeypatch.setattr(frame, "winfo_height", lambda: 300)
-    monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
-    monkeypatch.setattr("tkwry.webview.sys.platform", "win32")
-
-    assert web._layout_ready() is True
-    assert web.ready is True
-
-
 def test_frame_ready_for_initial_load_checks_geometry_on_linux(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -559,20 +559,8 @@ class WebView:
     def place(self, **kwargs) -> None:
         self._require_not_destroyed("place")
         self._frame.place(**kwargs)
-        try:
-            top = self._frame.winfo_toplevel()
-            self._frame.update_idletasks()
-            top.update_idletasks()
-        except tk.TclError:
-            pass
         self._schedule_bounds_sync()
         self._schedule_try_create()
-        if self._webview is not None:
-            self._sync_bounds_and_stacking()
-            if self._initial_load is not None:
-                self._track_after(self._frame.after_idle(self._run_initial_load))
-            else:
-                self._maybe_reschedule_initial_load()
         self._maybe_fire_ready()
 
     def __repr__(self) -> str:
@@ -874,43 +862,22 @@ class WebView:
         elif sys.platform == "linux":
             GtkPump.detach(self._frame)
             if had_native or self._native_teardown_pending is not None:
-                self._flush_native_teardown_sync()
+                from tkwry._linux import pump_gtk_events
+
+                for _ in range(24):
+                    if self._native_teardown_pending is not None:
+                        self._finish_native_teardown()
+                    pump_gtk_events()
+                    if self._native_teardown_pending is None:
+                        break
+                    try:
+                        self._toplevel.update_idletasks()
+                    except tk.TclError:
+                        break
         if self._native_teardown_pending is not None:
             self._ensure_event_poll()
         else:
             self._event_poll_active = False
-
-    def _flush_native_teardown_sync(self) -> None:
-        """Finish native release on the Tk thread before host frame teardown."""
-        if sys.platform == "linux":
-            from tkwry._linux import pump_gtk_events
-
-            root = self._toplevel
-            for _ in range(64):
-                if self._native_teardown_pending is not None:
-                    self._finish_native_teardown()
-                pump_gtk_events()
-                if self._native_teardown_pending is None:
-                    break
-                try:
-                    root.update_idletasks()
-                    root.update()
-                except tk.TclError:
-                    break
-            for _ in range(48):
-                pump_gtk_events()
-            return
-        if self._native_teardown_pending is None:
-            return
-        for _ in range(32):
-            self._finish_native_teardown()
-            if self._native_teardown_pending is None:
-                return
-            try:
-                self._toplevel.update_idletasks()
-                self._toplevel.update()
-            except tk.TclError:
-                break
 
     def _unbind_frame_events(self) -> None:
         """Drop host-frame binds so ``destroy()`` does not pin this instance."""
@@ -2116,7 +2083,10 @@ class WebView:
         self._schedule_bounds_sync()
         if initial_load is not None:
             self._initial_load = initial_load
-            self._schedule_initial_load()
+            if sys.platform == "linux":
+                self._run_initial_load()
+            if self._initial_load is not None:
+                self._schedule_initial_load()
         if sys.platform == "darwin" and self._webview is not None:
             toplevel = self._frame.winfo_toplevel()
             _ensure_mac_wakeup_pipe(toplevel, self._webview)
@@ -2141,29 +2111,17 @@ class WebView:
             else:
                 traceback.print_exc()
 
-    def _frame_has_laid_out_geometry(self) -> bool:
-        """True when Tk has resolved the host frame to real pixel dimensions."""
-        try:
-            return self._frame.winfo_width() > 1 and self._frame.winfo_height() > 1
-        except tk.TclError:
-            return False
-
     def _frame_ready_for_initial_load(self) -> bool:
         """Whether the host frame is laid out enough to load content."""
         try:
             if not self._frame.winfo_exists() or self._webview is None:
                 return False
-            if not self._frame_has_laid_out_geometry():
+            if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
                 return False
             # Xvfb headless: winfo_viewable() stays False while geometry is valid.
             if sys.platform == "linux":
                 return True
-            # WebView2 place layouts can report not viewable while geometry is valid.
-            if sys.platform == "win32":
-                return True
-            if not self._frame.winfo_viewable():
-                return False
-            return True
+            return bool(self._frame.winfo_viewable())
         except tk.TclError:
             return False
 
@@ -2322,18 +2280,12 @@ class WebView:
         try:
             if not self._frame.winfo_exists():
                 return False
-            size = self._bounds_size()
-            if size is None:
-                return False
             # Xvfb headless: winfo_viewable() stays False while geometry is valid.
             if sys.platform == "linux":
-                return True
-            # WebView2 place layouts can report not viewable while geometry is valid.
-            if sys.platform == "win32" and self._frame_has_laid_out_geometry():
-                return True
+                return self._bounds_size() is not None
             if not self._frame.winfo_viewable():
                 return False
-            return True
+            return self._bounds_size() is not None
         except tk.TclError:
             return False
 
@@ -2431,8 +2383,6 @@ class WebView:
         elif self._bounds_size() is not None:
             self._sync_bounds_and_stacking()
             self._maybe_fire_ready()
-            if self._initial_load is not None:
-                self._maybe_reschedule_initial_load()
         else:
             self._schedule_bounds_sync()
             self._maybe_fire_ready()

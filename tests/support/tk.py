@@ -10,6 +10,11 @@ import pytest
 
 from tkwry import WebView
 
+skip_linux_layout = pytest.mark.skipif(
+    sys.platform == "linux",
+    reason="WebKitGTK headless CI: Tk layout timing unreliable",
+)
+
 skip_linux_ci = pytest.mark.skipif(
     sys.platform == "linux" and os.environ.get("GITHUB_ACTIONS") == "true",
     reason="WebKitGTK headless CI: best-effort on Linux in v0.0.x",
