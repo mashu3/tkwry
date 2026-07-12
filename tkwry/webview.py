@@ -1033,7 +1033,10 @@ class WebView:
         native.reload()
         if self._on_page_load is not None:
             self._ensure_event_poll()
-            self._service_linux_events()
+            if sys.platform == "linux":
+                self._service_linux_events(gtk_rounds=64, passes=4)
+            else:
+                self._service_linux_events()
 
     def _run_deferred_reload(self) -> None:
         if self._destroyed or self._webview is None:
@@ -1045,7 +1048,10 @@ class WebView:
             return
         if self._on_page_load is not None:
             self._ensure_event_poll()
-            self._service_linux_events()
+            if sys.platform == "linux":
+                self._service_linux_events(gtk_rounds=64, passes=4)
+            else:
+                self._service_linux_events()
 
     def eval_js(self, script: str, *, on_error: EvalErrorHandler | None = None) -> None:
         """Evaluate JavaScript without waiting for a result.
@@ -1763,23 +1769,24 @@ class WebView:
         for event, page_url in pending:
             self._invoke_callback(page_load, event, page_url)
 
-    def _service_linux_events(self, *, gtk_rounds: int = 32) -> None:
+    def _service_linux_events(self, *, gtk_rounds: int = 32, passes: int = 1) -> None:
         if sys.platform != "linux" or self._destroyed:
             return
         from tkwry._linux import pump_gtk_events
 
-        pump_gtk_events(bursts=gtk_rounds)
-        native = self._webview
-        if native is not None:
-            native.drain_sync_hooks()
-        self._drain_sync_hooks()
-        if self._ipc_handler is not None:
-            self._deliver_ipc_messages()
-        self._deliver_page_load_events()
-        if self._on_title_changed is not None:
-            self._deliver_title_events()
-        if self._drag_drop_handler is not None:
-            self._deliver_drag_drop_events()
+        for _ in range(passes):
+            pump_gtk_events(bursts=gtk_rounds)
+            native = self._webview
+            if native is not None:
+                native.drain_sync_hooks()
+            self._drain_sync_hooks()
+            if self._ipc_handler is not None:
+                self._deliver_ipc_messages()
+            self._deliver_page_load_events()
+            if self._on_title_changed is not None:
+                self._deliver_title_events()
+            if self._drag_drop_handler is not None:
+                self._deliver_drag_drop_events()
 
     def _register_pending_eval(
         self,
@@ -1870,6 +1877,7 @@ class WebView:
                 self._event_poll_active = False
             return
         if sys.platform == "linux":
+            _pump_toplevel_wakeup_pipe(self._toplevel)
             from tkwry._linux import pump_gtk_events
 
             pump_gtk_events()
@@ -1952,11 +1960,16 @@ class WebView:
             kwargs["on_navigation"] = self._native_navigation
         if self._on_new_window is not None:
             kwargs["on_new_window"] = self._native_new_window
+        kwargs["page_load_listening"] = self._on_page_load is not None
+        kwargs["ipc_listening"] = self._ipc_handler is not None
+        kwargs["title_listening"] = self._on_title_changed is not None
+        kwargs["drag_drop_listening"] = self._drag_drop_handler is not None
 
         if sys.platform == "linux":
             from tkwry._linux import pump_gtk_events
 
             pump_gtk_events(bursts=20)
+            self._ensure_tk_wakeup_pipe()
 
         try:
             self._webview = NativeWebView(
@@ -1979,6 +1992,8 @@ class WebView:
             self._schedule_try_create(delay_ms=delay)
             return
         self._create_attempt = 0
+        if sys.platform != "darwin":
+            self._ensure_tk_wakeup_pipe()
         self._sync_async_listening()
         self._ensure_gtk_pump_attached()
         self._pending_url = None
@@ -1995,12 +2010,11 @@ class WebView:
             toplevel = self._frame.winfo_toplevel()
             _ensure_mac_wakeup_pipe(toplevel, self._webview)
             _ensure_mac_pump(toplevel)
-        self._ensure_tk_wakeup_pipe()
         if self._needs_event_poll():
             self._ensure_event_poll()
             if sys.platform == "linux":
                 for _ in range(10):
-                    self._service_linux_events()
+                    self._service_linux_events(gtk_rounds=64, passes=4)
         self._maybe_fire_ready()
 
     def _run_eval_js(
@@ -2114,7 +2128,8 @@ class WebView:
             return
         self._sync_bounds()
         gtk_rounds = 64 if sys.platform == "linux" else 32
-        self._service_linux_events(gtk_rounds=gtk_rounds)
+        passes = 4 if sys.platform == "linux" else 1
+        self._service_linux_events(gtk_rounds=gtk_rounds, passes=passes)
         if self._on_page_load is not None:
             self._ensure_event_poll()
         self._initial_load = None
@@ -2124,6 +2139,8 @@ class WebView:
         if self._destroyed or self._webview is None or self._pending_load is None:
             return
         kind, payload = self._pending_load
+        if sys.platform == "linux":
+            self._sync_bounds()
         try:
             if kind == "url":
                 self._webview.load_url(payload)
@@ -2152,7 +2169,10 @@ class WebView:
         self._flush_load_attempt = 0
         self._initial_load = None
         self._sync_bounds()
-        self._service_linux_events()
+        if sys.platform == "linux":
+            self._service_linux_events(gtk_rounds=64, passes=4)
+        else:
+            self._service_linux_events()
         if self._on_page_load is not None:
             self._ensure_event_poll()
 

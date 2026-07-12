@@ -28,7 +28,8 @@ def pump(root, *, steps: int = 80, delay_ms: int = 50) -> None:
         if sys.platform == "linux":
             from tkwry._core import pump_events
 
-            pump_events()
+            for _round in range(4):
+                pump_events(256)
         root.after(delay_ms)
         root.update()
 

@@ -867,6 +867,10 @@ impl WebView {
         initialization_script = None,
         on_navigation = None,
         on_new_window = None,
+        page_load_listening = false,
+        ipc_listening = false,
+        title_listening = false,
+        drag_drop_listening = false,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -884,6 +888,10 @@ impl WebView {
         initialization_script: Option<String>,
         on_navigation: Option<Py<PyAny>>,
         on_new_window: Option<Py<PyAny>>,
+        page_load_listening: bool,
+        ipc_listening: bool,
+        title_listening: bool,
+        drag_drop_listening: bool,
     ) -> PyResult<Self> {
         let owner_thread = match owner_thread {
             Some(id) => id,
@@ -939,11 +947,11 @@ impl WebView {
         let drag_drop_pending: DragDropPending = Arc::new(Mutex::new(VecDeque::new()));
         let eval_callbacks: EvalCallbackMap = Arc::new(Mutex::new(HashMap::new()));
         let eval_result_pending: EvalResultPending = Arc::new(Mutex::new(VecDeque::new()));
-        // Async queues start disabled; Python enables them when a handler is set.
-        let page_load_listening = Arc::new(AtomicBool::new(false));
-        let ipc_listening = Arc::new(AtomicBool::new(false));
-        let title_listening = Arc::new(AtomicBool::new(false));
-        let drag_drop_listening = Arc::new(AtomicBool::new(false));
+        // Async queues start disabled unless Python requests them at create.
+        let page_load_listening = Arc::new(AtomicBool::new(page_load_listening));
+        let ipc_listening = Arc::new(AtomicBool::new(ipc_listening));
+        let title_listening = Arc::new(AtomicBool::new(title_listening));
+        let drag_drop_listening = Arc::new(AtomicBool::new(drag_drop_listening));
         let ipc_overflow_dropped = Arc::new(AtomicU64::new(0));
         let page_load_overflow_dropped = Arc::new(AtomicU64::new(0));
         let title_overflow_dropped = Arc::new(AtomicU64::new(0));

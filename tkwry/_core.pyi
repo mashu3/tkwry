@@ -49,6 +49,10 @@ class WebView:
         initialization_script: str | None = None,
         on_navigation: Callable[[str], bool] | None = None,
         on_new_window: Callable[[str], NewWindowResponse] | None = None,
+        page_load_listening: bool = False,
+        ipc_listening: bool = False,
+        title_listening: bool = False,
+        drag_drop_listening: bool = False,
     ) -> WebView: ...
     def load_url(self, url: str) -> None: ...
     def load_html(self, html: str) -> None: ...
