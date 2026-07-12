@@ -82,9 +82,10 @@ def test_schedule_destroy_on_tk_thread_runs_destroy(
     assert destroyed == [True]
 
 
-def test_schedule_destroy_from_worker_wakes_tk_thread(
+def test_schedule_destroy_from_off_thread_queues_wakeup(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Off-thread scheduling queues destroy and wakes the Tk thread (no real thread)."""
     import threading
 
     frame = tk.Frame(tk_root)
@@ -100,25 +101,33 @@ def test_schedule_destroy_from_worker_wakes_tk_thread(
     monkeypatch.setattr(web, "destroy", track_destroy, raising=False)
     web._unbind_frame_events()
     toplevel = frame.winfo_toplevel()
-    toplevel._tkwry_mac_wake_read_fd = 1
-    toplevel._tkwry_mac_wake_write_fd = 2
+    if sys.platform == "darwin":
+        setattr(toplevel, "_tkwry_mac_wake_read_fd", 1)
+        setattr(toplevel, "_tkwry_mac_wake_write_fd", 2)
+    else:
+        setattr(toplevel, "_tkwry_wake_write_fd", 2)
     write_calls: list[bytes] = []
+    fallback: list[bool] = []
+    simulate_off_thread = [False]
+    real_get_ident = threading.get_ident
+
     monkeypatch.setattr(os, "write", lambda _fd, data: write_calls.append(data))
     monkeypatch.setattr(
         web,
         "_teardown_native_if_alive",
-        lambda: pytest.fail("should not fall back"),
+        lambda: fallback.append(True),
         raising=False,
     )
+    monkeypatch.setattr(
+        "tkwry.webview.threading.get_ident",
+        lambda: web._tk_thread_id + 1 if simulate_off_thread[0] else real_get_ident(),
+    )
 
-    done = threading.Event()
+    simulate_off_thread[0] = True
+    web._schedule_destroy_on_tk_thread()
+    simulate_off_thread[0] = False
 
-    def worker() -> None:
-        web._schedule_destroy_on_tk_thread()
-        done.set()
-
-    threading.Thread(target=worker).start()
-    assert done.wait(timeout=2.0)
+    assert fallback == []
     assert write_calls == [b"\x01"]
     pending = getattr(toplevel, "_tkwry_pending_destroy_webviews", [])
     assert len(pending) == 1

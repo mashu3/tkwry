@@ -1688,6 +1688,10 @@ class WebView:
             self._invoke_callback(expected_cb, result)
 
     def _poll_events(self) -> None:
+        try:
+            _drain_pending_destroy_webviews(self._frame.winfo_toplevel())
+        except tk.TclError:
+            pass
         self._finish_native_teardown()
         if self._destroyed:
             if self._native_teardown_pending is not None:

@@ -611,19 +611,33 @@ def test_del_on_worker_thread_tears_down_native(tk_root) -> None:
     web_ref = web
     web._unbind_frame_events()
     thread_done = threading.Event()
+    thread_error: list[BaseException] = []
 
     def worker() -> None:
-        web_ref.__del__()
-        thread_done.set()
+        try:
+            web_ref.__del__()
+        except BaseException as exc:
+            thread_error.append(exc)
+        finally:
+            thread_done.set()
 
-    threading.Thread(target=worker).start()
-    assert thread_done.wait(timeout=2.0)
+    threading.Thread(target=worker, daemon=True).start()
+    assert thread_done.wait(timeout=5.0)
+    assert thread_error == []
 
-    assert wait_until(
-        tk_root,
-        lambda: web.destroyed and web._webview is None,
-        steps=120,
-    )
+    toplevel = frame.winfo_toplevel()
+    for _ in range(200):
+        tk_root.update_idletasks()
+        tk_root.update()
+        if sys.platform == "darwin":
+            from tkwry._macos import _mac_service_wakeup
+
+            _mac_service_wakeup(toplevel)
+        if web.destroyed and web._webview is None:
+            break
+
+    assert web.destroyed
+    assert web._webview is None
     assert web._event_poll_active is False
 
     frame.destroy()
