@@ -729,7 +729,7 @@ def test_unmap_does_not_detach_gtk_pump(
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)
     GtkPump.attach(frame)
-    assert tk_root.winfo_id() in GtkPump._by_root_id
+    assert id(tk_root) in GtkPump._by_root_key
 
     frame.event_generate("<Unmap>")
     tk_root.update_idletasks()

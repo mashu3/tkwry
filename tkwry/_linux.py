@@ -42,9 +42,22 @@ def pump_gtk_events(
     return backlog
 
 
-def _gtk_pump_tick(root_id: int) -> None:
-    """Run one GTK pump tick for *root_id* without holding a GtkPump reference."""
-    pump = GtkPump._by_root_id.get(root_id)
+def drain_gtk_with_tk(root: tk.Misc, *, rounds: int = 32) -> None:
+    """Interleave bounded GTK pumps with Tk updates (test / teardown isolation)."""
+    from tkwry._core import pump_events
+
+    for _ in range(rounds):
+        try:
+            root.update_idletasks()
+            root.update()
+        except tk.TclError:
+            break
+        pump_events()
+
+
+def _gtk_pump_tick(root_key: int) -> None:
+    """Run one GTK pump tick for *root_key* without holding a GtkPump reference."""
+    pump = GtkPump._by_root_key.get(root_key)
     if pump is None or not pump._active:
         return
     root = pump._root
@@ -76,14 +89,14 @@ def _gtk_pump_tick(root_id: int) -> None:
 class GtkPump:
     """Pump GTK events via ``tkwry._core.pump_events`` while Tk runs."""
 
-    _by_root_id: dict[int, GtkPump] = {}
-    # widget id -> (root_id, attach count for that widget)
+    _by_root_key: dict[int, GtkPump] = {}
+    # widget id -> (root_key, attach count for that widget)
     _widget_attachments: dict[int, tuple[int, int]] = {}
     _pending_attach: set[int] = set()
 
-    def __init__(self, root: tk.Misc, *, root_id: int | None = None) -> None:
+    def __init__(self, root: tk.Misc) -> None:
         self._root = root.winfo_toplevel()
-        self._root_id = root_id if root_id is not None else self._root.winfo_id()
+        self._root_key = id(self._root)
         self._active = False
         self._refcount = 0
         self._consecutive_errors = 0
@@ -106,10 +119,10 @@ class GtkPump:
 
     def _schedule_tick(self, delay_ms: int) -> None:
         self._cancel_tick()
-        root_id = self._root_id
+        root_key = self._root_key
 
         def _tick() -> None:
-            _gtk_pump_tick(root_id)
+            _gtk_pump_tick(root_key)
 
         after_id = self._schedule_callback(delay_ms, _tick)
         if after_id is None and delay_ms > 0:
@@ -170,31 +183,53 @@ class GtkPump:
             self._schedule_tick(0)
 
     @classmethod
-    def _resolve_root_id(cls, widget: tk.Misc) -> int | None:
+    def reset_all(cls) -> None:
+        """Drop all pumps (test isolation / stale X11 window ids)."""
+        for pump in list(cls._by_root_key.values()):
+            pump.stop()
+        cls._by_root_key.clear()
+        cls._widget_attachments.clear()
+        cls._pending_attach.clear()
+
+    @classmethod
+    def _resolve_root_key(cls, widget: tk.Misc) -> int | None:
         try:
-            return widget.winfo_toplevel().winfo_id()
+            return id(widget.winfo_toplevel())
         except tk.TclError:
             return None
 
     @classmethod
-    def _get_or_create_pump(cls, widget: tk.Misc, root_id: int) -> GtkPump:
-        pump = cls._by_root_id.get(root_id)
+    def _purge_stale_pump(cls, root_key: int) -> None:
+        pump = cls._by_root_key.get(root_key)
         if pump is None:
-            pump = GtkPump(widget, root_id=root_id)
-            cls._by_root_id[root_id] = pump
+            return
+        try:
+            alive = pump._root.winfo_exists()
+        except tk.TclError:
+            alive = False
+        if not alive:
+            pump.stop()
+
+    @classmethod
+    def _get_or_create_pump(cls, widget: tk.Misc, root_key: int) -> GtkPump:
+        cls._purge_stale_pump(root_key)
+        pump = cls._by_root_key.get(root_key)
+        if pump is None:
+            pump = GtkPump(widget)
+            cls._by_root_key[root_key] = pump
         return pump
 
     @classmethod
     def _increment_root_refcount(
-        cls, widget: tk.Misc, root_id: int, count: int
+        cls, widget: tk.Misc, root_key: int, count: int
     ) -> None:
-        pump = cls._get_or_create_pump(widget, root_id)
+        pump = cls._get_or_create_pump(widget, root_key)
         pump._refcount += count
         pump.start()
 
     @classmethod
-    def _decrement_root_refcount(cls, root_id: int, count: int) -> None:
-        pump = cls._by_root_id.get(root_id)
+    def _decrement_root_refcount(cls, root_key: int, count: int) -> None:
+        pump = cls._by_root_key.get(root_key)
         if pump is None:
             return
         pump._refcount = max(0, pump._refcount - count)
@@ -202,17 +237,17 @@ class GtkPump:
             pump.stop()
 
     @classmethod
-    def _transfer_widget_to_root(cls, widget: tk.Misc, new_root_id: int) -> None:
+    def _transfer_widget_to_root(cls, widget: tk.Misc, new_root_key: int) -> None:
         widget_id = id(widget)
         entry = cls._widget_attachments.get(widget_id)
         if entry is None:
             return
-        old_root_id, count = entry
-        if old_root_id == new_root_id:
+        old_root_key, count = entry
+        if old_root_key == new_root_key:
             return
-        cls._decrement_root_refcount(old_root_id, count)
-        cls._widget_attachments[widget_id] = (new_root_id, count)
-        cls._increment_root_refcount(widget, new_root_id, count)
+        cls._decrement_root_refcount(old_root_key, count)
+        cls._widget_attachments[widget_id] = (new_root_key, count)
+        cls._increment_root_refcount(widget, new_root_key, count)
 
     @classmethod
     def _schedule_attach_retry(cls, widget: tk.Misc) -> None:
@@ -258,26 +293,26 @@ class GtkPump:
 
     @classmethod
     def _attach_impl(cls, widget: tk.Misc) -> None:
-        root_id = cls._resolve_root_id(widget)
-        if root_id is None:
+        root_key = cls._resolve_root_key(widget)
+        if root_key is None:
             cls._schedule_attach_retry(widget)
             return
         cls._pending_attach.discard(id(widget))
         widget_id = id(widget)
         entry = cls._widget_attachments.get(widget_id)
         if entry is not None:
-            if entry[0] != root_id:
-                cls._transfer_widget_to_root(widget, root_id)
-            pump = cls._by_root_id.get(root_id)
+            if entry[0] != root_key:
+                cls._transfer_widget_to_root(widget, root_key)
+            pump = cls._by_root_key.get(root_key)
             if pump is not None:
                 pump._resume_if_recovery_pending()
                 if not pump._active and pump._refcount > 0:
                     pump._consecutive_errors = 0
                     pump.start()
             return
-        cls._widget_attachments[widget_id] = (root_id, 1)
+        cls._widget_attachments[widget_id] = (root_key, 1)
         try:
-            cls._increment_root_refcount(widget, root_id, 1)
+            cls._increment_root_refcount(widget, root_key, 1)
         except tk.TclError:
             cls._widget_attachments.pop(widget_id, None)
             raise
@@ -292,8 +327,8 @@ class GtkPump:
         entry = cls._widget_attachments.pop(widget_id, None)
         if entry is None:
             return
-        root_id, count = entry
-        cls._decrement_root_refcount(root_id, count)
+        root_key, count = entry
+        cls._decrement_root_refcount(root_key, count)
 
     def start(self) -> None:
         if self._active:
@@ -323,7 +358,7 @@ class GtkPump:
                 self._root.unbind("<Destroy>", bind_id)
             except tk.TclError:
                 pass
-        self._by_root_id.pop(self._root_id, None)
+        self._by_root_key.pop(self._root_key, None)
 
     def _on_destroy(self, event) -> None:
         if event.widget is not self._root:

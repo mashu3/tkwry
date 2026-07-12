@@ -146,11 +146,9 @@ def test_page_load_callback_receives_finished(tk_root) -> None:
     def finished() -> bool:
         return any(evt == PageLoadEvent.Finished for evt, _ in events)
 
-    if not wait_until(tk_root, finished, steps=400):
-        pump(tk_root, steps=100)
-        assert wait_until(tk_root, finished, steps=200), (
-            f"expected PageLoadEvent.Finished, got {events!r}"
-        )
+    assert wait_until(tk_root, finished, steps=400), (
+        f"expected PageLoadEvent.Finished, got {events!r}"
+    )
 
     web.destroy()
     frame.destroy()
