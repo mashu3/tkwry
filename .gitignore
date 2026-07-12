@@ -20,6 +20,7 @@ htmlcov/
 
 # Local / private
 NOTES.md
+docs/MAINTAINERS.md
 .env
 .env.*
 *.local

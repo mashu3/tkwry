@@ -74,6 +74,7 @@ _SYNC_HOOK_MAX_WAIT_S = _SYNC_HOOK_TIMEOUT_S + _SYNC_HOOK_HANDLER_TIMEOUT_S
 _MIN_LAYOUT_DIMENSION = 2
 _CREATE_MAX_ATTEMPTS = 30
 _FLUSH_LOAD_MAX_ATTEMPTS = 3
+_NATIVE_TEARDOWN_MAX_ATTEMPTS = 100
 _QUEUE_DROP_IPC = 0
 _QUEUE_DROP_PAGE_LOAD = 1
 _QUEUE_DROP_TITLE = 2
@@ -424,6 +425,7 @@ class WebView:
         self._initial_load_after_id: str | None = None
         self._deferred_after_ids: list[str] = []
         self._native_teardown_pending: NativeWebView | None = None
+        self._native_teardown_attempts = 0
 
         try:
             if sys.platform == "linux":
@@ -806,6 +808,7 @@ class WebView:
             traceback.print_exc()
         if self._native_is_alive(native):
             self._native_teardown_pending = native
+            self._native_teardown_attempts = 0
         self._webview = None
         if self._native_teardown_pending is not None:
             self._ensure_event_poll()
@@ -820,6 +823,19 @@ class WebView:
                 native.destroy()
             if not self._native_is_alive(native):
                 self._native_teardown_pending = None
+                self._native_teardown_attempts = 0
+                if self._destroyed and not self._should_keep_polling():
+                    self._event_poll_active = False
+                return
+            self._native_teardown_attempts += 1
+            if self._native_teardown_attempts >= _NATIVE_TEARDOWN_MAX_ATTEMPTS:
+                print(
+                    "tkwry: native teardown timed out after "
+                    f"{_NATIVE_TEARDOWN_MAX_ATTEMPTS} poll attempts",
+                    file=sys.stderr,
+                )
+                self._native_teardown_pending = None
+                self._native_teardown_attempts = 0
                 if self._destroyed and not self._should_keep_polling():
                     self._event_poll_active = False
         except Exception:

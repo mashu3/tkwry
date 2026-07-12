@@ -575,7 +575,9 @@ def test_destroy_clears_native_when_native_destroy_fails(tk_root) -> None:
         _ = web.native
 
 
-def test_destroy_clears_native_when_native_destroy_deferred(tk_root) -> None:
+def test_destroy_clears_native_when_native_destroy_deferred(
+    tk_root, capsys: pytest.CaptureFixture[str]
+) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)
 
@@ -610,6 +612,38 @@ def test_destroy_clears_native_when_native_destroy_deferred(tk_root) -> None:
     assert native.alive is False
     with pytest.raises(WebViewDestroyedError):
         _ = web.native
+
+    frame2 = tk.Frame(tk_root)
+    web2 = WebView(frame2, width=400, height=300)
+
+    class _NeverDiesNative:
+        def __init__(self) -> None:
+            self.visible = True
+            self.destroy_calls = 0
+
+        def set_visible(self, visible: bool) -> None:
+            self.visible = visible
+
+        def is_alive(self) -> bool:
+            return True
+
+        def destroy(self) -> None:
+            self.destroy_calls += 1
+
+    stuck = _NeverDiesNative()
+    web2._webview = stuck
+    web2._event_poll_active = True
+    web2.destroy()
+
+    assert web2._native_teardown_pending is stuck
+    for _ in range(100):
+        web2._poll_events()
+        if web2._native_teardown_pending is None:
+            break
+
+    assert web2._native_teardown_pending is None
+    assert web2._event_poll_active is False
+    assert "native teardown timed out" in capsys.readouterr().err
 
 
 def test_destroy_stops_event_poll_after_native_teardown(
