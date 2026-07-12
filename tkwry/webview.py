@@ -563,15 +563,16 @@ class WebView:
             top = self._frame.winfo_toplevel()
             self._frame.update_idletasks()
             top.update_idletasks()
-            if sys.platform == "win32":
-                top.update()
         except tk.TclError:
             pass
         self._schedule_bounds_sync()
         self._schedule_try_create()
         if self._webview is not None:
             self._sync_bounds_and_stacking()
-            self._maybe_reschedule_initial_load()
+            if self._initial_load is not None:
+                self._track_after(self._frame.after_idle(self._run_initial_load))
+            else:
+                self._maybe_reschedule_initial_load()
         self._maybe_fire_ready()
 
     def __repr__(self) -> str:
@@ -2140,16 +2141,25 @@ class WebView:
             else:
                 traceback.print_exc()
 
+    def _frame_has_laid_out_geometry(self) -> bool:
+        """True when Tk has resolved the host frame to real pixel dimensions."""
+        try:
+            return self._frame.winfo_width() > 1 and self._frame.winfo_height() > 1
+        except tk.TclError:
+            return False
+
     def _frame_ready_for_initial_load(self) -> bool:
         """Whether the host frame is laid out enough to load content."""
         try:
             if not self._frame.winfo_exists() or self._webview is None:
                 return False
-            if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
+            if not self._frame_has_laid_out_geometry():
                 return False
             # Xvfb headless: winfo_viewable() stays False while geometry is valid.
-            # WebView2 place layouts can report not viewable while bounds are valid.
-            if sys.platform in ("linux", "win32"):
+            if sys.platform == "linux":
+                return True
+            # WebView2 place layouts can report not viewable while geometry is valid.
+            if sys.platform == "win32":
                 return True
             if not self._frame.winfo_viewable():
                 return False
@@ -2312,13 +2322,18 @@ class WebView:
         try:
             if not self._frame.winfo_exists():
                 return False
+            size = self._bounds_size()
+            if size is None:
+                return False
             # Xvfb headless: winfo_viewable() stays False while geometry is valid.
-            # WebView2 place layouts can report not viewable while bounds are valid.
-            if sys.platform in ("linux", "win32"):
-                return self._bounds_size() is not None
+            if sys.platform == "linux":
+                return True
+            # WebView2 place layouts can report not viewable while geometry is valid.
+            if sys.platform == "win32" and self._frame_has_laid_out_geometry():
+                return True
             if not self._frame.winfo_viewable():
                 return False
-            return self._bounds_size() is not None
+            return True
         except tk.TclError:
             return False
 

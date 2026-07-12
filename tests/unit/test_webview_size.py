@@ -473,6 +473,22 @@ def test_layout_ready_ignores_viewable_on_linux_headless(tk_root, monkeypatch) -
     assert web.ready is True
 
 
+def test_layout_ready_false_for_init_size_before_map_on_win32(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    web._webview = object()
+    monkeypatch.setattr("tkwry.webview.sys.platform", "win32")
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
+
+    assert web._layout_ready() is False
+    assert web.ready is False
+
+
 def test_layout_ready_ignores_viewable_on_win32_place(tk_root, monkeypatch) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=300, height=200)
