@@ -94,9 +94,9 @@ class GtkPump:
     _widget_attachments: dict[int, tuple[int, int]] = {}
     _pending_attach: set[int] = set()
 
-    def __init__(self, root: tk.Misc) -> None:
+    def __init__(self, root: tk.Misc, *, root_key: int | None = None) -> None:
         self._root = root.winfo_toplevel()
-        self._root_key = id(self._root)
+        self._root_key = root_key if root_key is not None else id(self._root)
         self._active = False
         self._refcount = 0
         self._consecutive_errors = 0
@@ -215,7 +215,7 @@ class GtkPump:
         cls._purge_stale_pump(root_key)
         pump = cls._by_root_key.get(root_key)
         if pump is None:
-            pump = GtkPump(widget)
+            pump = GtkPump(widget, root_key=root_key)
             cls._by_root_key[root_key] = pump
         return pump
 
