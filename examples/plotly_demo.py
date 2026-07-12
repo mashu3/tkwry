@@ -189,8 +189,12 @@ def main() -> None:
     def push_figure() -> None:
         fig = build_figure(kind_var.get(), points_var.get(), dark=dark_var.get())
         payload = json.dumps(fig.to_plotly_json())
-        web.eval_js(f"window.renderPlot({payload});")
-        web.eval_js('window.setStatus("Chart updated from Tkinter.");')
+        # eval_js coalesces rapid calls (last-wins) — keep render + status in one script.
+        web.eval_js(
+            f"window.renderPlot({payload}).then(function () {{"
+            'window.setStatus("Chart updated from Tkinter.");'
+            "});"
+        )
 
     btn_row = ttk.Frame(panel)
     btn_row.pack(fill="x", pady=(0, 8))
@@ -210,7 +214,7 @@ def main() -> None:
     points_scale.bind("<ButtonRelease-1>", lambda _e: push_figure())
     dark_var.trace_add("write", lambda *_: push_figure())
 
-    root.after(800, push_figure)
+    web.when_ready(push_figure)
     root.mainloop()
 
 
