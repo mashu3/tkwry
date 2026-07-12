@@ -299,6 +299,42 @@ class WebView:
     (``-> None``); OS drops are always accepted and cannot be denied from
     Python.
 
+    **Lifecycle state** (maintainers: triage ``ready`` / initial load /
+    ``destroy`` regressions against this table before patching):
+
+    +---------------+--------+-------+-----------+---------------------------+
+    | State         | native | ready | destroyed | Allowed public API        |
+    +===============+========+=======+===========+===========================+
+    | pre-create    | None   | False | False     | ``load_*``,               |
+    |               |        |       |           | ``wait_until_ready``,     |
+    |               |        |       |           | handler setters,          |
+    |               |        |       |           | ``bind`` / ``when_ready``,|
+    |               |        |       |           | ``sync_bounds``,          |
+    |               |        |       |           | ``destroy``               |
+    +---------------+--------+-------+-----------+---------------------------+
+    | unmapped      | Some   | False | False     | Same as pre-create;       |
+    |               |        |       |           | ``_require_ready`` APIs   |
+    |               |        |       |           | (``eval_js``, ``reload``, |
+    |               |        |       |           | ``focus``, …) raise       |
+    |               |        |       |           | ``WebViewNotReadyError``  |
+    +---------------+--------+-------+-----------+---------------------------+
+    | ready+mapped  | Some   | True  | False     | All public methods        |
+    +---------------+--------+-------+-----------+---------------------------+
+    | destroyed     | None   | —     | True      | None; raises              |
+    |               |        |       |           | ``WebViewDestroyedError`` |
+    +---------------+--------+-------+-----------+---------------------------+
+
+    **Initial load** (constructor ``url`` / ``html`` vs user ``load_*``):
+
+    1. **At create** — pending ``url``/``html`` is captured once in
+       ``_try_create`` as ``_initial_load``.
+    2. **Post-ready** — after native creation, ``_run_initial_load`` is
+       scheduled once (delayed) when the host frame is viewable with real
+       geometry.
+    3. **User ``load_*`` last-wins** — :meth:`load_url` / :meth:`load_html`
+       supersede any pending constructor load and coalesce rapid calls (only
+       the final URL/HTML is applied).
+
     **Navigation hooks** (``on_navigation``, ``on_new_window``) must return
     immediately to WebKit, so the native layer blocks until your handler
     finishes. Handlers run on the **Tk main thread** (queued from WebKit).
