@@ -599,9 +599,13 @@ def test_no_eval_callback_after_destroy(tk_root) -> None:
     frame.destroy()
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 def test_del_on_worker_thread_tears_down_native(tk_root) -> None:
     """GC off the Tk thread schedules destroy; native is released on the main thread."""
+    from tkwry.webview import (
+        _drain_pending_destroy_webviews,
+        _pump_toplevel_wakeup_pipe,
+    )
+
     frame = bare_frame(tk_root)
     web = WebView(frame, width=400, height=300, html="<p>gc</p>")
     layout_bare_frame(frame, width=400, height=300)
@@ -633,6 +637,9 @@ def test_del_on_worker_thread_tears_down_native(tk_root) -> None:
             from tkwry._macos import _mac_service_wakeup
 
             _mac_service_wakeup(toplevel)
+        else:
+            _pump_toplevel_wakeup_pipe(toplevel)
+            _drain_pending_destroy_webviews(toplevel)
         if web.destroyed and web._webview is None:
             break
 
