@@ -354,6 +354,10 @@ class WebView:
         if background_color is not None:
             _validate_background_color(background_color)
         self._frame = frame
+        try:
+            self._toplevel = frame.winfo_toplevel()
+        except tk.TclError:
+            self._toplevel = frame
         self._tk_thread_id = threading.get_ident()
         self._early_create = width is not None or height is not None
         self._init_width = (
@@ -648,17 +652,14 @@ class WebView:
             else:
                 self._schedule_destroy_on_tk_thread()
         except Exception:
-            pass
+            if not self._destroyed:
+                try:
+                    self._teardown_native_if_alive()
+                except Exception:
+                    pass
 
     def _schedule_destroy_on_tk_thread(self) -> None:
         """Best-effort ``destroy()`` when ``__del__`` runs off the Tk thread."""
-        try:
-            frame = self._frame
-            toplevel = frame.winfo_toplevel()
-        except (AttributeError, tk.TclError):
-            self._teardown_native_if_alive()
-            return
-
         tk_thread_id = self._tk_thread_id
 
         def _run() -> None:
@@ -671,9 +672,14 @@ class WebView:
 
         if threading.get_ident() == tk_thread_id:
             try:
-                frame.after(0, _run)
-            except (tk.TclError, RuntimeError):
+                self._frame.after(0, _run)
+            except (AttributeError, tk.TclError, RuntimeError):
                 self._teardown_native_if_alive()
+            return
+
+        toplevel = getattr(self, "_toplevel", None)
+        if toplevel is None:
+            self._teardown_native_if_alive()
             return
 
         try:
@@ -684,10 +690,12 @@ class WebView:
                 pending = []
                 setattr(toplevel, "_tkwry_pending_destroy_webviews", pending)
             pending.append(weakref.ref(self))
-            if sys.platform == "darwin":
-                write_fd = getattr(toplevel, "_tkwry_mac_wake_write_fd", None)
-            else:
-                write_fd = getattr(toplevel, "_tkwry_wake_write_fd", None)
+            write_fd = self._tk_wakeup_write_fd
+            if write_fd is None:
+                if sys.platform == "darwin":
+                    write_fd = getattr(toplevel, "_tkwry_mac_wake_write_fd", None)
+                else:
+                    write_fd = getattr(toplevel, "_tkwry_wake_write_fd", None)
             if write_fd is None:
                 self._teardown_native_if_alive()
                 return
