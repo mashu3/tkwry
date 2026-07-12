@@ -334,7 +334,7 @@ def _mac_input_wakeup(event: tk.Event) -> None:
 
 
 def _mac_focus_in_handler(event: tk.Event) -> None:
-    """Tag editable widgets on focus and drop Tcl focus when web input is active."""
+    """Tag editable widgets on focus; leave web input when user focuses Tk keys."""
     widget = event.widget
     toplevel = widget.winfo_toplevel()
     if not getattr(toplevel, "_tkwry_mac_webviews", None):
@@ -343,7 +343,8 @@ def _mac_focus_in_handler(event: tk.Event) -> None:
         return
     _prepend_mac_key_guard(widget)
     if _mac_web_input_active(toplevel):
-        _release_tk_keyboard_focus(toplevel)
+        _release_web_input_for_tk_traversal(toplevel)
+        _mac_after(toplevel, 1, _refocus_tk_widget, widget)
         _mac_after(toplevel, 1, _mac_service_wakeup, toplevel)
 
 
@@ -368,13 +369,20 @@ def _release_web_input_for_tk_traversal(toplevel: tk.Misc) -> None:
         native = web.native
         if native is None or not native.mac_web_input_active():
             continue
-        native.mac_request_tk_unfocus()
         try:
             web.focus_parent()
         except Exception:
             pass
         break
     _mac_service_wakeup(toplevel)
+
+
+def _refocus_tk_widget(widget: tk.Misc) -> None:
+    try:
+        if _widget_accepts_tk_keys(widget):
+            widget.focus_set()
+    except tk.TclError:
+        pass
 
 
 def _ensure_mac_wakeup_pipe(toplevel: tk.Misc, native: NativeWebViewType) -> None:

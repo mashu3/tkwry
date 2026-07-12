@@ -316,7 +316,7 @@ def test_unregister_tears_down_when_toplevel_already_destroyed(
     assert teardown_calls == [tk_root]
 
 
-def test_focus_in_tags_widget_and_releases_tk_focus_while_web_active(
+def test_focus_in_tags_widget_and_releases_web_input_while_web_active(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import tkinter as tk
@@ -325,7 +325,7 @@ def test_focus_in_tags_widget_and_releases_tk_focus_while_web_active(
     tagged: list[tk.Misc] = []
     monkeypatch.setattr(
         _macos,
-        "_release_tk_keyboard_focus",
+        "_release_web_input_for_tk_traversal",
         lambda _t: released.append(True),
     )
     monkeypatch.setattr(

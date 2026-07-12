@@ -288,7 +288,7 @@ fn handle_click(
     if let Some(idx) = topmost_entry_index(window, entries, window_point) {
         activate_entry(entries, idx, wakeup);
     } else {
-        release_all_web_focus(entries);
+        release_all_web_focus(entries, wakeup);
     }
 }
 
@@ -425,7 +425,8 @@ fn activate_entry(entries: &[FocusEntry], idx: usize, wakeup: &AtomicI32) {
     notify_wakeup(wakeup);
 }
 
-fn release_all_web_focus(entries: &[FocusEntry]) {
+fn release_all_web_focus(entries: &[FocusEntry], wakeup: &AtomicI32) {
+    let mut changed = false;
     for entry in entries {
         if !entry.web_wants_keyboard.load(Ordering::SeqCst) {
             continue;
@@ -433,8 +434,12 @@ fn release_all_web_focus(entries: &[FocusEntry]) {
         if let Ok(guard) = entry.inner.lock() {
             if let Some(ref wv) = *guard {
                 release_web_focus_locked(wv, &entry.web_wants_keyboard);
+                changed = true;
             }
         }
+    }
+    if changed {
+        notify_wakeup(wakeup);
     }
 }
 

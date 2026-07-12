@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -24,10 +23,7 @@ def main() -> None:
     frame = tk.Frame(root, bg="#1e1e1e")
     frame.pack(fill="both", expand=True, padx=8, pady=8)
 
-    web_kwargs: dict = {"url": "https://github.com"}
-    if sys.platform == "win32":
-        web_kwargs["focused"] = False
-    web = WebView(frame, **web_kwargs)
+    web = WebView(frame, url="https://github.com", focused=False)
 
     def go() -> None:
         try:
