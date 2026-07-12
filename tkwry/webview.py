@@ -354,6 +354,7 @@ class WebView:
         if background_color is not None:
             _validate_background_color(background_color)
         self._frame = frame
+        self._toplevel: tk.Misc
         try:
             self._toplevel = frame.winfo_toplevel()
         except tk.TclError:
