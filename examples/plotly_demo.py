@@ -189,7 +189,7 @@ def main() -> None:
     def push_figure() -> None:
         fig = build_figure(kind_var.get(), points_var.get(), dark=dark_var.get())
         payload = json.dumps(fig.to_plotly_json())
-        # eval_js coalesces rapid calls (last-wins) — keep render + status in one script.
+        # eval_js coalesces rapid calls (last-wins); one script for render + status.
         web.eval_js(
             f"window.renderPlot({payload}).then(function () {{"
             'window.setStatus("Chart updated from Tkinter.");'
