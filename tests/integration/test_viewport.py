@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 
 import pytest
-from support.tk import pump, skip_linux_ci, skip_linux_layout, wait_ready, wait_until
+from support.tk import pump, skip_linux_ci, wait_ready, wait_until
 from support.viewport import (
     VIEWPORT_HTML,
     read_viewport,
@@ -16,7 +16,6 @@ from support.viewport import (
 from tkwry import PageLoadEvent, WebView
 
 
-@skip_linux_layout
 def test_viewport_matches_frame_after_web_pack(tk_root) -> None:
     import tkinter as tk
 
@@ -36,7 +35,6 @@ def test_viewport_matches_frame_after_web_pack(tk_root) -> None:
     host.destroy()
 
 
-@skip_linux_layout
 def test_viewport_matches_frame_after_late_host_pack(tk_root) -> None:
     import tkinter as tk
 
@@ -170,7 +168,6 @@ def test_viewport_via_eval_callback_matches_frame(tk_root) -> None:
     host.destroy()
 
 
-@skip_linux_layout
 def test_viewport_not_stale_after_repack(tk_root) -> None:
     import tkinter as tk
 
@@ -198,7 +195,6 @@ def test_viewport_not_stale_after_repack(tk_root) -> None:
     host.destroy()
 
 
-@skip_linux_layout
 def test_viewport_matches_frame_after_grid(tk_root) -> None:
     import tkinter as tk
 
@@ -223,7 +219,6 @@ def test_viewport_matches_frame_after_grid(tk_root) -> None:
     host.destroy()
 
 
-@skip_linux_layout
 def test_viewport_matches_frame_after_place(tk_root) -> None:
     import tkinter as tk
 
@@ -245,7 +240,6 @@ def test_viewport_matches_frame_after_place(tk_root) -> None:
     host.destroy()
 
 
-@skip_linux_layout
 def test_viewport_matches_frame_with_explicit_width_only(tk_root) -> None:
     import tkinter as tk
 
@@ -267,7 +261,6 @@ def test_viewport_matches_frame_with_explicit_width_only(tk_root) -> None:
     host.destroy()
 
 
-@skip_linux_layout
 def test_viewport_matches_frame_with_explicit_height_only(tk_root) -> None:
     import tkinter as tk
 

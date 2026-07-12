@@ -6,7 +6,6 @@ from support.tk import (
     host_frame,
     pump,
     skip_linux_ci,
-    skip_linux_layout,
     wait_ready,
     wait_until,
 )
@@ -30,7 +29,6 @@ __all__ = [
     "read_viewport",
     "read_viewport_via_callback",
     "skip_linux_ci",
-    "skip_linux_layout",
     "viewport_matches_frame",
     "wait_ready",
     "wait_until",

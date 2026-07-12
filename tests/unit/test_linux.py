@@ -297,6 +297,45 @@ def test_gtk_pump_tick_keeps_pumping_after_repeated_pump_errors(
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
+def test_attach_schedules_retry_when_attach_raises_tcl_error(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root)
+    idle_callbacks: list[object] = []
+    monkeypatch.setattr(
+        tk_root,
+        "after_idle",
+        lambda callback: idle_callbacks.append(callback),
+    )
+    real_increment = GtkPump._increment_root_refcount
+
+    def failing_increment(widget: tk.Misc, root_id: int, count: int) -> None:
+        raise tk.TclError("not ready")
+
+    monkeypatch.setattr(
+        GtkPump, "_increment_root_refcount", staticmethod(failing_increment)
+    )
+
+    GtkPump.attach(frame)
+
+    assert id(frame) in GtkPump._pending_attach
+    assert id(frame) not in GtkPump._widget_attachments
+
+    monkeypatch.setattr(
+        GtkPump, "_increment_root_refcount", staticmethod(real_increment)
+    )
+    monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
+    monkeypatch.setattr(tk_root, "after", lambda *_a, **_k: "after-id")
+
+    idle_callbacks[0]()
+
+    assert id(frame) in GtkPump._widget_attachments
+    GtkPump.detach(frame)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
 def test_attach_schedules_retry_when_root_id_unavailable(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

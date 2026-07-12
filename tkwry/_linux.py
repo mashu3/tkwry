@@ -251,6 +251,13 @@ class GtkPump:
     def attach(cls, widget: tk.Misc) -> None:
         if sys.platform != "linux":
             return
+        try:
+            cls._attach_impl(widget)
+        except tk.TclError:
+            cls._schedule_attach_retry(widget)
+
+    @classmethod
+    def _attach_impl(cls, widget: tk.Misc) -> None:
         root_id = cls._resolve_root_id(widget)
         if root_id is None:
             cls._schedule_attach_retry(widget)
@@ -269,7 +276,11 @@ class GtkPump:
                     pump.start()
             return
         cls._widget_attachments[widget_id] = (root_id, 1)
-        cls._increment_root_refcount(widget, root_id, 1)
+        try:
+            cls._increment_root_refcount(widget, root_id, 1)
+        except tk.TclError:
+            cls._widget_attachments.pop(widget_id, None)
+            raise
 
     @classmethod
     def detach(cls, widget: tk.Misc) -> None:
@@ -290,10 +301,16 @@ class GtkPump:
         from tkwry._core import ensure_gtk_init
 
         ensure_gtk_init()
-        self._active = True
         self._consecutive_errors = 0
         self._recovery_pending = False
-        self._destroy_bind_id = self._root.bind("<Destroy>", self._on_destroy, add="+")
+        try:
+            self._destroy_bind_id = self._root.bind(
+                "<Destroy>", self._on_destroy, add="+"
+            )
+        except tk.TclError:
+            self._recovery_pending = True
+            return
+        self._active = True
         self._schedule_tick(0)
 
     def stop(self) -> None:

@@ -457,7 +457,7 @@ def test_layout_ready_false_when_not_viewable(tk_root, monkeypatch) -> None:
     assert web.ready is False
 
 
-def test_layout_ready_requires_viewable_on_linux(tk_root, monkeypatch) -> None:
+def test_layout_ready_ignores_viewable_on_linux_headless(tk_root, monkeypatch) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=300, height=200)
     web._webview = object()
@@ -467,8 +467,8 @@ def test_layout_ready_requires_viewable_on_linux(tk_root, monkeypatch) -> None:
     monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
     monkeypatch.setattr("tkwry.webview.sys.platform", "linux")
 
-    assert web._layout_ready() is False
-    assert web.ready is False
+    assert web._layout_ready() is True
+    assert web.ready is True
 
 
 def test_frame_ready_for_initial_load_checks_geometry_on_linux(
@@ -484,6 +484,11 @@ def test_frame_ready_for_initial_load_checks_geometry_on_linux(
     monkeypatch.setattr(frame, "winfo_viewable", lambda: True)
 
     assert web._frame_ready_for_initial_load() is False
+
+    monkeypatch.setattr(frame, "winfo_width", lambda: 400)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
+
+    assert web._frame_ready_for_initial_load() is True
 
 
 def test_second_webview_on_same_frame_raises(tk_root) -> None:

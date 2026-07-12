@@ -131,10 +131,6 @@ def test_load_after_create_cancels_deferred_initial_load(tk_root) -> None:
     frame.destroy()
 
 
-@pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK headless CI does not reliably deliver page-load callbacks",
-)
 def test_page_load_callback_receives_finished(tk_root) -> None:
     events: list[tuple[PageLoadEvent, str]] = []
 
@@ -164,10 +160,6 @@ def test_page_load_callback_receives_finished(tk_root) -> None:
 @pytest.mark.skipif(
     sys.platform == "linux",
     reason="WebKitGTK headless CI: local file URL loading unreliable",
-)
-@pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK headless CI does not reliably deliver page-load callbacks",
 )
 def test_reload_after_ready_fires_page_load(tk_root, tmp_path: Path) -> None:
     page = tmp_path / "reload.html"
@@ -219,10 +211,6 @@ def test_reload_after_ready_fires_page_load(tk_root, tmp_path: Path) -> None:
     frame.destroy()
 
 
-@pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK headless CI does not reliably deliver page-load callbacks",
-)
 def test_page_load_discards_backlog_before_handler_attach(tk_root) -> None:
     events: list[tuple[PageLoadEvent, str]] = []
 
@@ -349,10 +337,6 @@ def test_title_changed_delivers_on_document_title_set(tk_root) -> None:
     frame.destroy()
 
 
-@pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK headless CI: drag-drop event poll unreliable",
-)
 def test_drag_drop_native_queues_without_blocking(tk_root) -> None:
     """Queue Enter/Drop on the Tk thread (same queue OS drops use).
 

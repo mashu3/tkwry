@@ -523,11 +523,8 @@ class WebView:
         self._native_teardown_pending: NativeWebView | None = None
         self._native_teardown_attempts = 0
 
-        try:
-            if sys.platform == "linux":
-                self._ensure_gtk_pump_attached()
-        except tk.TclError:
-            pass
+        if sys.platform == "linux":
+            self._ensure_gtk_pump_attached()
         self._frame_bind_ids: list[tuple[str, str]] = []
         for sequence, handler in (
             ("<Configure>", self._on_configure),
@@ -878,8 +875,12 @@ class WebView:
         self._frame_bind_ids.clear()
 
     def _ensure_gtk_pump_attached(self) -> None:
-        if sys.platform == "linux" and not self._destroyed:
+        if sys.platform != "linux" or self._destroyed:
+            return
+        try:
             GtkPump.ensure_attached(self._frame)
+        except tk.TclError:
+            GtkPump._schedule_attach_retry(self._frame)
 
     def _native_is_alive(self, native: NativeWebView) -> bool:
         try:
@@ -2022,7 +2023,10 @@ class WebView:
                 return False
             if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
                 return False
-            return bool(self._frame.winfo_viewable())
+            # Xvfb headless: winfo_viewable() stays False while geometry is valid.
+            if sys.platform != "linux" and not self._frame.winfo_viewable():
+                return False
+            return True
         except tk.TclError:
             return False
 
@@ -2171,7 +2175,8 @@ class WebView:
         try:
             if not self._frame.winfo_exists():
                 return False
-            if not self._frame.winfo_viewable():
+            # Xvfb headless: winfo_viewable() stays False while geometry is valid.
+            if sys.platform != "linux" and not self._frame.winfo_viewable():
                 return False
             return self._bounds_size() is not None
         except tk.TclError:
