@@ -324,9 +324,13 @@ def _mac_widget_mapped(event: tk.Event) -> None:
 
 def _mac_input_wakeup(event: tk.Event) -> None:
     """Drain Rust focus flags promptly when Tcl sees a click."""
-    toplevel = event.widget.winfo_toplevel()
+    widget = event.widget
+    toplevel = widget.winfo_toplevel()
     if not getattr(toplevel, "_tkwry_mac_webviews", None):
         return
+    if _widget_accepts_tk_keys(widget) and _mac_web_input_active(toplevel):
+        _release_web_input_for_tk_traversal(toplevel)
+        _mac_after(toplevel, 1, _refocus_tk_widget, widget)
     _mac_service_wakeup(toplevel)
     pump_idle = not getattr(toplevel, "_tkwry_mac_pump_active", False)
     if pump_idle and _mac_webviews(toplevel):
@@ -334,7 +338,7 @@ def _mac_input_wakeup(event: tk.Event) -> None:
 
 
 def _mac_focus_in_handler(event: tk.Event) -> None:
-    """Tag editable widgets on focus; leave web input when user focuses Tk keys."""
+    """Tag editable widgets on focus for the web-active key guard."""
     widget = event.widget
     toplevel = widget.winfo_toplevel()
     if not getattr(toplevel, "_tkwry_mac_webviews", None):
@@ -342,10 +346,6 @@ def _mac_focus_in_handler(event: tk.Event) -> None:
     if not _widget_accepts_tk_keys(widget):
         return
     _prepend_mac_key_guard(widget)
-    if _mac_web_input_active(toplevel):
-        _release_web_input_for_tk_traversal(toplevel)
-        _mac_after(toplevel, 1, _refocus_tk_widget, widget)
-        _mac_after(toplevel, 1, _mac_service_wakeup, toplevel)
 
 
 def _mac_web_key_guard(event: tk.Event) -> str | None:

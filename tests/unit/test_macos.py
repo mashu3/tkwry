@@ -316,7 +316,7 @@ def test_unregister_tears_down_when_toplevel_already_destroyed(
     assert teardown_calls == [tk_root]
 
 
-def test_focus_in_tags_widget_and_releases_web_input_while_web_active(
+def test_focus_in_tags_widget_without_releasing_web_input(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import tkinter as tk
@@ -334,7 +334,6 @@ def test_focus_in_tags_widget_and_releases_web_input_while_web_active(
         lambda widget: tagged.append(widget),
     )
     monkeypatch.setattr(_macos, "_mac_web_input_active", lambda _t: True)
-    monkeypatch.setattr(_macos, "_mac_after", lambda *_a, **_k: None)
 
     entry = tk.Entry(tk_root)
     tk_root._tkwry_mac_webviews = [SimpleNamespace()]  # type: ignore[list-item]
@@ -343,7 +342,40 @@ def test_focus_in_tags_widget_and_releases_web_input_while_web_active(
     _macos._mac_focus_in_handler(event)  # type: ignore[arg-type]
 
     assert tagged == [entry]
+    assert released == []
+
+
+def test_input_wakeup_releases_web_input_on_editable_click(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    released: list[bool] = []
+    refocused: list[tk.Misc] = []
+    monkeypatch.setattr(
+        _macos,
+        "_release_web_input_for_tk_traversal",
+        lambda _t: released.append(True),
+    )
+    monkeypatch.setattr(
+        _macos,
+        "_refocus_tk_widget",
+        lambda widget: refocused.append(widget),
+    )
+    monkeypatch.setattr(_macos, "_mac_web_input_active", lambda _t: True)
+    monkeypatch.setattr(_macos, "_mac_after", lambda _t, _d, cb, *args: cb(*args))
+    monkeypatch.setattr(_macos, "_mac_service_wakeup", lambda _t: None)
+    monkeypatch.setattr(_macos, "_mac_webviews", lambda _t: [object()])
+    monkeypatch.setattr(_macos, "_ensure_mac_pump", lambda _t: None)
+
+    entry = tk.Entry(tk_root)
+    tk_root._tkwry_mac_webviews = [SimpleNamespace()]  # type: ignore[list-item]
+    event = SimpleNamespace(widget=entry)
+
+    _macos._mac_input_wakeup(event)  # type: ignore[arg-type]
+
     assert released == [True]
+    assert refocused == [entry]
 
 
 def test_mac_web_key_guard_allows_tab_traversal(
