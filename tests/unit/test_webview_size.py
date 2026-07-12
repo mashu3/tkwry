@@ -263,6 +263,7 @@ def test_run_initial_load_reschedules_after_exception_until_attempts_exhausted(
     web._initial_load = ("html", "<p>retry</p>")
     web._initial_load_attempt = 0
     scheduled: list[int] = []
+    monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
     monkeypatch.setattr(web._frame, "after_idle", lambda _fn: None)
     monkeypatch.setattr(
         web, "_frame_ready_for_initial_load", lambda: True, raising=False

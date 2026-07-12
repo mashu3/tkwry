@@ -559,6 +559,11 @@ class WebView:
     def place(self, **kwargs) -> None:
         self._require_not_destroyed("place")
         self._frame.place(**kwargs)
+        try:
+            self._frame.update_idletasks()
+            self._frame.winfo_toplevel().update_idletasks()
+        except tk.TclError:
+            pass
         self._schedule_bounds_sync()
         self._schedule_try_create()
         self._maybe_fire_ready()
@@ -2104,10 +2109,7 @@ class WebView:
         self._schedule_bounds_sync()
         if initial_load is not None:
             self._initial_load = initial_load
-            if sys.platform == "linux":
-                self._run_initial_load()
-            if self._initial_load is not None:
-                self._schedule_initial_load()
+            self._schedule_initial_load()
         if sys.platform == "darwin" and self._webview is not None:
             toplevel = self._frame.winfo_toplevel()
             _ensure_mac_wakeup_pipe(toplevel, self._webview)
@@ -2218,6 +2220,12 @@ class WebView:
             self._initial_load = None
             return
         kind, payload = load
+        if sys.platform == "linux":
+            self._pending_load = (kind, payload)
+            self._dispatch_pending_load()
+            if self._pending_load is None:
+                self._initial_load = None
+            return
         try:
             if kind == "url":
                 self._webview.load_url(payload)
