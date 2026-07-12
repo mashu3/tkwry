@@ -582,8 +582,9 @@ def test_destroy_clears_native_when_native_destroy_fails(tk_root) -> None:
 
 
 def test_destroy_clears_native_when_native_destroy_deferred(
-    tk_root, capsys: pytest.CaptureFixture[str]
+    tk_root, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)
 
@@ -660,6 +661,7 @@ def test_destroy_clears_native_when_native_destroy_deferred(
 def test_destroy_stops_event_poll_after_native_teardown(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)
 
