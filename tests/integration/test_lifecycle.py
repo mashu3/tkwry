@@ -597,3 +597,33 @@ def test_no_eval_callback_after_destroy(tk_root) -> None:
     assert not results
 
     frame.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+def test_del_on_worker_thread_tears_down_native(tk_root) -> None:
+    """GC off the Tk thread schedules destroy; native is released on the main thread."""
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>gc</p>")
+    layout_bare_frame(frame, width=400, height=300)
+    assert web.wait_until_ready(timeout=10.0)
+    assert web.native is not None
+
+    web_ref = web
+    web._unbind_frame_events()
+    thread_done = threading.Event()
+
+    def worker() -> None:
+        web_ref.__del__()
+        thread_done.set()
+
+    threading.Thread(target=worker).start()
+    assert thread_done.wait(timeout=2.0)
+
+    assert wait_until(
+        tk_root,
+        lambda: web.destroyed and web._webview is None,
+        steps=120,
+    )
+    assert web._event_poll_active is False
+
+    frame.destroy()

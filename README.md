@@ -253,7 +253,11 @@ tkwry works around this by:
 2. Positioning it with `set_bounds` to match your `Frame` (`<Configure>`)
 3. Hiding it with `set_visible(False)` when the frame is unmapped (`<Unmap>`) — e.g. another `ttk.Notebook` tab is selected
 
-**Keyboard focus (macOS):** tkwry routes input between Tk widgets (`Entry`, `Text`, …) and the WebView automatically. Rust hit-tests clicks at the `NSEvent` layer and switches first responder; Python drains focus signals on the Tk main thread so keystrokes reach the correct target. Use `web.focus()` and `web.focus_parent()` when you need explicit control — see [`examples/url_demo.py`](examples/url_demo.py). IME and other advanced input may still behave differently than in a standalone browser.
+**Keyboard focus (macOS):** tkwry routes input between Tk widgets (`Entry`, `Text`, …) and the WebView automatically. Rust hit-tests clicks at the `NSEvent` layer and switches first responder; Python drains focus signals on the Tk main thread so keystrokes reach the correct target. Use `web.focus()` and `web.focus_parent()` when you need explicit control — see [`examples/url_demo.py`](examples/url_demo.py). On macOS, `focused=True` is deferred until `<<WebViewReady>>` (then `focus()` runs automatically); call `focus()` yourself after layout changes. IME and other advanced input may still behave differently than in a standalone browser.
+
+**Import order (macOS):** Import `tkwry` **before** any library that touches `AppKit` / `NSApplication` (e.g. `from AppKit import NSApp` or `NSApplication.sharedApplication()`). If full AppKit starts first, macOS may reserve automatic window-tab chrome and you can see a **double titlebar** strip. tkwry calls `disable_process_automatic_window_tabbing` at import on the main thread; that must run before `NSApplication` initializes. See [`examples/macos_double_titlebar_repro.py`](examples/macos_double_titlebar_repro.py).
+
+**Window tabbing disable:** If `disable_window_tabbing` fails during WebView create, tkwry logs to stderr and retries asynchronously (Python `<Map>` / deferred hooks). This is non-fatal and does not raise `WebViewCreationError`.
 
 **You do not need extra code for tabs or panes** — see [`examples/multi_demo.py`](examples/multi_demo.py). IPC, page-load, title, eval, and drag-and-drop handlers are dispatched on the **Tk main thread** via an internal queue (avoids WebKit deadlocks). `on_navigation` and `on_new_window` are synchronous WebKit-thread hooks — see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks).
 
@@ -299,6 +303,7 @@ pip install -e .
 | [`examples/folium_demo.py`](examples/folium_demo.py) | Folium maps (`pip install folium`) |
 | [`examples/markdown_demo.py`](examples/markdown_demo.py) | Monaco markdown editor + live preview (CDN) |
 | [`examples/dnd_demo.py`](examples/dnd_demo.py) | Native file drag & drop into WebView |
+| [`examples/macos_double_titlebar_repro.py`](examples/macos_double_titlebar_repro.py) | macOS import-order / double titlebar comparison |
 
 ```bash
 python examples/url_demo.py

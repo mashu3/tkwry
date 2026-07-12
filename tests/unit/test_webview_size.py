@@ -305,8 +305,8 @@ def test_destroy_rejects_layout_and_bind(tk_root) -> None:
         web.bind("<<WebViewReady>>", lambda _evt: None)
 
 
-def test_macos_focused_true_prints_warning(
-    tk_root, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_macos_focused_true_defers_until_ready(
+    tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tkwry._parent import EmbedParent
 
@@ -326,7 +326,28 @@ def test_macos_focused_true_prints_warning(
     web = WebView(frame, width=400, height=300, focused=True)
 
     assert web._focused is False
-    assert "focused=True is ignored on macOS" in capsys.readouterr().err
+    assert web._focus_when_ready is True
+
+
+def test_macos_focus_when_ready_calls_focus_on_idle(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import MagicMock
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+    native = MagicMock()
+    web._webview = native
+    web._focus_when_ready = True
+    focus_calls: list[bool] = []
+    monkeypatch.setattr(web, "focus", lambda: focus_calls.append(True), raising=False)
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+
+    web._maybe_fire_ready()
+    tk_root.update_idletasks()
+
+    assert focus_calls == [1]
+    assert web._focus_when_ready is False
 
 
 def test_fire_ready_defers_webview_ready_until_idle(
@@ -589,6 +610,55 @@ def test_destroy_clears_native_when_native_destroy_deferred(tk_root) -> None:
     assert native.alive is False
     with pytest.raises(WebViewDestroyedError):
         _ = web.native
+
+
+def test_destroy_stops_event_poll_after_native_teardown(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+
+    class _Native:
+        def __init__(self) -> None:
+            self.alive = True
+            self.destroy_calls = 0
+
+        def set_visible(self, _visible: bool) -> None:
+            return None
+
+        def is_alive(self) -> bool:
+            return self.alive
+
+        def destroy(self) -> None:
+            self.destroy_calls += 1
+            if self.destroy_calls >= 2:
+                self.alive = False
+
+    native = _Native()
+    web._webview = native
+    web._event_poll_active = True
+    original_after = frame.after
+
+    def after(delay, func=None, *args):
+        if func is web._poll_events:
+            return ""
+        if func is None:
+            return original_after(delay)
+        return original_after(delay, func, *args)
+
+    monkeypatch.setattr(frame, "after", after)
+    web.destroy()
+
+    assert web._webview is None
+    assert web._native_teardown_pending is native
+
+    for _ in range(5):
+        web._poll_events()
+        if web._native_teardown_pending is None:
+            break
+
+    assert web._native_teardown_pending is None
+    assert web._event_poll_active is False
 
 
 def test_unmap_does_not_detach_gtk_pump(

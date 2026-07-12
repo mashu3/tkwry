@@ -156,6 +156,7 @@ def _pump_toplevel_wakeup_pipe(toplevel: tk.Misc) -> None:
 
 def _drain_toplevel_sync_hooks(toplevel: tk.Misc) -> None:
     """Drain pending navigation/new-window hooks for all WebViews on *toplevel*."""
+    _drain_pending_destroy_webviews(toplevel)
     refs = getattr(toplevel, "_tkwry_sync_hook_webviews", None)
     if not refs:
         return
@@ -171,6 +172,32 @@ def _drain_toplevel_sync_hooks(toplevel: tk.Misc) -> None:
         setattr(toplevel, "_tkwry_sync_hook_webviews", live)
     elif hasattr(toplevel, "_tkwry_sync_hook_webviews"):
         delattr(toplevel, "_tkwry_sync_hook_webviews")
+
+
+def _drain_pending_destroy_webviews(toplevel: tk.Misc) -> None:
+    """Run ``destroy()`` queued from off-thread ``__del__`` on the Tk thread."""
+    refs = getattr(toplevel, "_tkwry_pending_destroy_webviews", None)
+    if not refs:
+        return
+    live: list[weakref.ReferenceType[WebView]] = []
+    for ref in refs:
+        web = ref()
+        if web is None or web._destroyed:
+            continue
+        if threading.get_ident() != web._tk_thread_id:
+            live.append(ref)
+            continue
+        try:
+            web._cancel_deferred_callbacks()
+            web.destroy()
+        except Exception:
+            traceback.print_exc()
+            if not web._destroyed:
+                live.append(ref)
+    if live:
+        setattr(toplevel, "_tkwry_pending_destroy_webviews", live)
+    elif hasattr(toplevel, "_tkwry_pending_destroy_webviews"):
+        delattr(toplevel, "_tkwry_pending_destroy_webviews")
 
 
 def _ensure_tk_wakeup_fileevent(toplevel: tk.Misc) -> None:
@@ -355,13 +382,10 @@ class WebView:
         self._background_color = background_color
         self._user_agent = user_agent
         self._initialization_script = initialization_script
+        self._focus_when_ready = False
         if sys.platform == "darwin" and focused:
-            print(
-                "tkwry: focused=True is ignored on macOS at create time; "
-                "call focus() after the WebView is ready",
-                file=sys.stderr,
-            )
             # Child WKWebView + focused=True fights Tk for first responder at create.
+            self._focus_when_ready = True
             focused = False
         self._focused = focused
         self._event_poll_active = False
@@ -630,7 +654,7 @@ class WebView:
         """Best-effort ``destroy()`` when ``__del__`` runs off the Tk thread."""
         try:
             frame = self._frame
-            after = frame.after
+            toplevel = frame.winfo_toplevel()
         except (AttributeError, tk.TclError):
             self._teardown_native_if_alive()
             return
@@ -645,9 +669,30 @@ class WebView:
             self._cancel_deferred_callbacks()
             self.destroy()
 
+        if threading.get_ident() == tk_thread_id:
+            try:
+                frame.after(0, _run)
+            except (tk.TclError, RuntimeError):
+                self._teardown_native_if_alive()
+            return
+
         try:
-            after(0, _run)
-        except (tk.TclError, RuntimeError):
+            pending: list[weakref.ReferenceType[WebView]] | None = getattr(
+                toplevel, "_tkwry_pending_destroy_webviews", None
+            )
+            if pending is None:
+                pending = []
+                setattr(toplevel, "_tkwry_pending_destroy_webviews", pending)
+            pending.append(weakref.ref(self))
+            if sys.platform == "darwin":
+                write_fd = getattr(toplevel, "_tkwry_mac_wake_write_fd", None)
+            else:
+                write_fd = getattr(toplevel, "_tkwry_wake_write_fd", None)
+            if write_fd is None:
+                self._teardown_native_if_alive()
+                return
+            os.write(write_fd, b"\x01")
+        except Exception:
             self._teardown_native_if_alive()
 
     def _teardown_native_if_alive(self) -> None:
@@ -1249,6 +1294,13 @@ class WebView:
             self._ready_callbacks = []
             for callback in callbacks:
                 self._invoke_callback(callback)
+            if self._focus_when_ready:
+                self._focus_when_ready = False
+                if self._webview is not None:
+                    try:
+                        self.focus()
+                    except Exception:
+                        traceback.print_exc()
 
         self._track_after(self._frame.after_idle(_deliver_ready))
 

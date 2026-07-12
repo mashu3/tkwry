@@ -82,6 +82,54 @@ def test_schedule_destroy_on_tk_thread_runs_destroy(
     assert destroyed == [True]
 
 
+def test_schedule_destroy_from_worker_wakes_tk_thread(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    destroyed: list[bool] = []
+    original_destroy = web.destroy
+
+    def track_destroy() -> None:
+        destroyed.append(True)
+        original_destroy()
+
+    monkeypatch.setattr(web, "destroy", track_destroy, raising=False)
+    web._unbind_frame_events()
+    toplevel = frame.winfo_toplevel()
+    toplevel._tkwry_mac_wake_read_fd = 1
+    toplevel._tkwry_mac_wake_write_fd = 2
+    write_calls: list[bytes] = []
+    monkeypatch.setattr(os, "write", lambda _fd, data: write_calls.append(data))
+    monkeypatch.setattr(
+        web,
+        "_teardown_native_if_alive",
+        lambda: pytest.fail("should not fall back"),
+        raising=False,
+    )
+
+    done = threading.Event()
+
+    def worker() -> None:
+        web._schedule_destroy_on_tk_thread()
+        done.set()
+
+    threading.Thread(target=worker).start()
+    assert done.wait(timeout=2.0)
+    assert write_calls == [b"\x01"]
+    pending = getattr(toplevel, "_tkwry_pending_destroy_webviews", [])
+    assert len(pending) == 1
+    assert pending[0]() is web
+
+    from tkwry.webview import _drain_pending_destroy_webviews
+
+    _drain_pending_destroy_webviews(toplevel)
+    assert destroyed == [True]
+
+
 def test_schedule_destroy_falls_back_when_after_unavailable(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

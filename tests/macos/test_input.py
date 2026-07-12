@@ -232,7 +232,10 @@ def test_multi_webview_z_order_click_switches_input(tk_root) -> None:
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 @pytest.mark.skipif(
     is_github_actions(),
-    reason="GHA macOS: Tcl focus drain timing not reliable on virtual runners",
+    reason=(
+        "GHA macOS virtual runners: Tcl focus drain timing unreliable; "
+        "passes consistently on local Mac hardware"
+    ),
 )
 def test_tcl_unfocus_drains_within_50ms(url_demo_layout) -> None:
     web = WebView(url_demo_layout.web_frame, html="<p>latency</p>")
