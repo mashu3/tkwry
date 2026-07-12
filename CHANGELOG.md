@@ -4,6 +4,40 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.0.9] - 2026-07-12
+
+### Added
+
+- `WebViewCreationError` — raised when native WebView creation fails after all retries
+- `WebView.take_queue_drop_counts()` — returns `(ipc, page_load, title, drag_drop, eval)` overflow counts since the last call
+- macOS: `disable_process_automatic_window_tabbing` runs at `tkwry` import on the main thread
+- `examples/macos_double_titlebar_repro.py` — import-order / double titlebar comparison
+- Lifecycle state table and initial-load rules documented in the `WebView` class docstring
+
+### Fixed
+
+- Native teardown poll capped when `is_alive` never clears; off-thread `__del__` / GC destroy queued via wakeup pipe with cached toplevel (no Tcl from worker threads)
+- Deferred native teardown kept async on Windows and macOS; Python native ref cleared on deferred destroy; partial `__del__` guarded
+- Sync-hook and event-queue drains run on the Tk thread only; atexit drain for pending destroys; sync-hook handler wait capped and timed-out hooks canceled
+- `<<WebViewReady>>` double-fire prevented; ready callback ordering fixed; `focused=True` deferred until ready on macOS
+- macOS focus routing consolidated in `src/macos/focus.rs` (per-window monitors, z-order hit tests, Tcl focus release)
+- macOS embed probe hardened — drawable lookup failures raise `WebViewCreationError`; Tk 8.5 offsets validated via native NSView
+- macOS window tabbing disabled at import and scoped to the host window; double-titlebar mitigated by avoiding early `NSApplication` init
+- macOS `url()` reads from the wry handle directly; NSString UTF-8 conversion validated
+- Windows layout-ready scoped to laid-out geometry; `place` viewport and stacking sync fixes
+- Linux GtkPump: adaptive backlog scheduling, attach retry, reparent migration, pause on unmap; initial load routed through GTK pump for `place` layouts; GTK teardown and page-load delivery hardened
+- Eval poll: no double callback after timeout; native eval wait cleared on timeout; eval pending buffer overflow queues an empty result
+- Event queues compacted; drop counts accounted in Rust and Python
+- Navigation hooks run on the Tk thread; sync-hook queues capped with unified defaults
+- URL validation tightened — invalid HTTP hosts, ports, schemes, IPv6 zones, and UNC paths; local file existence checks; symlink resolution avoided in file URIs
+- Linux `ImportError` message when the `_core` extension is missing (build-from-source hint)
+
+### Changed
+
+- `_runtime.py` renamed to `_linux.py`; macOS Rust code consolidated under `src/macos/`
+- README: macOS import order, `focused=True` deferral, and non-fatal window-tabbing disable retries
+- Regression tests for off-thread destroy (macOS + Windows), sync hooks, GtkPump, macOS focus/layout, queue drops, eval coalescing, and page-load buffering
+
 ## [0.0.8] - 2026-07-10
 
 ### Fixed
@@ -182,6 +216,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.0.9]: https://github.com/mashu3/tkwry/releases/tag/v0.0.9
 [0.0.8]: https://github.com/mashu3/tkwry/releases/tag/v0.0.8
 [0.0.7]: https://github.com/mashu3/tkwry/releases/tag/v0.0.7
 [0.0.6]: https://github.com/mashu3/tkwry/releases/tag/v0.0.6
