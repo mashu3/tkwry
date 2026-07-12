@@ -1034,7 +1034,8 @@ class WebView:
         if self._on_page_load is not None:
             self._ensure_event_poll()
             if sys.platform == "linux":
-                self._service_linux_events(gtk_rounds=64, passes=4)
+                self._service_linux_events(gtk_rounds=32, passes=2)
+                self._deliver_page_load_events()
             else:
                 self._service_linux_events()
 
@@ -1049,7 +1050,8 @@ class WebView:
         if self._on_page_load is not None:
             self._ensure_event_poll()
             if sys.platform == "linux":
-                self._service_linux_events(gtk_rounds=64, passes=4)
+                self._service_linux_events(gtk_rounds=32, passes=2)
+                self._deliver_page_load_events()
             else:
                 self._service_linux_events()
 
@@ -2013,8 +2015,8 @@ class WebView:
         if self._needs_event_poll():
             self._ensure_event_poll()
             if sys.platform == "linux":
-                for _ in range(10):
-                    self._service_linux_events(gtk_rounds=64, passes=4)
+                for _ in range(3):
+                    self._service_linux_events(gtk_rounds=32, passes=2)
         self._maybe_fire_ready()
 
     def _run_eval_js(
@@ -2060,7 +2062,10 @@ class WebView:
             return
         self._flush_load_scheduled = True
         if delay_ms is None:
-            self._track_after(self._frame.after_idle(self._flush_load))
+            if sys.platform == "linux":
+                self._track_after(self._frame.after(0, self._flush_load))
+            else:
+                self._track_after(self._frame.after_idle(self._flush_load))
         else:
             self._track_after(self._frame.after(delay_ms, self._flush_load))
 
@@ -2127,9 +2132,11 @@ class WebView:
             self._maybe_reschedule_initial_load()
             return
         self._sync_bounds()
-        gtk_rounds = 64 if sys.platform == "linux" else 32
-        passes = 4 if sys.platform == "linux" else 1
+        gtk_rounds = 32 if sys.platform == "linux" else 32
+        passes = 2 if sys.platform == "linux" else 1
         self._service_linux_events(gtk_rounds=gtk_rounds, passes=passes)
+        if sys.platform == "linux":
+            self._deliver_page_load_events()
         if self._on_page_load is not None:
             self._ensure_event_poll()
         self._initial_load = None
@@ -2170,7 +2177,8 @@ class WebView:
         self._initial_load = None
         self._sync_bounds()
         if sys.platform == "linux":
-            self._service_linux_events(gtk_rounds=64, passes=4)
+            self._service_linux_events(gtk_rounds=32, passes=2)
+            self._deliver_page_load_events()
         else:
             self._service_linux_events()
         if self._on_page_load is not None:

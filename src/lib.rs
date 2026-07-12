@@ -1206,21 +1206,30 @@ impl WebView {
     fn load_url(&self, url: &str) -> PyResult<()> {
         with_webview(self, |wv| {
             wv.load_url(url)
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            #[cfg(all(unix, not(target_os = "macos")))]
+            pump_gtk_after_navigation();
+            Ok(())
         })
     }
 
     fn load_html(&self, html: &str) -> PyResult<()> {
         with_webview(self, |wv| {
             wv.load_html(html)
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            #[cfg(all(unix, not(target_os = "macos")))]
+            pump_gtk_after_navigation();
+            Ok(())
         })
     }
 
     fn reload(&self) -> PyResult<()> {
         with_webview(self, |wv| {
             wv.reload()
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            #[cfg(all(unix, not(target_os = "macos")))]
+            pump_gtk_after_navigation();
+            Ok(())
         })
     }
 
@@ -1639,6 +1648,17 @@ where
     })();
     this.leave_wry_call()?;
     result
+}
+
+/// Pump GTK after navigation so WebKitGTK can deliver page-load callbacks.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn pump_gtk_after_navigation() {
+    const MAX_ITERATIONS: usize = 256;
+    for _ in 0..MAX_ITERATIONS {
+        if !gtk::main_iteration_do(false) && !gtk::events_pending() {
+            break;
+        }
+    }
 }
 
 #[pyfunction]
