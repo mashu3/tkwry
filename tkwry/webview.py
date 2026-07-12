@@ -1714,9 +1714,9 @@ class WebView:
 
     def _poll_events(self) -> None:
         try:
-            _drain_pending_destroy_webviews(self._frame.winfo_toplevel())
+            _drain_pending_destroy_webviews(self._toplevel)
         except tk.TclError:
-            pass
+            return
         self._finish_native_teardown()
         if self._destroyed:
             if self._native_teardown_pending is not None:
@@ -1729,10 +1729,9 @@ class WebView:
 
             pump_gtk_events()
         elif sys.platform == "darwin":
-            toplevel = self._frame.winfo_toplevel()
-            _mac_service_wakeup(toplevel)
+            _mac_service_wakeup(self._toplevel)
         else:
-            _pump_toplevel_wakeup_pipe(self._frame.winfo_toplevel())
+            _pump_toplevel_wakeup_pipe(self._toplevel)
 
         native = self._webview
         if native is not None:
