@@ -255,7 +255,7 @@ def test_poll_events_expires_stale_eval_callbacks(
 
     web._poll_events()
 
-    assert results == [""]
+    assert results == []
     assert web._pending_eval_callbacks == 0
     assert not web._pending_eval_tokens
     assert web._event_poll_active is False
@@ -277,7 +277,7 @@ def test_poll_events_does_not_double_invoke_after_eval_timeout(
 
     web._poll_events()
 
-    assert results == [""]
+    assert results == []
     assert web._pending_eval_callbacks == 0
     assert not web._native_eval_wait
 
@@ -298,7 +298,7 @@ def test_poll_stops_after_timeout_when_native_eval_never_returns(
 
     web._poll_events()
 
-    assert results == [""]
+    assert results == []
     assert web._pending_eval_callbacks == 0
     assert not web._native_eval_wait
     assert web._event_poll_active is False
@@ -306,7 +306,7 @@ def test_poll_stops_after_timeout_when_native_eval_never_returns(
     native.drain_eval_callbacks.return_value = [(1, results.append, "late")]
     web._poll_events()
 
-    assert results == [""]
+    assert results == []
     assert not web._native_eval_wait
     assert web._event_poll_active is False
 

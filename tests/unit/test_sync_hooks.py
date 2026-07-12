@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from unittest.mock import MagicMock
 
 import pytest
 from support.linux import noop_linux_runtime
@@ -190,6 +191,29 @@ def test_dispatch_sync_hook_schedules_tk_drain(tk_root, monkeypatch) -> None:
     worker_thread.join(timeout=1.0)
     assert not worker_thread.is_alive()
     assert result_holder == [True]
+    web.destroy()
+
+
+def test_navigation_deferred_load_avoids_sync_hook_deadlock(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _make_web(tk_root)
+    native = MagicMock()
+    web._webview = native
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+
+    def handler(url: str) -> bool:
+        web.load_url("https://example.com/deferred")
+        return True
+
+    web.set_on_navigation(handler)
+    assert web._native_navigation("https://example.com/") is True
+    assert web._sync_hook_depth == 0
+    assert web._pending_load == ("url", "https://example.com/deferred")
+    assert native.load_url.call_count == 0
+
+    web._flush_load()
+    native.load_url.assert_called_once_with("https://example.com/deferred")
     web.destroy()
 
 

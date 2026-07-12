@@ -284,10 +284,10 @@ def test_run_initial_load_reschedules_after_exception_until_attempts_exhausted(
 
     scheduled.clear()
     web._run_initial_load()
-    assert scheduled == []
-    assert web._initial_load is None
-    assert web._initial_load_attempt == 2
-    assert "initial load failed after 2 attempt(s); giving up" in (
+    assert scheduled == [1]
+    assert web._initial_load == ("html", "<p>retry</p>")
+    assert web._initial_load_attempt == 0
+    assert "initial load failed after 2 attempt(s); will retry" in (
         capsys.readouterr().err
     )
 
@@ -620,6 +620,7 @@ def test_destroy_clears_native_when_native_destroy_deferred(
         def __init__(self) -> None:
             self.visible = True
             self.destroy_calls = 0
+            self.force_destroy_calls = 0
 
         def set_visible(self, visible: bool) -> None:
             self.visible = visible
@@ -629,6 +630,9 @@ def test_destroy_clears_native_when_native_destroy_deferred(
 
         def destroy(self) -> None:
             self.destroy_calls += 1
+
+        def force_destroy(self) -> None:
+            self.force_destroy_calls += 1
 
     stuck = _NeverDiesNative()
     web2._webview = stuck
@@ -643,6 +647,7 @@ def test_destroy_clears_native_when_native_destroy_deferred(
 
     assert web2._native_teardown_pending is None
     assert web2._event_poll_active is False
+    assert stuck.force_destroy_calls == 1
     assert "native teardown timed out" in capsys.readouterr().err
 
 
@@ -832,7 +837,7 @@ def test_try_create_retries_after_native_failure(
     assert scheduled == [1]
 
 
-def test_flush_load_retries_then_clears_pending_on_failure(
+def test_flush_load_retries_without_clearing_pending_on_failure(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from unittest.mock import MagicMock
@@ -857,7 +862,7 @@ def test_flush_load_retries_then_clears_pending_on_failure(
 
     web._flush_load_attempt = _FLUSH_LOAD_MAX_ATTEMPTS - 1
     web._flush_load()
-    assert web._pending_load is None
+    assert web._pending_load == ("url", "https://example.com")
     assert web._flush_load_attempt == 0
 
 

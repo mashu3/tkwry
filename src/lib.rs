@@ -1583,6 +1583,15 @@ impl WebView {
         self.destroy_inner()
     }
 
+    /// Force release even when nested wry calls left ``destroy_pending`` set.
+    fn force_destroy(&self) -> PyResult<()> {
+        self.require_owner_thread()?;
+        self.clear_callbacks_and_queues();
+        self.destroy_pending.set(false);
+        self.wry_call_depth.set(0);
+        self.destroy_inner()
+    }
+
     /// ``True`` while the native webview has not been torn down yet.
     fn is_alive(&self) -> bool {
         self.native_is_alive()

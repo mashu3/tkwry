@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import math
 import os
 import queue
@@ -74,6 +75,8 @@ _SYNC_HOOK_MAX_WAIT_S = _SYNC_HOOK_TIMEOUT_S + _SYNC_HOOK_HANDLER_TIMEOUT_S
 _MIN_LAYOUT_DIMENSION = 2
 _CREATE_MAX_ATTEMPTS = 30
 _FLUSH_LOAD_MAX_ATTEMPTS = 3
+_FLUSH_LOAD_RETRY_BASE_MS = 150
+_FLUSH_LOAD_RETRY_MAX_MS = 2000
 _NATIVE_TEARDOWN_MAX_ATTEMPTS = 100
 _QUEUE_DROP_IPC = 0
 _QUEUE_DROP_PAGE_LOAD = 1
@@ -82,6 +85,8 @@ _QUEUE_DROP_DRAG_DROP = 3
 _QUEUE_DROP_EVAL = 4
 _T = TypeVar("_T")
 _frame_webview_refs: dict[int, weakref.ReferenceType[WebView]] = {}
+_atexit_destroy_drain_registered = False
+_atexit_destroy_toplevels: list[weakref.ReferenceType[tk.Misc]] = []
 
 
 def _frame_webview_weakref_dead(ref: weakref.ReferenceType[WebView]) -> None:
@@ -199,6 +204,59 @@ def _drain_pending_destroy_webviews(toplevel: tk.Misc) -> None:
         setattr(toplevel, "_tkwry_pending_destroy_webviews", live)
     elif hasattr(toplevel, "_tkwry_pending_destroy_webviews"):
         delattr(toplevel, "_tkwry_pending_destroy_webviews")
+
+
+def _ensure_atexit_destroy_drain() -> None:
+    global _atexit_destroy_drain_registered
+    if _atexit_destroy_drain_registered:
+        return
+    _atexit_destroy_drain_registered = True
+    atexit.register(_atexit_drain_pending_destroys)
+
+
+def _track_atexit_destroy_toplevel(toplevel: tk.Misc) -> None:
+    _ensure_atexit_destroy_drain()
+    for ref in _atexit_destroy_toplevels:
+        if ref() is toplevel:
+            return
+    _atexit_destroy_toplevels.append(weakref.ref(toplevel))
+
+
+def _atexit_drain_pending_destroys() -> None:
+    live: list[weakref.ReferenceType[tk.Misc]] = []
+    for ref in _atexit_destroy_toplevels:
+        toplevel = ref()
+        if toplevel is None:
+            continue
+        live.append(ref)
+        for _ in range(32):
+            try:
+                toplevel.update_idletasks()
+                toplevel.update()
+            except tk.TclError:
+                break
+            _drain_pending_destroy_webviews(toplevel)
+            if not getattr(toplevel, "_tkwry_pending_destroy_webviews", None):
+                break
+        refs = getattr(toplevel, "_tkwry_pending_destroy_webviews", None)
+        if not refs:
+            continue
+        for pending_ref in list(refs):
+            web = pending_ref()
+            if web is None or web._destroyed:
+                continue
+            if threading.get_ident() == web._tk_thread_id:
+                try:
+                    web._cancel_deferred_callbacks()
+                    web.destroy()
+                except Exception:
+                    traceback.print_exc()
+            else:
+                try:
+                    web._force_native_teardown()
+                except Exception:
+                    traceback.print_exc()
+    _atexit_destroy_toplevels[:] = live
 
 
 def _ensure_tk_wakeup_fileevent(toplevel: tk.Misc) -> None:
@@ -437,6 +495,7 @@ class WebView:
         self._pending_eval_tokens: dict[int, _PendingEval] = {}
         self._native_eval_wait: dict[int, _NativeEvalWait] = {}
         self._sync_hook_queue: queue.SimpleQueue[_SyncHookItem] = queue.SimpleQueue()
+        self._sync_hook_depth = 0
         self._tk_wakeup_write_fd: int | None = None
         # Bumped on destroy so late WebKit-thread delivers are discarded.
         self._eval_epoch = 0
@@ -502,7 +561,7 @@ class WebView:
     def place(self, **kwargs) -> None:
         self._require_not_destroyed("place")
         self._frame.place(**kwargs)
-        self._schedule_bounds_sync()
+        self._sync_bounds_and_stacking()
         self._schedule_try_create()
         self._maybe_fire_ready()
 
@@ -729,6 +788,7 @@ class WebView:
                 pending = []
                 setattr(toplevel, "_tkwry_pending_destroy_webviews", pending)
             pending.append(weakref.ref(self))
+            _track_atexit_destroy_toplevel(toplevel)
             write_fd = self._tk_wakeup_write_fd
             if write_fd is None:
                 if sys.platform == "darwin":
@@ -849,6 +909,21 @@ class WebView:
         if self._native_teardown_pending is not None:
             self._ensure_event_poll()
 
+    def _force_native_teardown(self) -> None:
+        """Best-effort native release when Tk-thread destroy is unavailable."""
+        native = self._webview
+        if native is None and self._native_teardown_pending is not None:
+            native = self._native_teardown_pending
+        if native is None:
+            return
+        try:
+            native.force_destroy()
+        except Exception:
+            traceback.print_exc()
+        self._native_teardown_pending = None
+        self._native_teardown_attempts = 0
+        self._webview = None
+
     def _finish_native_teardown(self) -> None:
         native = self._native_teardown_pending
         if native is None:
@@ -867,9 +942,14 @@ class WebView:
             if self._native_teardown_attempts >= _NATIVE_TEARDOWN_MAX_ATTEMPTS:
                 print(
                     "tkwry: native teardown timed out after "
-                    f"{_NATIVE_TEARDOWN_MAX_ATTEMPTS} poll attempts",
+                    f"{_NATIVE_TEARDOWN_MAX_ATTEMPTS} poll attempts; "
+                    "forcing release",
                     file=sys.stderr,
                 )
+                try:
+                    native.force_destroy()
+                except Exception:
+                    traceback.print_exc()
                 self._native_teardown_pending = None
                 self._native_teardown_attempts = 0
                 if self._destroyed and not self._should_keep_polling():
@@ -900,6 +980,11 @@ class WebView:
             self._pending_url = normalized
             self._pending_html = None
             return
+        if self._sync_hook_depth > 0:
+            self._initial_load = None
+            self._pending_load = ("url", normalized)
+            self._track_after(self._frame.after_idle(self._flush_load))
+            return
         # Supersede constructor deferred load so it cannot overwrite this nav.
         self._initial_load = None
         self._pending_load = ("url", normalized)
@@ -922,6 +1007,11 @@ class WebView:
             self._pending_html = html
             self._pending_url = None
             return
+        if self._sync_hook_depth > 0:
+            self._initial_load = None
+            self._pending_load = ("html", html)
+            self._track_after(self._frame.after_idle(self._flush_load))
+            return
         # Supersede constructor deferred load so it cannot overwrite this nav.
         self._initial_load = None
         self._pending_load = ("html", html)
@@ -935,7 +1025,22 @@ class WebView:
         # Drop any idle-coalesced load_url/load_html so it cannot overwrite reload.
         self._pending_load = None
         self._flush_load_attempt = 0
+        if self._sync_hook_depth > 0:
+            self._track_after(self._frame.after_idle(self._run_deferred_reload))
+            return
         native.reload()
+        if self._on_page_load is not None:
+            self._ensure_event_poll()
+            self._service_linux_events()
+
+    def _run_deferred_reload(self) -> None:
+        if self._destroyed or self._webview is None:
+            return
+        try:
+            self._webview.reload()
+        except Exception:
+            traceback.print_exc()
+            return
         if self._on_page_load is not None:
             self._ensure_event_poll()
             self._service_linux_events()
@@ -965,7 +1070,7 @@ class WebView:
         completes. The result is always a ``str`` (including JSON literals).
         If *on_error* is provided, it is called with the exception on failure
         or on timeout (30s); otherwise the traceback is printed to stderr and
-        *callback* receives ``""`` on timeout.
+        *callback* is not invoked on timeout.
         """
         self._require_ready("eval_js_with_callback")
         epoch = self._eval_epoch
@@ -1115,7 +1220,7 @@ class WebView:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call sync_bounds()"
             ) from self._creation_error
-        self._sync_bounds()
+        self._sync_bounds_and_stacking()
 
     def take_queue_drop_counts(self) -> tuple[int, int, int, int, int]:
         """Return overflow drop counts since the last call.
@@ -1515,11 +1620,7 @@ class WebView:
 
     def _dispatch_sync_hook(self, invoke: Callable[[], _T], default: _T) -> _T:
         if threading.get_ident() == self._tk_thread_id:
-            try:
-                return invoke()
-            except Exception:
-                traceback.print_exc()
-                return default
+            return self._run_sync_hook_invoke(invoke, default)
 
         done = threading.Event()
         result: list[object] = [default]
@@ -1576,6 +1677,16 @@ class WebView:
             self._schedule_sync_hook_drain()
         return cast(_T, result[0])
 
+    def _run_sync_hook_invoke(self, invoke: Callable[[], _T], default: _T) -> _T:
+        self._sync_hook_depth += 1
+        try:
+            return invoke()
+        except Exception:
+            traceback.print_exc()
+            return default
+        finally:
+            self._sync_hook_depth -= 1
+
     def _drain_sync_hooks(self) -> None:
         while True:
             try:
@@ -1595,11 +1706,7 @@ class WebView:
             else:
                 started[0] = True
                 handler_started_at[0] = time.monotonic()
-                try:
-                    result[0] = invoke()
-                except Exception:
-                    traceback.print_exc()
-                    result[0] = default
+                result[0] = self._run_sync_hook_invoke(invoke, default)
             done.set()
 
     def _abort_sync_hooks(self) -> None:
@@ -1716,7 +1823,6 @@ class WebView:
                     self._invoke_callback(on_error, exc)
                 else:
                     print(f"tkwry: {exc}", file=sys.stderr)
-                    self._invoke_callback(callback, "")
 
     def _ensure_event_poll(self) -> None:
         if self._event_poll_active or self._destroyed:
@@ -1924,10 +2030,10 @@ class WebView:
         if self._initial_load_attempt >= max_attempts:
             print(
                 "tkwry: initial load failed after "
-                f"{max_attempts} attempt(s); giving up",
+                f"{max_attempts} attempt(s); will retry",
                 file=sys.stderr,
             )
-            self._initial_load = None
+            self._initial_load_attempt = 0
 
     def _schedule_flush_load(self, *, delay_ms: int | None = None) -> None:
         if self._flush_load_scheduled:
@@ -2020,19 +2126,21 @@ class WebView:
         except Exception:
             traceback.print_exc()
             self._flush_load_attempt += 1
-            if (
-                self._flush_load_attempt < _FLUSH_LOAD_MAX_ATTEMPTS
-                and self._pending_load is not None
-            ):
-                self._schedule_flush_load(delay_ms=150)
+            if self._destroyed or self._pending_load is None:
                 return
-            print(
-                "tkwry: load failed after "
-                f"{self._flush_load_attempt} attempt(s); giving up",
-                file=sys.stderr,
+            delay_ms = min(
+                _FLUSH_LOAD_RETRY_MAX_MS,
+                _FLUSH_LOAD_RETRY_BASE_MS * (2 ** min(self._flush_load_attempt - 1, 4)),
             )
-            self._pending_load = None
-            self._flush_load_attempt = 0
+            if self._flush_load_attempt >= _FLUSH_LOAD_MAX_ATTEMPTS:
+                print(
+                    "tkwry: load failed after "
+                    f"{self._flush_load_attempt} attempt(s); retrying in "
+                    f"{delay_ms}ms",
+                    file=sys.stderr,
+                )
+                self._flush_load_attempt = 0
+            self._schedule_flush_load(delay_ms=delay_ms)
             return
         self._pending_load = None
         self._flush_load_attempt = 0
@@ -2079,8 +2187,34 @@ class WebView:
 
     def _deferred_sync_bounds(self) -> None:
         self._bounds_sync_scheduled = False
-        self._sync_bounds()
+        self._sync_bounds_and_stacking()
         self._maybe_fire_ready()
+
+    def _sync_bounds_and_stacking(self) -> bool:
+        synced = self._sync_bounds()
+        self._sync_tk_stacking_order()
+        return synced
+
+    def _sync_tk_stacking_order(self) -> None:
+        if sys.platform != "win32" or self._webview is None or self._destroyed:
+            return
+        try:
+            from tkwry._win32 import raise_frame_webview
+
+            parent = self._frame.master
+            for child in parent.winfo_children():
+                key = id(child)
+                ref = _frame_webview_refs.get(key)
+                if ref is None:
+                    continue
+                web = ref()
+                if web is None or web._destroyed or web._webview is None:
+                    continue
+                raise_frame_webview(child.winfo_id())
+        except tk.TclError:
+            pass
+        except Exception:
+            traceback.print_exc()
 
     def _sync_bounds(self) -> bool:
         if self._webview is None:
@@ -2117,7 +2251,7 @@ class WebView:
         if self._webview is None:
             self._schedule_try_create()
         else:
-            self._schedule_bounds_sync()
+            self._sync_bounds_and_stacking()
             self._maybe_fire_ready()
 
     def _on_map(self, event: tk.Event) -> None:
