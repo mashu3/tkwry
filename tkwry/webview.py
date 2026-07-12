@@ -863,11 +863,8 @@ class WebView:
             GtkPump.detach(self._frame)
             if had_native or self._native_teardown_pending is not None:
                 self._flush_native_teardown_sync()
-                self._event_poll_active = False
-            else:
-                self._event_poll_active = False
-        elif self._native_teardown_pending is not None:
-            self._flush_native_teardown_sync()
+        if self._native_teardown_pending is not None:
+            self._ensure_event_poll()
         else:
             self._event_poll_active = False
 
