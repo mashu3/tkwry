@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import tkinter as tk
 
 import pytest
@@ -472,6 +473,20 @@ def test_layout_ready_ignores_viewable_on_linux_headless(tk_root, monkeypatch) -
     assert web.ready is True
 
 
+def test_layout_ready_ignores_viewable_on_win32_place(tk_root, monkeypatch) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    web._webview = object()
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 400)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 300)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
+    monkeypatch.setattr("tkwry.webview.sys.platform", "win32")
+
+    assert web._layout_ready() is True
+    assert web.ready is True
+
+
 def test_frame_ready_for_initial_load_checks_geometry_on_linux(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -581,10 +596,13 @@ def test_destroy_clears_native_when_native_destroy_fails(tk_root) -> None:
         _ = web.native
 
 
+@pytest.mark.skipif(
+    sys.platform == "linux",
+    reason="Linux destroy() flushes native teardown synchronously",
+)
 def test_destroy_clears_native_when_native_destroy_deferred(
-    tk_root, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tk_root, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)
 
@@ -658,10 +676,13 @@ def test_destroy_clears_native_when_native_destroy_deferred(
     assert "native teardown timed out" in capsys.readouterr().err
 
 
+@pytest.mark.skipif(
+    sys.platform == "linux",
+    reason="Linux destroy() flushes native teardown synchronously",
+)
 def test_destroy_stops_event_poll_after_native_teardown(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)
 

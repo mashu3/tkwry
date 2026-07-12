@@ -560,12 +560,18 @@ class WebView:
         self._require_not_destroyed("place")
         self._frame.place(**kwargs)
         try:
+            top = self._frame.winfo_toplevel()
             self._frame.update_idletasks()
-            self._frame.winfo_toplevel().update_idletasks()
+            top.update_idletasks()
+            if sys.platform == "win32":
+                top.update()
         except tk.TclError:
             pass
         self._schedule_bounds_sync()
         self._schedule_try_create()
+        if self._webview is not None:
+            self._sync_bounds_and_stacking()
+            self._maybe_reschedule_initial_load()
         self._maybe_fire_ready()
 
     def __repr__(self) -> str:
@@ -2142,7 +2148,10 @@ class WebView:
             if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
                 return False
             # Xvfb headless: winfo_viewable() stays False while geometry is valid.
-            if sys.platform != "linux" and not self._frame.winfo_viewable():
+            # WebView2 place layouts can report not viewable while bounds are valid.
+            if sys.platform in ("linux", "win32"):
+                return True
+            if not self._frame.winfo_viewable():
                 return False
             return True
         except tk.TclError:
@@ -2221,7 +2230,10 @@ class WebView:
             return
         kind, payload = load
         if sys.platform == "linux":
-            self._pending_load = (kind, payload)
+            if kind == "url":
+                self._pending_load = ("url", payload)
+            else:
+                self._pending_load = ("html", payload)
             self._dispatch_pending_load()
             if self._pending_load is None:
                 self._initial_load = None
@@ -2301,7 +2313,10 @@ class WebView:
             if not self._frame.winfo_exists():
                 return False
             # Xvfb headless: winfo_viewable() stays False while geometry is valid.
-            if sys.platform != "linux" and not self._frame.winfo_viewable():
+            # WebView2 place layouts can report not viewable while bounds are valid.
+            if sys.platform in ("linux", "win32"):
+                return self._bounds_size() is not None
+            if not self._frame.winfo_viewable():
                 return False
             return self._bounds_size() is not None
         except tk.TclError:
@@ -2401,6 +2416,8 @@ class WebView:
         elif self._bounds_size() is not None:
             self._sync_bounds_and_stacking()
             self._maybe_fire_ready()
+            if self._initial_load is not None:
+                self._maybe_reschedule_initial_load()
         else:
             self._schedule_bounds_sync()
             self._maybe_fire_ready()

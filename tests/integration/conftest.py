@@ -16,6 +16,6 @@ def _linux_integration_isolation(tk_root) -> None:
 
     GtkPump.reset_all()
     yield
-    if GtkPump._by_root_key:
-        drain_gtk_with_tk(tk_root)
+    GtkPump.reset_all()
+    drain_gtk_with_tk(tk_root)
     GtkPump.reset_all()
