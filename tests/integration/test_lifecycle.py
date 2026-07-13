@@ -6,7 +6,13 @@ import sys
 import threading
 
 import pytest
-from support.tk import bare_frame, layout_bare_frame, pump, skip_linux_lifecycle, wait_until
+from support.tk import (
+    bare_frame,
+    layout_bare_frame,
+    pump,
+    skip_linux_lifecycle,
+    wait_until,
+)
 
 from tkwry import WebView, WebViewDestroyedError, WebViewNotReadyError
 
