@@ -6,11 +6,11 @@ import sys
 import threading
 
 import pytest
-from support.tk import bare_frame, layout_bare_frame, pump, skip_linux_ci, wait_until
+from support.tk import bare_frame, layout_bare_frame, pump, skip_linux_lifecycle, wait_until
 
 from tkwry import WebView, WebViewDestroyedError, WebViewNotReadyError
 
-pytestmark = skip_linux_ci
+pytestmark = skip_linux_lifecycle
 
 
 def test_initial_size_creates_without_pack(tk_root) -> None:

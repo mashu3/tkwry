@@ -1474,7 +1474,18 @@ class WebView:
         """Whether the host frame has real geometry for callbacks and API use."""
         if self._webview is None or self._destroyed:
             return False
-        return self._frame_should_show()
+        return self._frame_is_laid_out()
+
+    def _frame_is_laid_out(self) -> bool:
+        """Whether the host is managed by pack/grid/place with usable size."""
+        try:
+            if not self._frame.winfo_exists():
+                return False
+            if not self._frame.winfo_manager():
+                return False
+        except tk.TclError:
+            return False
+        return self._bounds_size() is not None
 
     def _maybe_fire_ready(self) -> None:
         if self._destroyed or self._webview is None:
@@ -2280,12 +2291,14 @@ class WebView:
         try:
             if not self._frame.winfo_exists():
                 return False
+            if self._bounds_size() is None:
+                return False
             # Xvfb headless: winfo_viewable() stays False while geometry is valid.
             if sys.platform == "linux":
-                return self._bounds_size() is not None
+                return True
             if not self._frame.winfo_viewable():
                 return False
-            return self._bounds_size() is not None
+            return True
         except tk.TclError:
             return False
 

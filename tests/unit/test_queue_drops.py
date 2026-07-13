@@ -5,7 +5,18 @@ from __future__ import annotations
 import tkinter as tk
 from unittest.mock import MagicMock
 
+import pytest
+
 from tkwry import WebView
+
+
+@pytest.fixture(autouse=True)
+def _noop_linux_gtk_pump(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("tkwry._linux.GtkPump.attach", lambda _widget: None)
+    monkeypatch.setattr("tkwry._linux.GtkPump.detach", lambda _widget: None)
+    monkeypatch.setattr(
+        "tkwry._linux.pump_gtk_events", lambda **_kwargs: False, raising=False
+    )
 
 
 def test_take_queue_drop_counts_before_native_returns_zeros(tk_root) -> None:

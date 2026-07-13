@@ -112,18 +112,19 @@ def test_layout_ready_false_before_frame_geometry(tk_root, monkeypatch) -> None:
     assert web._layout_ready() is False
 
 
-def test_layout_ready_true_with_init_size_before_frame_layout(
+def test_layout_ready_false_with_init_size_before_geometry_manager(
     tk_root, monkeypatch
 ) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=300, height=200)
     web._webview = object()
     monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_manager", lambda: "")
     monkeypatch.setattr(frame, "winfo_width", lambda: 1)
     monkeypatch.setattr(frame, "winfo_height", lambda: 1)
     monkeypatch.setattr(frame, "winfo_viewable", lambda: True)
 
-    assert web._layout_ready() is True
+    assert web._layout_ready() is False
 
 
 def test_layout_ready_true_when_frame_is_laid_out(tk_root, monkeypatch) -> None:
@@ -131,6 +132,7 @@ def test_layout_ready_true_when_frame_is_laid_out(tk_root, monkeypatch) -> None:
     web = WebView(frame, width=300, height=200)
     web._webview = object()
     monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_manager", lambda: "pack")
     monkeypatch.setattr(frame, "winfo_width", lambda: 400)
     monkeypatch.setattr(frame, "winfo_height", lambda: 300)
     monkeypatch.setattr(frame, "winfo_viewable", lambda: True)
@@ -464,6 +466,7 @@ def test_layout_ready_ignores_viewable_on_linux_headless(tk_root, monkeypatch) -
     web = WebView(frame, width=300, height=200)
     web._webview = object()
     monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_manager", lambda: "pack")
     monkeypatch.setattr(frame, "winfo_width", lambda: 400)
     monkeypatch.setattr(frame, "winfo_height", lambda: 300)
     monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
@@ -525,7 +528,9 @@ def test_maybe_fire_ready_fires_once_after_unmap_remap(
     web = WebView(frame, width=400, height=300)
     web._webview = object()
     viewable = [True]
+    monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
     monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_manager", lambda: "pack")
     monkeypatch.setattr(frame, "winfo_width", lambda: 400)
     monkeypatch.setattr(frame, "winfo_height", lambda: 300)
     monkeypatch.setattr(frame, "winfo_viewable", lambda: viewable[0])

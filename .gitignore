@@ -27,6 +27,10 @@ docs/MAINTAINERS.md
 *競合*
 *conflicted copy*
 
+# Local Docker (dev-only Linux test env)
+docker/
+.dockerignore
+
 # Built extension modules
 *.so
 *.pyd
