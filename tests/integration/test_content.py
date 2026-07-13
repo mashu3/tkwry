@@ -1,8 +1,4 @@
-"""Content loading, callbacks, and drag-and-drop queueing.
-
-Linux integration tests that depend on WebKitGTK event timing are skipped on
-Linux — v0.0.x treats Linux as best-effort (see README / CHANGELOG).
-"""
+"""Content loading, callbacks, and drag-and-drop queueing."""
 
 from __future__ import annotations
 
@@ -55,10 +51,6 @@ def test_load_html_supersedes_pending_url_before_create(tk_root) -> None:
     frame.destroy()
 
 
-@pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK headless CI: deferred initial-load timing unreliable",
-)
 def test_initial_load_runs_after_bounds_sync(tk_root) -> None:
     """Deferred initial content load completes after bounds sync (no network)."""
     frame = host_frame(tk_root)
@@ -89,10 +81,6 @@ def test_load_url_coalesces_before_create(tk_root) -> None:
     frame.destroy()
 
 
-@pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK headless CI: after-create load coalescing unreliable",
-)
 def test_load_coalesces_to_last_pending(tk_root) -> None:
     frame = host_frame(tk_root)
     web = WebView(frame, html="<p>init</p>")
@@ -102,17 +90,16 @@ def test_load_coalesces_to_last_pending(tk_root) -> None:
     web.load_url("https://example.com/b")
     web.load_url("https://example.com/c")
 
-    assert web._pending_load == ("url", "https://example.com/c")
     assert web._initial_load is None
+    if web._pending_load is not None:
+        assert web._pending_load == ("url", "https://example.com/c")
+    else:
+        assert web.url == "https://example.com/c"
 
     web.destroy()
     frame.destroy()
 
 
-@pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK headless CI: deferred initial-load timing unreliable",
-)
 def test_load_after_create_cancels_deferred_initial_load(tk_root) -> None:
     """Post-create load_* must win over the delayed constructor reload."""
     frame = host_frame(tk_root)
@@ -123,9 +110,13 @@ def test_load_after_create_cancels_deferred_initial_load(tk_root) -> None:
     web.load_url("https://example.com/B")
 
     assert web._initial_load is None
-    assert web._pending_load == ("url", "https://example.com/B")
+    if web._pending_load is not None:
+        assert web._pending_load == ("url", "https://example.com/B")
+    else:
+        assert web.url == "https://example.com/B"
     web._run_initial_load()  # delayed callback must be a no-op
     assert web._initial_load is None
+    assert web.url == "https://example.com/B"
 
     web.destroy()
     frame.destroy()
@@ -154,10 +145,6 @@ def test_page_load_callback_receives_finished(tk_root) -> None:
     frame.destroy()
 
 
-@pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK headless CI: local file URL loading unreliable",
-)
 def test_reload_after_ready_fires_page_load(tk_root, tmp_path: Path) -> None:
     page = tmp_path / "reload.html"
     page.write_text(
@@ -234,10 +221,6 @@ def test_page_load_discards_backlog_before_handler_attach(tk_root) -> None:
     frame.destroy()
 
 
-@pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK headless CI: IPC event poll unreliable",
-)
 def test_ipc_handler_exception_does_not_stop_poll(tk_root) -> None:
     received: list[str] = []
 
@@ -264,7 +247,7 @@ def test_ipc_handler_exception_does_not_stop_poll(tk_root) -> None:
 
 @pytest.mark.skipif(
     sys.platform == "linux",
-    reason="WebKitGTK headless CI: IPC event poll unreliable",
+    reason="WebKitGTK: IPC e2e hangs after other WebViews in the same pytest process",
 )
 def test_ipc_post_message_reaches_handler(tk_root) -> None:
     """End-to-end: JS window.ipc.postMessage -> Tk-thread handler."""
@@ -296,10 +279,6 @@ def test_ipc_post_message_reaches_handler(tk_root) -> None:
     frame.destroy()
 
 
-@pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK headless CI: title-changed callback timing unreliable",
-)
 def test_title_changed_delivers_on_document_title_set(tk_root) -> None:
     titles: list[str] = []
 
@@ -365,10 +344,6 @@ def test_drag_drop_native_queues_without_blocking(tk_root) -> None:
     frame.destroy()
 
 
-@pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK headless CI: local file URL loading unreliable",
-)
 def test_load_local_html_resolves_relative_resources(tk_root, tmp_path: Path) -> None:
     (tmp_path / "style.css").write_text(
         "p { color: rgb(255, 0, 0); }", encoding="utf-8"

@@ -864,7 +864,7 @@ class WebView:
             if had_native or self._native_teardown_pending is not None:
                 from tkwry._linux import pump_gtk_events
 
-                for _ in range(24):
+                for _ in range(_NATIVE_TEARDOWN_MAX_ATTEMPTS):
                     if self._native_teardown_pending is not None:
                         self._finish_native_teardown()
                     pump_gtk_events()
@@ -872,8 +872,17 @@ class WebView:
                         break
                     try:
                         self._toplevel.update_idletasks()
+                        self._toplevel.update()
                     except tk.TclError:
                         break
+                if self._native_teardown_pending is not None:
+                    pending = self._native_teardown_pending
+                    try:
+                        pending.force_destroy()
+                    except Exception:
+                        traceback.print_exc()
+                    self._native_teardown_pending = None
+                    self._native_teardown_attempts = 0
         if self._native_teardown_pending is not None:
             self._ensure_event_poll()
         else:
