@@ -28,7 +28,7 @@ Tkinter is still a solid GUI shell — it just had no first-class way to host mo
 - **Layout-aware** — tracks `pack` / `grid` / `place`, tabs, and `PanedWindow`
 
 Pre-built **abi3** wheels ship for **Windows (x86_64, arm64)** and **macOS (Apple Silicon + Intel)** — these are the primary release targets.
-**Linux** is **best-effort**: build from source (sdist / git); timing and headless behavior are not guaranteed in v0.0.x.
+**Linux** is **best-effort**: build from source (sdist / git); not a wheel release target in v0.0.x. CI covers Linux under Xvfb, but real-desktop timing is still not a release blocker.
 
 ---
 
@@ -226,7 +226,7 @@ Type aliases: `IpcHandler`, `NavigationHandler`, `PageLoadHandler`, `TitleChange
 
 - **Alpha** — APIs may change; not recommended for production yet
 - **Windows** — WebView2 Runtime required; systems without it are unsupported
-- **Linux** — source install only (no PyPI wheel); **best-effort** in v0.0.x — headless CI and event timing are not release blockers
+- **Linux** — source install only (no PyPI wheel); **best-effort** in v0.0.x (not a wheel release target). CI runs the integration suite under Xvfb; real desktops may still differ
 - **DevTools** — macOS uses private APIs; avoid in Mac App Store release builds
 - **macOS input** — Tk text widgets and the WebView share one window; tkwry routes focus automatically (see [macOS embedding](#macos-embedding)). IME and other advanced input may still differ from a standalone browser
 - **Drag & drop** — drop target is the WebView area only (not arbitrary Tk widgets; use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for those)
@@ -282,7 +282,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Plotly-ready** — load HTML + `eval_js` for interactive charts
 - **Folium-ready** — embed Leaflet maps from Folium HTML (right-click to pin)
 - **Markdown-ready** — Monaco editor + live preview in a `PanedWindow` (see [`examples/markdown_demo.py`](examples/markdown_demo.py); CDN required)
-- **Alpha, but tested** — CI runs `pytest tests/` on Windows (x86_64 + arm64), macOS, and Linux (Xvfb + WebKitGTK); many timing-sensitive integration tests are skipped on Linux CI (**best-effort**, not a release blocker)
+- **Alpha, but tested** — CI runs `pytest tests/` on Windows (x86_64 + arm64), macOS, and Linux (Xvfb + WebKitGTK). Linux is **best-effort** (source install, no wheel); the integration suite is largely enabled on Linux CI
 
 ---
 
