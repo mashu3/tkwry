@@ -12,9 +12,6 @@ from support.tk import pump, skip_linux_ci, wait_until
 
 from tkwry import PageLoadEvent, WebView
 
-# Concurrent WebKitGTK views hang under Xvfb (even a lone two-pane test).
-pytestmark = skip_linux_ci
-
 
 def _two_pane_row(root):
     import tkinter as tk
@@ -37,14 +34,17 @@ def _two_pane_row(root):
     root.update_idletasks()
     root.update()
     # Ensure both hosts are mapped with real geometry before creating WebViews.
+    # Xvfb: winfo_viewable() can stay false while geometry is valid.
     for _ in range(50):
         if (
-            left.winfo_viewable()
-            and right.winfo_viewable()
-            and left.winfo_width() > 1
+            left.winfo_width() > 1
             and right.winfo_width() > 1
             and left.winfo_height() > 1
             and right.winfo_height() > 1
+            and (
+                sys.platform == "linux"
+                or (left.winfo_viewable() and right.winfo_viewable())
+            )
         ):
             break
         root.update_idletasks()
@@ -54,7 +54,29 @@ def _two_pane_row(root):
     return row, left, right
 
 
+def _json_text(raw: str) -> str | None:
+    """Decode eval_js JSON; WebKitGTK may double-encode string results."""
+    try:
+        data = json.loads(raw)
+        if isinstance(data, str):
+            try:
+                nested = json.loads(data)
+                if isinstance(nested, str):
+                    return nested
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return data
+        return None
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+@skip_linux_ci
 def test_two_webviews_both_ready_and_independent_eval(tk_root) -> None:
+    """Two panes ready + independent eval (skipped on Linux CI / GITHUB_ACTIONS).
+
+    Dual WebViews with page_load_listening stall ``pump_events`` under Xvfb.
+    """
     row, left, right = _two_pane_row(tk_root)
 
     load_events: dict[str, list[PageLoadEvent]] = {"a": [], "b": []}
@@ -88,29 +110,22 @@ def test_two_webviews_both_ready_and_independent_eval(tk_root) -> None:
 
     results: dict[str, str] = {}
 
+    # Prefer sequential evals — concurrent callbacks can stall WebKitGTK.
     web_a.eval_js_with_callback(
         "document.getElementById('pane-a').textContent",
         lambda value: results.update({"a": value}),
     )
+    assert wait_until(
+        tk_root, lambda: _json_text(results.get("a", "")) == "A", steps=200
+    ), f"expected pane A eval, got {results!r}"
+
     web_b.eval_js_with_callback(
         "document.getElementById('pane-b').textContent",
         lambda value: results.update({"b": value}),
     )
-
-    def both_evaluated() -> bool:
-        a = results.get("a")
-        b = results.get("b")
-        if a is None or b is None:
-            return False
-        try:
-            return json.loads(a) == "A" and json.loads(b) == "B"
-        except (json.JSONDecodeError, TypeError):
-            # Interim empty/invalid deliveries must not abort wait_until.
-            return False
-
-    assert wait_until(tk_root, both_evaluated, steps=200), (
-        f"expected independent eval results, got {results!r}"
-    )
+    assert wait_until(
+        tk_root, lambda: _json_text(results.get("b", "")) == "B", steps=200
+    ), f"expected pane B eval, got {results!r}"
 
     web_a.destroy()
     web_b.destroy()
