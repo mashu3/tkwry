@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from support.layout import attach_bounds_recorder, bounds_close, expected_bounds
-from support.tk import pump, skip_linux_ci, wait_until
+from support.tk import pump, wait_until
 
 from tkwry import PageLoadEvent, WebView
 
@@ -71,12 +71,8 @@ def _json_text(raw: str) -> str | None:
         return None
 
 
-@skip_linux_ci
 def test_two_webviews_both_ready_and_independent_eval(tk_root) -> None:
-    """Two panes ready + independent eval (skipped on Linux CI / GITHUB_ACTIONS).
-
-    Dual WebViews with page_load_listening stall ``pump_events`` under Xvfb.
-    """
+    """Two panes ready + independent eval (sequential on both platforms)."""
     row, left, right = _two_pane_row(tk_root)
 
     load_events: dict[str, list[PageLoadEvent]] = {"a": [], "b": []}

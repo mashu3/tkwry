@@ -84,6 +84,7 @@ run_common=(
 if $live; then
   run_common+=(
     -v "$ROOT/tkwry/webview.py:/usr/local/lib/python3.12/dist-packages/tkwry/webview.py:ro"
+    -v "$ROOT/tkwry/_linux.py:/usr/local/lib/python3.12/dist-packages/tkwry/_linux.py:ro"
     -v "$ROOT/tests:/app/tests:ro"
     -v "$ROOT/scripts:/app/scripts:ro"
   )

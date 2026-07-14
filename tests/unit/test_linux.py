@@ -494,6 +494,38 @@ def test_gtk_pump_tick_uses_fast_schedule_when_backlog(
     _gtk_pump_tick(pump._root_key)
 
     assert delays == [0]
+    assert pump._consecutive_busy == 1
+    pump.stop()
+
+
+def test_gtk_pump_tick_yields_after_consecutive_busy_streak(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tkwry._linux import _PUMP_MAX_CONSECUTIVE_BUSY, _PUMP_TICK_IDLE_MS
+
+    delays: list[int] = []
+    monkeypatch.setattr(
+        "tkwry._linux.pump_gtk_events",
+        lambda **_kwargs: True,
+        raising=False,
+    )
+
+    pump = GtkPump(tk_root)
+    GtkPump._by_root_key[pump._root_key] = pump
+    pump._active = True
+    monkeypatch.setattr(
+        pump._root,
+        "after",
+        lambda delay, _callback: delays.append(delay) or "after-id",
+    )
+
+    for _ in range(_PUMP_MAX_CONSECUTIVE_BUSY):
+        _gtk_pump_tick(pump._root_key)
+    assert delays == [0] * _PUMP_MAX_CONSECUTIVE_BUSY
+
+    _gtk_pump_tick(pump._root_key)
+    assert delays[-1] == _PUMP_TICK_IDLE_MS
+    assert pump._consecutive_busy == 0
     pump.stop()
 
 

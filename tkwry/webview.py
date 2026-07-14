@@ -1978,9 +1978,13 @@ class WebView:
             return
         if sys.platform == "linux":
             _pump_toplevel_wakeup_pipe(self._toplevel)
-            from tkwry._linux import pump_gtk_events
+            # GtkPump already drains the shared GTK context for this toplevel.
+            # Nested full bursts from every 1ms WebView poll starve Tk when
+            # multiple views keep events_pending under Xvfb.
+            if not GtkPump.is_active_for(self._frame):
+                from tkwry._linux import pump_gtk_events
 
-            pump_gtk_events()
+                pump_gtk_events()
         elif sys.platform == "darwin":
             _mac_service_wakeup(self._toplevel)
         else:

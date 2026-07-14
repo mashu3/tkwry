@@ -16,6 +16,9 @@ _PUMP_BURST_MAX = 8
 _PUMP_BACKLOG_MAX_PASSES = 8
 _PUMP_TICK_IDLE_MS = 10
 _PUMP_TICK_BUSY_MS = 0
+# Cap delay=0 chains so nested Tk ``update()`` can progress when WebKitGTK
+# keeps ``events_pending`` true under Xvfb (especially with multiple views).
+_PUMP_MAX_CONSECUTIVE_BUSY = 2
 _PUMP_ERROR_LIMIT = 5
 _PUMP_ERROR_RECOVERY_BASE_MS = 10
 _PUMP_ERROR_RECOVERY_MAX_MS = 200
@@ -81,9 +84,18 @@ def _gtk_pump_tick(root_key: int) -> None:
         pump._handle_pump_error()
         return
     pump._consecutive_errors = 0
-    if pump._active:
-        delay = _PUMP_TICK_BUSY_MS if backlog else _PUMP_TICK_IDLE_MS
-        pump._schedule_tick(delay)
+    if not pump._active:
+        return
+    if backlog:
+        pump._consecutive_busy += 1
+    else:
+        pump._consecutive_busy = 0
+    use_busy = backlog and pump._consecutive_busy <= _PUMP_MAX_CONSECUTIVE_BUSY
+    if backlog and not use_busy:
+        # Yielded to Tk; allow a fresh busy burst on the next backlog streak.
+        pump._consecutive_busy = 0
+    delay = _PUMP_TICK_BUSY_MS if use_busy else _PUMP_TICK_IDLE_MS
+    pump._schedule_tick(delay)
 
 
 class GtkPump:
@@ -100,6 +112,7 @@ class GtkPump:
         self._active = False
         self._refcount = 0
         self._consecutive_errors = 0
+        self._consecutive_busy = 0
         self._recovery_pending = False
         self._destroy_bind_id: str | None = None
         self._tick_after_id: str | None = None
@@ -276,6 +289,17 @@ class GtkPump:
             cls._pending_attach.discard(widget_id)
 
     @classmethod
+    def is_active_for(cls, widget: tk.Misc) -> bool:
+        """True when a GtkPump is already draining this toplevel."""
+        if sys.platform != "linux":
+            return False
+        root_key = cls._resolve_root_key(widget)
+        if root_key is None:
+            return False
+        pump = cls._by_root_key.get(root_key)
+        return pump is not None and pump._active and pump._refcount > 0
+
+    @classmethod
     def ensure_attached(cls, widget: tk.Misc) -> None:
         """Attach *widget* once; retry when the toplevel is not mapped yet."""
         if sys.platform != "linux":
@@ -337,6 +361,7 @@ class GtkPump:
 
         ensure_gtk_init()
         self._consecutive_errors = 0
+        self._consecutive_busy = 0
         self._recovery_pending = False
         try:
             self._destroy_bind_id = self._root.bind(
@@ -350,6 +375,7 @@ class GtkPump:
 
     def stop(self) -> None:
         self._active = False
+        self._consecutive_busy = 0
         self._cancel_tick()
         bind_id = self._destroy_bind_id
         self._destroy_bind_id = None
