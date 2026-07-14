@@ -6,19 +6,7 @@ import os
 import sys
 from collections.abc import Callable
 
-import pytest
-
 from tkwry import WebView
-
-skip_linux_ci = pytest.mark.skipif(
-    sys.platform == "linux" and os.environ.get("GITHUB_ACTIONS") == "true",
-    reason="WebKitGTK headless CI: best-effort on Linux in v0.0.x",
-)
-
-skip_linux_lifecycle = pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK lifecycle integration unreliable on Linux in v0.0.x",
-)
 
 
 def is_github_actions() -> bool:

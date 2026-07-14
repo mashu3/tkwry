@@ -8,8 +8,8 @@ The **bad** window (left) imports ``AppKit`` and touches ``NSApplication`` befor
 ``tkwry``. macOS may reserve automatic window-tab chrome, producing a double
 titlebar strip above the normal Tk title.
 
-The **good** window (right) imports ``tkwry`` first so
-``disable_process_automatic_window_tabbing`` runs before full AppKit startup.
+The **good** window (right) imports ``tkwry`` first so process-level automatic
+window tabbing is disabled before full AppKit startup.
 """
 
 from __future__ import annotations
