@@ -2076,6 +2076,19 @@ class WebView:
             pump_gtk_events(bursts=20)
             self._ensure_tk_wakeup_pipe()
 
+        if sys.platform == "win32":
+            from tkwry._win32 import (
+                WEBVIEW2_MISSING_MESSAGE,
+                is_webview2_runtime_available,
+                looks_like_webview2_missing,
+                webview2_missing_error,
+            )
+
+            if not is_webview2_runtime_available():
+                self._creation_error = webview2_missing_error()
+                print(f"tkwry: {WEBVIEW2_MISSING_MESSAGE}", file=sys.stderr)
+                return
+
         try:
             self._webview = NativeWebView(
                 self._embed.handle,
@@ -2084,6 +2097,18 @@ class WebView:
             )
         except Exception as exc:
             traceback.print_exc()
+            if sys.platform == "win32":
+                from tkwry._win32 import (
+                    WEBVIEW2_MISSING_MESSAGE,
+                    is_webview2_runtime_available,
+                    looks_like_webview2_missing,
+                    webview2_missing_error,
+                )
+
+                if looks_like_webview2_missing(exc) or not is_webview2_runtime_available():
+                    self._creation_error = webview2_missing_error(exc)
+                    print(f"tkwry: {WEBVIEW2_MISSING_MESSAGE}", file=sys.stderr)
+                    return
             self._create_attempt += 1
             if self._create_attempt >= _CREATE_MAX_ATTEMPTS:
                 self._creation_error = exc

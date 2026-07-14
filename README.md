@@ -225,7 +225,7 @@ Type aliases: `IpcHandler`, `NavigationHandler`, `PageLoadHandler`, `TitleChange
 ## ⚠️ Known limitations
 
 - **Alpha** — APIs may change; not recommended for production yet
-- **Windows** — WebView2 Runtime required; systems without it are unsupported
+- **Windows** — WebView2 Runtime required; systems without it fail hard with `WebViewCreationError` (install link in the message; no fallback engine)
 - **Linux** — source install only (no PyPI wheel); **best-effort** in v0.0.x (not a wheel release target). CI runs the integration suite under Xvfb; real desktops may still differ
 - **DevTools** — macOS uses private APIs; avoid in Mac App Store release builds
 - **macOS input** — Tk text widgets and the WebView share one window; tkwry routes focus automatically (see [macOS embedding](#macos-embedding)). IME and other advanced input may still differ from a standalone browser
