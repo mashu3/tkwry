@@ -139,23 +139,11 @@ jobs:
           TK_SILENCE_DEPRECATION: "1"
           PYTHONUNBUFFERED: "1"
         run: |
-          # WebKitGTK hangs in a single pytest process after many WebViews;
-          # also needs >64MB /dev/shm. Split suites and use a fixed Xvfb.
+          # WebKitGTK hangs after many WebViews and needs >64MB /dev/shm.
+          # Split suites live in scripts/run-linux-ci-tests.sh (Docker --ci uses the same).
           Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX +render -noreset &
           sleep 3
-          # Leftover WebKitNetworkProcess zombies can lock later suites on GHA.
-          cleanup_webkit() { pkill -9 -f '[Ww]eb[Kk]it' 2>/dev/null || true; }
-          pytest tests/unit/ -v --tb=short
-          cleanup_webkit
-          pytest tests/integration/test_content.py -v --tb=short
-          cleanup_webkit
-          pytest tests/integration/test_layout.py -v --tb=short
-          cleanup_webkit
-          pytest tests/integration/test_viewport.py -v --tb=short
-          cleanup_webkit
-          pytest tests/integration/test_multi_webview.py -v --tb=short
-          cleanup_webkit
-          pytest tests/integration/test_lifecycle.py -v --tb=short
+          bash scripts/run-linux-ci-tests.sh
 
       - name: Run tests (Windows / macOS)
         if: runner.os != 'Linux'

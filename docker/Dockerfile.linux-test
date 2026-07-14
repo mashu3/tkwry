@@ -1,0 +1,48 @@
+# Shared Linux integration env (WebKitGTK + Xvfb). Mirrors GitHub Actions Ubuntu deps.
+# Usage from repo root:
+#   docker/run-linux-tests.sh --build --ci              # GHA-like skips + split suites
+#   docker/run-linux-tests.sh --build --ci --amd64      # also linux/amd64 (GHA arch)
+#   docker/run-linux-tests.sh -- /app/tests/unit/ -q
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PKG_CONFIG_PATH=""
+ENV TK_SILENCE_DEPRECATION=1
+ENV DISPLAY=:99
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    libglib2.0-dev \
+    libgtk-3-dev \
+    libwebkit2gtk-4.1-dev \
+    patchelf \
+    pkg-config \
+    python3 \
+    python3-pip \
+    python3-tk \
+    python3-venv \
+    xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /app
+COPY . .
+
+# Host artifacts must not shadow the Linux wheel (see .dockerignore).
+RUN rm -f tkwry/_core*.so tkwry/_core*.pyd
+
+RUN pip install --break-system-packages maturin pytest \
+    && maturin build --profile ci --out /tmp/dist \
+    && pip install --break-system-packages /tmp/dist/*.whl
+
+# Run from /tmp so /app/tkwry sources do not shadow the installed wheel.
+WORKDIR /tmp
+
+# Default mirrors CI: fixed Xvfb + split suites (set GITHUB_ACTIONS for skips).
+CMD ["bash", "-c", "Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX +render -noreset & sleep 3 && export DISPLAY=:99 && exec /app/scripts/run-linux-ci-tests.sh"]
