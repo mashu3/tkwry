@@ -127,13 +127,28 @@ jobs:
           echo "TCL_LIBRARY=${pythonLocation}/tcl/tcl8.6" >> "$GITHUB_ENV"
           echo "TK_LIBRARY=${pythonLocation}/tcl/tk8.6" >> "$GITHUB_ENV"
 
+      - name: Enlarge /dev/shm for WebKitGTK
+        if: runner.os == 'Linux'
+        run: sudo mount -o remount,size=2G /dev/shm
+
       - name: Run tests (Linux)
         if: runner.os == 'Linux'
         shell: bash
         env:
           DISPLAY: :99
           TK_SILENCE_DEPRECATION: "1"
-        run: xvfb-run -a pytest tests/ -v
+          PYTHONUNBUFFERED: "1"
+        run: |
+          # WebKitGTK hangs in a single pytest process after many WebViews;
+          # also needs >64MB /dev/shm. Split suites and use a fixed Xvfb.
+          Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX +render -noreset &
+          sleep 3
+          pytest tests/unit/ -v --tb=short
+          pytest tests/integration/test_content.py -v --tb=short
+          pytest tests/integration/test_layout.py -v --tb=short
+          pytest tests/integration/test_viewport.py -v --tb=short
+          pytest tests/integration/test_lifecycle.py \
+                tests/integration/test_multi_webview.py -v --tb=short
 
       - name: Run tests (Windows / macOS)
         if: runner.os != 'Linux'
