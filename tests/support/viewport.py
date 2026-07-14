@@ -43,6 +43,9 @@ def read_viewport_via_callback(
     def callback(raw: str) -> None:
         try:
             data = json.loads(raw)
+            # WebKitGTK may JSON-encode string results twice.
+            if isinstance(data, str):
+                data = json.loads(data)
             results.append((int(data["w"]), int(data["h"])))
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             pass

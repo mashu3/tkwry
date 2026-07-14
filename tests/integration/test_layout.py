@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import sys
-
-import pytest
 from support.layout import attach_bounds_recorder, bounds_close, expected_bounds
 from support.tk import pump, wait_until
 
@@ -158,10 +155,6 @@ def test_bounds_shrink_when_sibling_packed_after_create(tk_root) -> None:
     body.destroy()
 
 
-@pytest.mark.skipif(
-    sys.platform not in ("darwin", "win32"),
-    reason="auto bounds sync after sibling pack verified on macOS and Windows",
-)
 def test_bounds_without_manual_sync_after_sibling_pack(tk_root) -> None:
     import tkinter as tk
 
