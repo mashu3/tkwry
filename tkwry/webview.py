@@ -2105,7 +2105,10 @@ class WebView:
                     webview2_missing_error,
                 )
 
-                if looks_like_webview2_missing(exc) or not is_webview2_runtime_available():
+                missing = looks_like_webview2_missing(exc) or (
+                    not is_webview2_runtime_available()
+                )
+                if missing:
                     self._creation_error = webview2_missing_error(exc)
                     print(f"tkwry: {WEBVIEW2_MISSING_MESSAGE}", file=sys.stderr)
                     return

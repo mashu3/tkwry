@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import sys
+import tkinter as tk
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-import tkinter as tk
 
 from tkwry import WebView
 from tkwry._win32 import (
