@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 
 import pytest
-from support.tk import pump, skip_linux_layout, wait_ready, wait_until
+from support.tk import pump, wait_ready, wait_until
 from support.viewport import (
     VIEWPORT_HTML,
     read_viewport,
@@ -249,17 +249,16 @@ def test_viewport_matches_frame_after_place(tk_root) -> None:
     host.destroy()
 
 
-@skip_linux_layout
 def test_viewport_matches_frame_with_explicit_width_only(tk_root) -> None:
     import tkinter as tk
 
     tk_root.geometry("520x380")
     host = tk.Frame(tk_root, height=280, bg="#222")
     host.pack_propagate(False)
-    host.pack(fill="x", padx=8, pady=8)
-
+    # Pack once via WebView.pack (packs the host frame). Do not pack the host
+    # first and then call web.pack again — that remaps the frame.
     web = WebView(host, width=480, html=VIEWPORT_HTML)
-    web.pack(fill="both", expand=True)
+    web.pack(fill="x", padx=8, pady=8)
 
     wait_ready(tk_root, web)
     viewport = read_viewport(web, tk_root)
@@ -271,17 +270,14 @@ def test_viewport_matches_frame_with_explicit_width_only(tk_root) -> None:
     host.destroy()
 
 
-@skip_linux_layout
 def test_viewport_matches_frame_with_explicit_height_only(tk_root) -> None:
     import tkinter as tk
 
     tk_root.geometry("520x380")
     host = tk.Frame(tk_root, width=360, bg="#222")
     host.pack_propagate(False)
-    host.pack(side="left", fill="y", padx=8, pady=8)
-
     web = WebView(host, height=280, html=VIEWPORT_HTML)
-    web.pack(fill="both", expand=True)
+    web.pack(side="left", fill="y", padx=8, pady=8)
 
     wait_ready(tk_root, web)
     viewport = read_viewport(web, tk_root)

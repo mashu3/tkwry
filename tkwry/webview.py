@@ -2103,10 +2103,9 @@ class WebView:
         self._schedule_bounds_sync()
         if initial_load is not None:
             self._initial_load = initial_load
-            if sys.platform == "linux":
-                self._run_initial_load()
-            if self._initial_load is not None:
-                self._schedule_initial_load()
+            # Defer load until after create returns: sync load_html during
+            # _try_create/pack races WebKitGTK (constructor html never finishes).
+            self._schedule_initial_load()
         if sys.platform == "darwin" and self._webview is not None:
             toplevel = self._frame.winfo_toplevel()
             _ensure_mac_wakeup_pipe(toplevel, self._webview)

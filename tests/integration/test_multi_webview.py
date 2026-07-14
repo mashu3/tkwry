@@ -12,6 +12,7 @@ from support.tk import pump, skip_linux_ci, wait_until
 
 from tkwry import PageLoadEvent, WebView
 
+# Concurrent WebKitGTK views hang under Xvfb (even a lone two-pane test).
 pytestmark = skip_linux_ci
 
 
