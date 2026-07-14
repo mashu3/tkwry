@@ -447,18 +447,23 @@ def test_fire_ready_skips_delivery_if_destroyed_before_idle(
     assert when_ready_fired == []
 
 
-def test_layout_ready_false_when_not_viewable(tk_root, monkeypatch) -> None:
+def test_layout_ready_ignores_viewable_when_geometry_valid(
+    tk_root, monkeypatch
+) -> None:
+    """``ready`` is layout-based; hide path uses ``_frame_should_show`` instead."""
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=300, height=200)
     web._webview = object()
     monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_manager", lambda: "pack")
     monkeypatch.setattr(frame, "winfo_width", lambda: 400)
     monkeypatch.setattr(frame, "winfo_height", lambda: 300)
     monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
     monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
 
-    assert web._layout_ready() is False
-    assert web.ready is False
+    assert web._layout_ready() is True
+    assert web.ready is True
+    assert web._frame_should_show() is False
 
 
 def test_layout_ready_ignores_viewable_on_linux_headless(tk_root, monkeypatch) -> None:
@@ -474,6 +479,19 @@ def test_layout_ready_ignores_viewable_on_linux_headless(tk_root, monkeypatch) -
 
     assert web._layout_ready() is True
     assert web.ready is True
+    assert web._frame_should_show() is True
+
+
+def test_frame_should_show_true_when_viewable(tk_root, monkeypatch) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 400)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 300)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: True)
+    monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
+
+    assert web._frame_should_show() is True
 
 
 def test_layout_ready_false_for_init_size_before_map_on_win32(

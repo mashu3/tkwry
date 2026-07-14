@@ -370,11 +370,14 @@ class WebView:
     |               |        |       |           | ``sync_bounds``,          |
     |               |        |       |           | ``destroy``               |
     +---------------+--------+-------+-----------+---------------------------+
-    | unmapped      | Some   | False | False     | Same as pre-create;       |
-    |               |        |       |           | ``_require_ready`` APIs   |
-    |               |        |       |           | (``eval_js``, ``reload``, |
-    |               |        |       |           | ``focus``, …) raise       |
-    |               |        |       |           | ``WebViewNotReadyError``  |
+    | unmapped      | Some   | True*  | False     | Public APIs allowed;      |
+    | (hidden tab)  |        |       |           | native is                 |
+    |               |        |       |           | ``set_visible(False)``.   |
+    |               |        |       |           | ``*`` ``ready`` follows   |
+    |               |        |       |           | layout size, not map      |
+    |               |        |       |           | state (Notebook tabs).    |
+    |               |        |       |           | Prefer calling after map  |
+    |               |        |       |           | for visible results.      |
     +---------------+--------+-------+-----------+---------------------------+
     | ready+mapped  | Some   | True  | False     | All public methods        |
     +---------------+--------+-------+-----------+---------------------------+

@@ -228,9 +228,10 @@ Type aliases: `IpcHandler`, `NavigationHandler`, `PageLoadHandler`, `TitleChange
 - **Windows** — WebView2 Runtime required; systems without it fail hard with `WebViewCreationError` (install link in the message; no fallback engine)
 - **Linux** — source install only (no PyPI wheel); **best-effort** in v0.0.x (not a wheel release target). CI runs the integration suite under Xvfb; real desktops may still differ
 - **DevTools** — macOS uses private APIs; avoid in Mac App Store release builds
-- **macOS input** — Tk text widgets and the WebView share one window; tkwry routes focus automatically (see [macOS embedding](#macos-embedding)). IME and other advanced input may still differ from a standalone browser
+- **macOS input / IME** — Tk widgets (`Entry`, `Text`, …) and the WebView share one window; tkwry routes focus automatically (see [macOS embedding](#macos-embedding)). **Not** Safari-parity: mid-composition focus switches, candidate-window placement, and dead keys can mis-route or cancel composition when the first responder flips between Tcl and `WKWebView`. Prefer finishing IME input in one surface before changing focus
 - **macOS import order** — import `tkwry` before any library that initializes AppKit / `NSApplication`, or you may see a double titlebar strip (see [macOS embedding](#macos-embedding) and [`examples/macos_double_titlebar_repro.py`](examples/macos_double_titlebar_repro.py))
-- **`url()` on macOS** — may be `None` for inline HTML or when WKWebView has no document `NSURL` (not an error; use `load_url` / eval when you need a concrete URL)
+- **`url()` on macOS** — may be `None` for inline HTML (`html=` / `load_html`) or when WKWebView has no document `NSURL` (not an error). After `load_url`, `url` becomes the concrete URI; use that or `eval` when you need a stable locator
+- **Hidden Notebook tabs** — inactive tabs call `set_visible(False)` so the native view is hidden (essential on macOS, where tabs share one toplevel `NSView`). `ready` can stay `True` while unmapped; `eval_js` may still succeed — prefer running visible work after the tab is selected again
 - **Drag & drop** — drop target is the WebView area only (not arbitrary Tk widgets; use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for those)
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
@@ -255,11 +256,15 @@ tkwry works around this by:
 2. Positioning it with `set_bounds` to match your `Frame` (`<Configure>`)
 3. Hiding it with `set_visible(False)` when the frame is unmapped (`<Unmap>`) — e.g. another `ttk.Notebook` tab is selected
 
-**Keyboard focus (macOS):** tkwry routes input between Tk widgets (`Entry`, `Text`, …) and the WebView automatically. Rust hit-tests clicks at the `NSEvent` layer and switches first responder; Python drains focus signals on the Tk main thread so keystrokes reach the correct target. Use `web.focus()` and `web.focus_parent()` when you need explicit control — see [`examples/url_demo.py`](examples/url_demo.py). On macOS, `focused=True` is deferred until `<<WebViewReady>>` (then `focus()` runs automatically); call `focus()` yourself after layout changes. IME and other advanced input may still behave differently than in a standalone browser.
+**Keyboard focus (macOS):** tkwry routes input between Tk widgets (`Entry`, `Text`, …) and the WebView automatically. Rust hit-tests clicks at the `NSEvent` layer and switches first responder; Python drains focus signals on the Tk main thread so keystrokes reach the correct target. Use `web.focus()` and `web.focus_parent()` when you need explicit control — see [`examples/url_demo.py`](examples/url_demo.py). On macOS, `focused=True` is deferred until `<<WebViewReady>>` (then `focus()` runs automatically); call `focus()` yourself after layout changes.
+
+**IME (macOS):** Composition stays with whichever surface is first responder. Switching focus mid-composition (Tk ↔ WebView), or relying on the system candidate window while both surfaces compete for keys, can cancel or mis-deliver input compared with Safari. This is **not** a v0.1 goal — work around by completing composition before changing focus, or keep IME-heavy editing in one surface.
 
 **Import order (macOS):** Import `tkwry` **before** any library that touches `AppKit` / `NSApplication` (e.g. `from AppKit import NSApp` or `NSApplication.sharedApplication()`). If full AppKit starts first, macOS may reserve automatic window-tab chrome and you can see a **double titlebar** strip. On import, tkwry disables process-level automatic window tabbing on the main thread (must run before `NSApplication` initializes). See [Known limitations](#known-limitations) and [`examples/macos_double_titlebar_repro.py`](examples/macos_double_titlebar_repro.py).
 
 **Window tabbing disable:** If the per-window tabbing disable during WebView create fails, tkwry logs to stderr and retries asynchronously (Python `<Map>` / deferred hooks). This is non-fatal and does not raise `WebViewCreationError`.
+
+**Notebook / tabs:** Selecting another `ttk.Notebook` tab unmaps the host frame; tkwry hides that WebView with `set_visible(False)` and shows it again on `<Map>`. On macOS this is required because child frames share the toplevel content `NSView`. `ready` remains layout-based (it can stay `True` while a tab is hidden); see [Known limitations](#known-limitations).
 
 **You do not need extra code for tabs or panes** — see [`examples/multi_demo.py`](examples/multi_demo.py). IPC, page-load, title, eval, and drag-and-drop handlers are dispatched on the **Tk main thread** via an internal queue (avoids WebKit deadlocks). `on_navigation` and `on_new_window` are synchronous WebKit-thread hooks — see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks).
 

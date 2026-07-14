@@ -26,6 +26,40 @@ def test_create_with_html_and_destroy(tk_root) -> None:
     frame.destroy()
 
 
+def test_url_none_for_inline_html_then_concrete_after_load_url(
+    tk_root, tmp_path: Path
+) -> None:
+    """Inline HTML has no document URL; ``load_url`` must expose a concrete URI.
+
+    On macOS this is the non-panicking ``url()`` path (WKWebView.URL may be nil).
+    """
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<p>inline</p>")
+
+    assert wait_until(tk_root, lambda: web.ready, steps=200)
+    assert web.native is not None
+    assert web.native.url() is None
+    assert web.url is None
+
+    page = tmp_path / "concrete.html"
+    page.write_text("<p>file</p>", encoding="utf-8")
+    expected = page.absolute().as_uri()
+    web.load_url(str(page))
+
+    def url_ready() -> bool:
+        try:
+            return web.url == expected
+        except Exception:
+            return False
+
+    assert wait_until(tk_root, url_ready, steps=300), (
+        f"expected document URL {expected!r}, got {web.url!r}"
+    )
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_load_url_before_create_normalizes_pending(tk_root) -> None:
     frame = host_frame(tk_root)
     web = WebView(frame)
