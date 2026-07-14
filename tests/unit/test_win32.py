@@ -80,9 +80,7 @@ def test_try_create_hard_fails_when_runtime_missing(
     scheduled: list[int] = []
 
     monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setattr(
-        "tkwry._win32.is_webview2_runtime_available", lambda: False
-    )
+    monkeypatch.setattr("tkwry._win32.is_webview2_runtime_available", lambda: False)
     monkeypatch.setattr(WebView, "_try_create", _real_try_create)
     monkeypatch.setattr(
         web, "_schedule_try_create", lambda **_k: scheduled.append(1), raising=False
@@ -113,9 +111,7 @@ def test_try_create_hard_fails_on_missing_hresult(
         raise RuntimeError("WebView2 error: HRESULT(0x80070002)")
 
     monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setattr(
-        "tkwry._win32.is_webview2_runtime_available", lambda: True
-    )
+    monkeypatch.setattr("tkwry._win32.is_webview2_runtime_available", lambda: True)
     monkeypatch.setattr("tkwry.webview.NativeWebView", boom)
     monkeypatch.setattr(WebView, "_try_create", _real_try_create)
     monkeypatch.setattr(

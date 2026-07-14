@@ -1866,7 +1866,7 @@ mod tests {
         let mut callbacks = HashMap::new();
         let dropped = AtomicU64::new(0);
         Python::attach(|py| {
-            let cb = py.None().into();
+            let cb = py.None();
             callbacks.insert(
                 1,
                 (
@@ -1874,7 +1874,7 @@ mod tests {
                     Instant::now() - EVAL_CALLBACK_TIMEOUT - Duration::from_secs(1),
                 ),
             );
-            callbacks.insert(2, (py.None().into(), Instant::now()));
+            callbacks.insert(2, (py.None(), Instant::now()));
         });
         prune_stale_eval_callbacks(&mut callbacks, &dropped);
         assert_eq!(dropped.load(Ordering::SeqCst), 1);

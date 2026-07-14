@@ -25,7 +25,7 @@ _SWP_FLAGS = _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE
 
 
 def _user32() -> Any:
-    return ctypes.windll.user32
+    return ctypes.windll.user32  # type: ignore[attr-defined]
 
 
 def _child_hwnds(parent_hwnd: int) -> list[int]:
@@ -33,9 +33,12 @@ def _child_hwnds(parent_hwnd: int) -> list[int]:
 
     found: list[int] = []
     user32 = _user32()
-    EnumChildProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    # WINFUNCTYPE exists on Windows; keep Mac/Linux mypy quiet.
+    enum_child_proc = ctypes.WINFUNCTYPE(  # type: ignore[attr-defined]
+        wintypes.BOOL, wintypes.HWND, wintypes.LPARAM
+    )
 
-    @EnumChildProc
+    @enum_child_proc
     def _callback(hwnd: wintypes.HWND, _lparam: wintypes.LPARAM) -> bool:
         found.append(int(hwnd))
         return True
