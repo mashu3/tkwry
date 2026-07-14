@@ -195,10 +195,6 @@ def test_two_webviews_sync_bounds_independently(tk_root) -> None:
     row.destroy()
 
 
-@pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK headless CI only; macOS and Windows run this in CI",
-)
 def test_grid_four_webviews_all_ready(tk_root) -> None:
     import tkinter as tk
 

@@ -588,10 +588,6 @@ def test_configure_triggers_create(tk_root) -> None:
     frame.destroy()
 
 
-@pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="WebKitGTK headless CI does not reliably deliver page-load callbacks",
-)
 def test_no_eval_callback_after_destroy(tk_root) -> None:
     results: list[str] = []
     frame = bare_frame(tk_root)
