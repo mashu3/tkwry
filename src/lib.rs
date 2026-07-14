@@ -1648,6 +1648,8 @@ fn pump_events(max_iterations: Option<usize>) -> bool {
     {
         const DEFAULT_ITERATIONS: usize = 128;
         const MAX_ITERATIONS: usize = 512;
+        // Tests / pumps may run before any WebView attaches GtkPump.
+        let _ = gtk::init();
         // Bound work per Tk tick — WebKitGTK can enqueue continuously and
         // an unbounded drain would hang nested inside Tcl's update().
         let limit = max_iterations

@@ -31,8 +31,9 @@ def pump(root, *, steps: int = 80, delay_ms: int = 50) -> None:
         root.update_idletasks()
         root.update()
         if sys.platform == "linux":
-            from tkwry._core import pump_events
+            from tkwry._core import ensure_gtk_init, pump_events
 
+            ensure_gtk_init()
             pump_events()
         root.after(delay_ms)
         root.update()

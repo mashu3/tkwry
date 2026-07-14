@@ -31,8 +31,9 @@ def pump_gtk_events(
     refcount: int = 1,
 ) -> bool:
     """Pump GTK with bounded bursts; return True when the queue still has work."""
-    from tkwry._core import pump_events
+    from tkwry._core import ensure_gtk_init, pump_events
 
+    ensure_gtk_init()
     burst_count = min(_PUMP_BURST_MAX, _PUMP_BURST_BASE + max(0, refcount - 1))
     if bursts > 1:
         burst_count = min(_PUMP_BURST_MAX, burst_count + bursts - 1)
@@ -47,8 +48,9 @@ def pump_gtk_events(
 
 def drain_gtk_with_tk(root: tk.Misc, *, rounds: int = 32) -> None:
     """Interleave bounded GTK pumps with Tk updates (test / teardown isolation)."""
-    from tkwry._core import pump_events
+    from tkwry._core import ensure_gtk_init, pump_events
 
+    ensure_gtk_init()
     for _ in range(rounds):
         try:
             root.update_idletasks()

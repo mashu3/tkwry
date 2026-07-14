@@ -1,4 +1,8 @@
-"""Ready events, initial size, and destroy safety."""
+"""Ready events, initial size, and destroy safety.
+
+Linux: most tests are enabled. ``test_no_eval_callback_after_destroy`` stays
+skipped (page-load callback delivery under Xvfb).
+"""
 
 from __future__ import annotations
 
@@ -10,13 +14,10 @@ from support.tk import (
     bare_frame,
     layout_bare_frame,
     pump,
-    skip_linux_lifecycle,
     wait_until,
 )
 
 from tkwry import WebView, WebViewDestroyedError, WebViewNotReadyError
-
-pytestmark = skip_linux_lifecycle
 
 
 def test_initial_size_creates_without_pack(tk_root) -> None:
