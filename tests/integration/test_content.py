@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -244,6 +245,13 @@ def test_ipc_handler_exception_does_not_stop_poll(tk_root) -> None:
     frame.destroy()
 
 
+@pytest.mark.skipif(
+    sys.platform == "linux",
+    reason=(
+        "WebKitGTK: IPC e2e hangs under Xvfb after earlier WebViews "
+        "(even in a fresh pytest process on GHA x64)"
+    ),
+)
 def test_ipc_post_message_reaches_handler(tk_root) -> None:
     """End-to-end: JS window.ipc.postMessage -> Tk-thread handler."""
     received: list[str] = []

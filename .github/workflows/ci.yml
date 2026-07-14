@@ -143,14 +143,18 @@ jobs:
           # also needs >64MB /dev/shm. Split suites and use a fixed Xvfb.
           Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX +render -noreset &
           sleep 3
+          # Leftover WebKitNetworkProcess zombies can lock later suites on GHA.
+          cleanup_webkit() { pkill -9 -f '[Ww]eb[Kk]it' 2>/dev/null || true; }
           pytest tests/unit/ -v --tb=short
-          # Split WebView-heavy modules: WebKitGTK can hang when too many
-          # native views are created in one pytest process.
-          pytest tests/integration/test_content.py -k "not ipc_post_message" -v --tb=short
-          pytest tests/integration/test_content.py::test_ipc_post_message_reaches_handler -v --tb=short
+          cleanup_webkit
+          pytest tests/integration/test_content.py -v --tb=short
+          cleanup_webkit
           pytest tests/integration/test_layout.py -v --tb=short
+          cleanup_webkit
           pytest tests/integration/test_viewport.py -v --tb=short
+          cleanup_webkit
           pytest tests/integration/test_multi_webview.py -v --tb=short
+          cleanup_webkit
           pytest tests/integration/test_lifecycle.py -v --tb=short
 
       - name: Run tests (Windows / macOS)
