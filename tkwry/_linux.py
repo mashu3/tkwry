@@ -10,9 +10,13 @@
    over forcing extra ``pump_events`` bursts.
 3. **Allowed direct** :func:`pump_gtk_events` — GtkPump's own tick, create-time
    GTK bootstrap before ``NativeWebView``, synchronous destroy flush after
-   detach, and tests.
+   detach, and tests. Nested WebView paths use
+   ``WebView._service_linux_events`` (queue-only when GtkPump is active).
 4. **No timing-skip loops** — do not fix page_load / multi-WebView flakes by
    adding one-off delay constants; fix attach / yield / single-drain instead.
+5. **Burst budget** — when GtkPump is inactive, prefer small ``passes`` with
+   modest ``bursts``; do not nest multi-pass × large-burst loops from create
+   or navigation once a pump is attached.
 """
 
 from __future__ import annotations

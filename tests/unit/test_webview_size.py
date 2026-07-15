@@ -1002,6 +1002,75 @@ def test_stop_event_poll_if_idle_keeps_active_during_teardown(tk_root) -> None:
     assert web._event_poll_active is False
 
 
+def test_service_linux_events_queue_only_when_gtk_pump_active(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    monkeypatch.setattr(sys, "platform", "linux")
+    pumps: list[object] = []
+    delivers: list[int] = []
+
+    monkeypatch.setattr(
+        "tkwry._linux.GtkPump.is_active_for",
+        classmethod(lambda cls, _w: True),
+    )
+    monkeypatch.setattr(
+        "tkwry._linux.pump_gtk_unless_active",
+        lambda *_a, **k: pumps.append(k) or False,
+        raising=False,
+    )
+    monkeypatch.setattr(web, "_deliver_async_event_queues", lambda: delivers.append(1))
+
+    web._service_linux_events(gtk_rounds=32, passes=4)
+
+    assert pumps == []
+    assert delivers == [1]
+
+
+def test_service_linux_events_pumps_when_gtk_pump_inactive(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    monkeypatch.setattr(sys, "platform", "linux")
+    pumps: list[dict[str, object]] = []
+    delivers: list[int] = []
+
+    monkeypatch.setattr(
+        "tkwry._linux.GtkPump.is_active_for",
+        classmethod(lambda cls, _w: False),
+    )
+    monkeypatch.setattr(
+        "tkwry._linux.pump_gtk_unless_active",
+        lambda *_a, **k: pumps.append(k) or False,
+        raising=False,
+    )
+    monkeypatch.setattr(web, "_deliver_async_event_queues", lambda: delivers.append(1))
+
+    web._service_linux_events(gtk_rounds=3, passes=2)
+
+    assert pumps == [{"bursts": 3}, {"bursts": 3}]
+    assert delivers == [1, 1]
+
+
+def test_drain_after_navigation_delegates_to_service_linux(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        web,
+        "_service_linux_events",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    web._drain_after_navigation()
+
+    assert calls == [{"gtk_rounds": 1, "passes": 4}]
+
+
 def test_unmap_does_not_detach_gtk_pump(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

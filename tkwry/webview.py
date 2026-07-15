@@ -2005,13 +2005,22 @@ class WebView:
         if self._drag_drop_handler is not None:
             self._deliver_drag_drop_events()
 
-    def _service_linux_events(self, *, gtk_rounds: int = 32, passes: int = 1) -> None:
+    def _service_linux_events(self, *, gtk_rounds: int = 1, passes: int = 1) -> None:
+        """Deliver async queues; pump GTK only when GtkPump is not already draining.
+
+        When ``GtkPump`` is active for this frame's toplevel, run a **single**
+        queue flush and return (no nested ``pump_events``). When inactive, pump
+        up to *gtk_rounds* bursts per pass for *passes* rounds, then deliver.
+        """
         if sys.platform != "linux" or self._destroyed:
             return
-        from tkwry._linux import pump_gtk_unless_active
+        from tkwry._linux import GtkPump, pump_gtk_unless_active
 
-        for _ in range(passes):
-            # Shared GtkPump tick owns ongoing drains; only pump when inactive.
+        if GtkPump.is_active_for(self._frame):
+            self._deliver_async_event_queues()
+            return
+
+        for _ in range(max(1, passes)):
             pump_gtk_unless_active(self._frame, bursts=gtk_rounds)
             self._deliver_async_event_queues()
 
@@ -2044,14 +2053,9 @@ class WebView:
             self._service_linux_events()
 
     def _drain_after_navigation(self) -> None:
-        """Bounded GTK pump + queue delivery after navigation."""
-        if sys.platform != "linux" or self._destroyed:
-            return
-        from tkwry._linux import pump_gtk_unless_active
-
-        for _ in range(4):
-            pump_gtk_unless_active(self._frame)
-            self._deliver_async_event_queues()
+        """Post-nav flush via :meth:`_service_linux_events` (queue-only if active)."""
+        # Inactive pump: a few light passes; active GtkPump: one queue deliver.
+        self._service_linux_events(gtk_rounds=1, passes=4)
 
     def _register_pending_eval(
         self,
@@ -2342,8 +2346,8 @@ class WebView:
         if self._needs_event_poll():
             self._ensure_event_poll()
             if sys.platform == "linux":
-                # One kick + queue flush; GtkPump owns ongoing drains when active.
-                self._service_linux_events(gtk_rounds=32, passes=2)
+                # GtkPump usually active after attach → queue-only; else one kick.
+                self._service_linux_events(gtk_rounds=32, passes=1)
         self._maybe_fire_ready()
 
     def _run_eval_js(
