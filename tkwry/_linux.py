@@ -1,4 +1,19 @@
-"""Linux-specific event-loop helpers for Gtk/WebKitGTK."""
+"""Linux-specific event-loop helpers for Gtk/WebKitGTK.
+
+**Pump policy (keep #7 / GtkPump changes aligned here):**
+
+1. **One drain per toplevel** — ``GtkPump`` owns the scheduled tick while any
+   WebView on that root is attached (``refcount > 0``).
+2. **No nested busy pumps that starve Tk** — call sites outside the tick must
+   use :func:`pump_gtk_unless_active` so a live GtkPump is not doubled from
+   WebView poll / navigation / wait helpers. Prefer delivering async queues
+   over forcing extra ``pump_events`` bursts.
+3. **Allowed direct** :func:`pump_gtk_events` — GtkPump's own tick, create-time
+   GTK bootstrap before ``NativeWebView``, synchronous destroy flush after
+   detach, and tests.
+4. **No timing-skip loops** — do not fix page_load / multi-WebView flakes by
+   adding one-off delay constants; fix attach / yield / single-drain instead.
+"""
 
 from __future__ import annotations
 
@@ -44,6 +59,28 @@ def pump_gtk_events(
         else:
             break
     return backlog
+
+
+def pump_gtk_unless_active(
+    widget: tk.Misc,
+    *,
+    bursts: int = 1,
+    max_iterations: int | None = _PUMP_ITERATIONS,
+    refcount: int = 1,
+) -> bool:
+    """Ad-hoc GTK pump that no-ops when ``GtkPump`` already drains *widget*'s root.
+
+    Returns False when skipped (shared pump owns the drain) or when the queue
+    went idle after pumping. Nested WebView call sites should use this instead
+    of :func:`pump_gtk_events` so Xvfb multi-WebView paths do not starve Tk.
+    """
+    if GtkPump.is_active_for(widget):
+        return False
+    return pump_gtk_events(
+        bursts=bursts,
+        max_iterations=max_iterations,
+        refcount=refcount,
+    )
 
 
 def drain_gtk_with_tk(root: tk.Misc, *, rounds: int = 32) -> None:
@@ -101,7 +138,10 @@ def _gtk_pump_tick(root_key: int) -> None:
 
 
 class GtkPump:
-    """Pump GTK events via ``tkwry._core.pump_events`` while Tk runs."""
+    """One scheduled GTK drain per Tk toplevel while WebViews are attached.
+
+    See module docstring for the nesting / ``pump_gtk_unless_active`` rules.
+    """
 
     _by_root_key: dict[int, GtkPump] = {}
     # widget id -> (root_key, attach count for that widget)

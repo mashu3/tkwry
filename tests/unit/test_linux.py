@@ -547,6 +547,44 @@ def test_pump_gtk_events_scales_bursts_with_refcount(
     assert all(limit == 512 for limit in calls)
 
 
+def test_pump_gtk_unless_active_skips_when_gtk_pump_owns_drain(
+    tk_root,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tkwry._linux import GtkPump, pump_gtk_unless_active
+
+    calls = {"n": 0}
+
+    def track_pump(**_kwargs: object) -> bool:
+        calls["n"] += 1
+        return False
+
+    monkeypatch.setattr("tkwry._linux.pump_gtk_events", track_pump, raising=False)
+    monkeypatch.setattr(GtkPump, "is_active_for", classmethod(lambda cls, _w: True))
+
+    assert pump_gtk_unless_active(tk_root) is False
+    assert calls["n"] == 0
+
+
+def test_pump_gtk_unless_active_pumps_when_inactive(
+    tk_root,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tkwry._linux import GtkPump, pump_gtk_unless_active
+
+    calls = {"n": 0}
+
+    def track_pump(**_kwargs: object) -> bool:
+        calls["n"] += 1
+        return True
+
+    monkeypatch.setattr("tkwry._linux.pump_gtk_events", track_pump, raising=False)
+    monkeypatch.setattr(GtkPump, "is_active_for", classmethod(lambda cls, _w: False))
+
+    assert pump_gtk_unless_active(tk_root, bursts=4) is True
+    assert calls["n"] == 1
+
+
 def test_gtk_pump_tick_pumps_multiple_passes_when_backlog(
     tk_root,
     monkeypatch: pytest.MonkeyPatch,

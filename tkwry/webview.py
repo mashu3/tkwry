@@ -1614,9 +1614,9 @@ class WebView:
             if self._should_keep_polling() or self._event_poll_active:
                 self._poll_events()
         if sys.platform == "linux":
-            from tkwry._linux import pump_gtk_events
+            from tkwry._linux import pump_gtk_unless_active
 
-            pump_gtk_events()
+            pump_gtk_unless_active(self._frame)
         try:
             root.update()
         except tk.TclError:
@@ -2008,10 +2008,11 @@ class WebView:
     def _service_linux_events(self, *, gtk_rounds: int = 32, passes: int = 1) -> None:
         if sys.platform != "linux" or self._destroyed:
             return
-        from tkwry._linux import pump_gtk_events
+        from tkwry._linux import pump_gtk_unless_active
 
         for _ in range(passes):
-            pump_gtk_events(bursts=gtk_rounds)
+            # Shared GtkPump tick owns ongoing drains; only pump when inactive.
+            pump_gtk_unless_active(self._frame, bursts=gtk_rounds)
             self._deliver_async_event_queues()
 
     def _schedule_post_navigation_drain(self) -> None:
@@ -2046,10 +2047,10 @@ class WebView:
         """Bounded GTK pump + queue delivery after navigation."""
         if sys.platform != "linux" or self._destroyed:
             return
-        from tkwry._linux import pump_gtk_events
+        from tkwry._linux import pump_gtk_unless_active
 
         for _ in range(4):
-            pump_gtk_events()
+            pump_gtk_unless_active(self._frame)
             self._deliver_async_event_queues()
 
     def _register_pending_eval(
@@ -2175,10 +2176,9 @@ class WebView:
             # GtkPump already drains the shared GTK context for this toplevel.
             # Nested full bursts from every 1ms WebView poll starve Tk when
             # multiple views keep events_pending under Xvfb.
-            if not GtkPump.is_active_for(self._frame):
-                from tkwry._linux import pump_gtk_events
+            from tkwry._linux import pump_gtk_unless_active
 
-                pump_gtk_events()
+            pump_gtk_unless_active(self._frame)
         elif sys.platform == "darwin":
             _mac_service_wakeup(self._toplevel)
         else:
@@ -2342,8 +2342,8 @@ class WebView:
         if self._needs_event_poll():
             self._ensure_event_poll()
             if sys.platform == "linux":
-                for _ in range(3):
-                    self._service_linux_events(gtk_rounds=32, passes=2)
+                # One kick + queue flush; GtkPump owns ongoing drains when active.
+                self._service_linux_events(gtk_rounds=32, passes=2)
         self._maybe_fire_ready()
 
     def _run_eval_js(
