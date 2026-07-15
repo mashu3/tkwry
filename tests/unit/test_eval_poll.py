@@ -294,6 +294,7 @@ def test_drain_drops_native_eval_when_epoch_mismatches(
     assert not web._native_eval_wait
     assert web._eval_epoch == wait_epoch + 1
 
+
 def test_poll_events_expires_stale_eval_callbacks(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
