@@ -6,17 +6,39 @@
    WebView on that root is attached (``refcount > 0``).
 2. **No nested busy pumps that starve Tk** — call sites outside the tick must
    use :func:`pump_gtk_unless_active` so a live GtkPump is not doubled from
-   WebView poll / navigation / wait helpers. Prefer delivering async queues
-   over forcing extra ``pump_events`` bursts.
-3. **Allowed direct** :func:`pump_gtk_events` — GtkPump's own tick, create-time
-   GTK bootstrap before ``NativeWebView``, synchronous destroy flush after
-   detach, and tests. Nested WebView paths use
+   WebView poll / navigation / wait / create / destroy helpers. Prefer
+   delivering async queues over forcing extra ``pump_events`` bursts.
+3. **Allowed direct** :func:`pump_gtk_events` — GtkPump's own tick,
+   :func:`drain_gtk_with_tk` (tests / teardown isolation), and unit tests.
+   Nested WebView paths use ``pump_gtk_unless_active`` or
    ``WebView._service_linux_events`` (queue-only when GtkPump is active).
 4. **No timing-skip loops** — do not fix page_load / multi-WebView flakes by
    adding one-off delay constants; fix attach / yield / single-drain instead.
 5. **Burst budget** — when GtkPump is inactive, prefer small ``passes`` with
    modest ``bursts``; do not nest multi-pass × large-burst loops from create
    or navigation once a pump is attached.
+
+**``webview.py`` call-site inventory:**
+
++-------------------------------+----------------------------------+
+| Site                          | Role                             |
++===============================+==================================+
+| GtkPump tick                  | Owns ongoing drain (direct)      |
++-------------------------------+----------------------------------+
+| create bootstrap              | ``pump_gtk_unless_active``       |
+|                               | **before** attach (first root    |
+|                               | pumps; sibling pump skips)       |
++-------------------------------+----------------------------------+
+| destroy flush after detach    | ``pump_gtk_unless_active``       |
+|                               | (last view pumps; siblings skip) |
++-------------------------------+----------------------------------+
+| ``_service_linux_events``     | Nested nav / create / finish     |
+|                               | (queue-only when active)         |
++-------------------------------+----------------------------------+
+| poll / wait_until_ready       | ``pump_gtk_unless_active``       |
++-------------------------------+----------------------------------+
+| ``drain_gtk_with_tk``         | Tests / teardown isolation only  |
++-------------------------------+----------------------------------+
 """
 
 from __future__ import annotations

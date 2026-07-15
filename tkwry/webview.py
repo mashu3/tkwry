@@ -449,7 +449,10 @@ class WebView:
        ``_try_create`` as ``_initial_load``.
     2. **Post-ready** — after native creation, ``_run_initial_load`` is
        scheduled once (delayed) when the host frame is viewable with real
-       geometry.
+       geometry. On **Linux**, that path queues via ``_set_pending_load`` +
+       ``_dispatch_pending_load`` so WebKitGTK / place layouts flush through
+       the GTK pump (same coalescing path as user ``load_*``). Other
+       platforms call the native load directly.
     3. **User ``load_*`` last-wins** — :meth:`load_url` / :meth:`load_html`
        supersede any pending constructor load and coalesce rapid calls (only
        the final URL/HTML is applied). Write paths go through
@@ -994,12 +997,14 @@ class WebView:
         if sys.platform == "linux":
             GtkPump.detach(self._frame)
             if had_native or self._native_teardown_pending is not None:
-                from tkwry._linux import pump_gtk_events
+                from tkwry._linux import pump_gtk_unless_active
 
+                # After detach: last view still needs a sync flush; siblings keep
+                # GtkPump so unless_active skips nested bursts.
                 for _ in range(_NATIVE_TEARDOWN_MAX_ATTEMPTS):
                     if self._native_teardown_pending is not None:
                         self._finish_native_teardown()
-                    pump_gtk_events()
+                    pump_gtk_unless_active(self._frame)
                     if self._native_teardown_pending is None:
                         break
                     try:
@@ -2272,10 +2277,12 @@ class WebView:
         kwargs["drag_drop_listening"] = self._drag_drop_handler is not None
 
         if sys.platform == "linux":
-            self._attach_gtk_pump_for_native()
-            from tkwry._linux import pump_gtk_events
+            from tkwry._linux import pump_gtk_unless_active
 
-            pump_gtk_events(bursts=20)
+            # Bootstrap before attach: first root pumps; a live sibling GtkPump
+            # is not doubled (unless_active no-ops).
+            pump_gtk_unless_active(self._frame, bursts=20)
+            self._attach_gtk_pump_for_native()
             self._ensure_tk_wakeup_pipe()
 
         if sys.platform == "win32":
