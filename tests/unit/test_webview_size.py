@@ -610,6 +610,22 @@ def test_maybe_fire_ready_fires_once_after_unmap_remap(
     assert web._ready_pending
 
 
+def test_sync_bounds_and_stacking_tries_ready_even_when_hidden(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ready funnel: stacking helper always tries ready (layout axis ≠ map)."""
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    web._webview = object()  # type: ignore[assignment]
+    tried: list[bool] = []
+    monkeypatch.setattr(web, "_sync_bounds", lambda: False)
+    monkeypatch.setattr(web, "_schedule_stacking_sync", lambda: None)
+    monkeypatch.setattr(web, "_maybe_fire_ready", lambda: tried.append(True))
+
+    assert web._sync_bounds_and_stacking() is False
+    assert tried == [True]
+
+
 def test_bind_after_ready_flag_before_idle_fires_once(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

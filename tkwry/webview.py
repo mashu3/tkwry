@@ -467,7 +467,8 @@ class WebView:
 
     **Ready** (``<<WebViewReady>>`` / :meth:`when_ready`): fires once per
     instance when the native view first becomes laid out; unmap/remap does not
-    re-fire the event.
+    re-fire the event. Layout-change paths funnel through
+    ``_sync_bounds_and_stacking`` (plus create) into ``_maybe_fire_ready``.
 
     **Page load** (``on_page_load``): fires ``Started`` and ``Finished`` for
     every navigation. Events are buffered (up to a fixed cap) until a handler
@@ -635,21 +636,18 @@ class WebView:
         self._frame.pack(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
-        self._maybe_fire_ready()
 
     def grid(self, **kwargs) -> None:
         self._require_not_destroyed("grid")
         self._frame.grid(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
-        self._maybe_fire_ready()
 
     def place(self, **kwargs) -> None:
         self._require_not_destroyed("place")
         self._frame.place(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
-        self._maybe_fire_ready()
 
     def __repr__(self) -> str:
         self._require_tk_thread()
@@ -2506,12 +2504,14 @@ class WebView:
     def _deferred_sync_bounds(self) -> None:
         self._bounds_sync_scheduled = False
         self._sync_bounds_and_stacking()
-        self._maybe_fire_ready()
 
     def _sync_bounds_and_stacking(self) -> bool:
+        """Push bounds/visibility, then try ready (layout axis; ignore map hide)."""
         synced = self._sync_bounds()
         if synced:
             self._schedule_stacking_sync()
+        # Funnel: even when HIDDEN (sync False), layout-ready still fires once.
+        self._maybe_fire_ready()
         return synced
 
     def _schedule_stacking_sync(self) -> None:
@@ -2580,17 +2580,14 @@ class WebView:
             self._schedule_try_create()
         elif self._bounds_size() is not None:
             self._sync_bounds_and_stacking()
-            self._maybe_fire_ready()
         else:
             self._schedule_bounds_sync()
-            self._maybe_fire_ready()
 
     def _on_map(self, event: tk.Event) -> None:
         if event.widget is not self._frame or self._destroyed:
             return
         self._ensure_gtk_pump_attached()
         self._schedule_bounds_sync()
-        self._maybe_fire_ready()
         self._track_after(self._frame.after_idle(self._run_initial_load))
 
     def _on_unmap(self, event: tk.Event) -> None:
