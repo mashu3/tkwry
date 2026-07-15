@@ -1081,6 +1081,45 @@ def test_try_create_retries_after_native_failure(
     assert scheduled == [1]
 
 
+@pytest.mark.parametrize("should_show", [True, False])
+def test_try_create_passes_visible_from_frame_should_show(
+    tk_root, monkeypatch: pytest.MonkeyPatch, should_show: bool
+) -> None:
+    """Create kwargs ``visible`` follows the map axis, not layout ``ready``."""
+    from unittest.mock import MagicMock
+
+    frame = tk.Frame(tk_root, width=400, height=300)
+    frame.pack_propagate(False)
+    frame.pack()
+    tk_root.update_idletasks()
+    monkeypatch.setattr(frame, "after_idle", lambda _fn: None)
+    web = WebView(frame, width=400, height=300)
+    captured: list[bool] = []
+
+    def fake_native(*_args: object, **kwargs: object) -> MagicMock:
+        captured.append(bool(kwargs["visible"]))
+        native = MagicMock()
+        native.is_alive.return_value = False
+        return native
+
+    monkeypatch.setattr("tkwry.webview.NativeWebView", fake_native)
+    monkeypatch.setattr(WebView, "_try_create", _real_try_create)
+    monkeypatch.setattr(web, "_frame_should_show", lambda: should_show)
+    monkeypatch.setattr(web, "_sync_bounds", lambda: True)
+    monkeypatch.setattr(web, "_maybe_fire_ready", lambda: None)
+    monkeypatch.setattr(web, "_schedule_initial_load", lambda: None)
+    monkeypatch.setattr(web, "_ensure_event_poll", lambda: None)
+    monkeypatch.setattr(web, "_needs_event_poll", lambda: False)
+    if sys.platform == "darwin":
+        monkeypatch.setattr("tkwry.webview._ensure_mac_wakeup_pipe", lambda *_a: None)
+        monkeypatch.setattr("tkwry.webview._ensure_mac_pump", lambda *_a: None)
+
+    web._try_create()
+
+    assert captured == [should_show]
+    assert web._webview is not None
+
+
 def test_flush_load_retries_without_clearing_pending_on_failure(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

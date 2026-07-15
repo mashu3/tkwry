@@ -2204,6 +2204,7 @@ class WebView:
         kwargs: dict = {
             "width": width,
             "height": height,
+            # Map axis only (Notebook / unmapped): not the layout ``ready`` contract.
             "visible": self._frame_should_show(),
             "devtools": self._devtools,
             "focused": self._focused,
