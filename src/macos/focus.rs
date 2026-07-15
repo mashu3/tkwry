@@ -20,6 +20,8 @@
 //! | Web + Tab/Esc | `handle_keydown` **and** Python key guard | Rust clears wants + `mac_tk_unfocus`; Python may `focus_parent` (intentional dual path) |
 //! | Pending Tcl unfocus | Rust flag + pipe | `_drain_mac_tk_unfocus` → `_release_tk_keyboard_focus` |
 //! | Key steal block | Python `_mac_web_key_guard` | Web-active → `"break"` (Tab/Esc exempt) |
+//! | Cache query (no Tcl SE) | Python `_mac_web_input_active` | Refresh cache ≡ OR(natives) only |
+//! | Cache sync + rising edge | Python `_sync_mac_web_input_cache` | After activate/wakeup: Idle→Web releases Tcl focus |
 //!
 //! Flag identity: `web_wants_keyboard` ≡ `native.mac_web_input_active()` ≡
 //! toplevel `_tkwry_mac_web_input_active` (OR of natives after sync).

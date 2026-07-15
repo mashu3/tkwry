@@ -104,7 +104,10 @@ def test_teardown_unbinds_via_toplevel_when_bind_root_differs(
 def test_mac_web_input_active_reads_native_state(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(_macos, "_release_tk_keyboard_focus", lambda _t: None)
+    releases: list[bool] = []
+    monkeypatch.setattr(
+        _macos, "_release_tk_keyboard_focus", lambda _t: releases.append(True)
+    )
     active_native = MagicMock()
     active_native.mac_web_input_active.return_value = True
     inactive_native = MagicMock()
@@ -123,6 +126,8 @@ def test_mac_web_input_active_reads_native_state(
     active_native.mac_web_input_active.return_value = False
     assert _macos._mac_web_input_active(tk_root) is False
     assert tk_root._tkwry_mac_web_input_active is False
+    # Query must not steal Tcl focus on Idle→Web (ownership table).
+    assert releases == []
 
 
 def test_mac_web_input_cache_matches_or_of_natives(
@@ -157,10 +162,35 @@ def test_mac_web_input_cache_matches_or_of_natives(
     assert tk_root._tkwry_mac_web_input_active is False
 
 
+def test_sync_mac_web_input_cache_releases_tcl_on_idle_to_web(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    releases: list[bool] = []
+    monkeypatch.setattr(
+        _macos, "_release_tk_keyboard_focus", lambda _t: releases.append(True)
+    )
+    native = MagicMock()
+    native.mac_web_input_active.return_value = True
+    tk_root._tkwry_mac_webviews = [SimpleNamespace(destroyed=False, native=native)]
+    tk_root._tkwry_mac_web_input_active = False
+
+    _macos._sync_mac_web_input_cache(tk_root)
+
+    assert tk_root._tkwry_mac_web_input_active is True
+    assert releases == [True]
+
+    releases.clear()
+    _macos._sync_mac_web_input_cache(tk_root)
+    assert releases == []  # already active: no second rising edge
+
+
 def test_set_mac_webviews_input_active_syncs_cache_from_natives(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(_macos, "_release_tk_keyboard_focus", lambda _t: None)
+    releases: list[bool] = []
+    monkeypatch.setattr(
+        _macos, "_release_tk_keyboard_focus", lambda _t: releases.append(True)
+    )
     native = MagicMock()
     native.mac_web_input_active.return_value = True
     web = SimpleNamespace(destroyed=False, native=native)
@@ -171,6 +201,7 @@ def test_set_mac_webviews_input_active_syncs_cache_from_natives(
 
     native.set_mac_web_input_active.assert_called_once_with(True)
     assert tk_root._tkwry_mac_web_input_active is True
+    assert releases == [True]
 
 
 def test_widget_accepts_tk_keys_includes_listbox_and_treeview(tk_root) -> None:

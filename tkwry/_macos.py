@@ -30,6 +30,12 @@ table before patching ``focus.rs`` or this module — change both together):
 | Key steal block           | Python ``_mac_web_key_…`` | Web-active → ``"break"``   |
 |                           |                           | (Tab/Esc exempt)           |
 +---------------------------+---------------------------+---------------------------+
+| Cache query (no Tcl SE)   | ``_mac_web_input_active`` | Refresh cache ≡ OR(natives)|
+|                           |                           | only — no focus side effect|
++---------------------------+---------------------------+---------------------------+
+| Cache sync + rising edge  | ``_sync_mac_web_input_…`` | After activate/wakeup: if |
+|                           |                           | Idle→Web, release Tcl focus|
++---------------------------+---------------------------+---------------------------+
 
 Flag identity: Rust ``web_wants_keyboard`` ≡ ``native.mac_web_input_active()``
 ≡ toplevel ``_tkwry_mac_web_input_active`` (OR of natives after sync).
@@ -231,7 +237,15 @@ def _unbind_mac_global(
         pass
 
 
-def _mac_web_input_active(toplevel: tk.Misc) -> bool:
+def _refresh_mac_web_input_cache(
+    toplevel: tk.Misc, *, apply_rising_edge_unfocus: bool
+) -> bool:
+    """Refresh toplevel cache from natives; optionally apply Idle→Web Tcl unfocus.
+
+    Callers that only need the current owner must pass
+    ``apply_rising_edge_unfocus=False`` so key-guard / pump polls cannot steal
+    Tcl focus as a read side effect.
+    """
     was_active = getattr(toplevel, "_tkwry_mac_web_input_active", False)
     active = False
     for web in _mac_webviews(toplevel):
@@ -240,13 +254,19 @@ def _mac_web_input_active(toplevel: tk.Misc) -> bool:
             active = True
             break
     toplevel._tkwry_mac_web_input_active = active
-    if active and not was_active:
+    if apply_rising_edge_unfocus and active and not was_active:
         _release_tk_keyboard_focus(toplevel)
     return active
 
 
+def _mac_web_input_active(toplevel: tk.Misc) -> bool:
+    """Return whether any native wants keyboard; refresh cache without Tcl SE."""
+    return _refresh_mac_web_input_cache(toplevel, apply_rising_edge_unfocus=False)
+
+
 def _sync_mac_web_input_cache(toplevel: tk.Misc) -> None:
-    _mac_web_input_active(toplevel)
+    """Sync cache after activate/wakeup and apply Idle→Web Tcl unfocus."""
+    _refresh_mac_web_input_cache(toplevel, apply_rising_edge_unfocus=True)
 
 
 def _drain_mac_tk_unfocus(toplevel: tk.Misc) -> bool:
