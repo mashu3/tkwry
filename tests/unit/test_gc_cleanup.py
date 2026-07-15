@@ -161,6 +161,144 @@ def test_schedule_destroy_falls_back_when_after_unavailable(
     assert teardown_calls == [True]
 
 
+def test_atexit_drain_runs_destroy_on_tk_thread(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import weakref
+
+    from tkwry import webview as webview_mod
+
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    destroyed: list[bool] = []
+    original_destroy = web.destroy
+
+    def track_destroy() -> None:
+        destroyed.append(True)
+        original_destroy()
+
+    monkeypatch.setattr(web, "destroy", track_destroy, raising=False)
+    web._unbind_frame_events()
+    toplevel = frame.winfo_toplevel()
+    setattr(toplevel, "_tkwry_pending_destroy_webviews", [weakref.ref(web)])
+    previous = list(webview_mod._atexit_destroy_toplevels)
+    webview_mod._atexit_destroy_toplevels[:] = [weakref.ref(toplevel)]
+    try:
+        webview_mod._atexit_drain_pending_destroys()
+    finally:
+        webview_mod._atexit_destroy_toplevels[:] = previous
+
+    assert destroyed == [True]
+    assert web.destroyed is True
+
+
+def test_atexit_leftover_uses_teardown_not_bare_force(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Non-Tk atexit leftovers must use terminal teardown, not bare force."""
+    import weakref
+
+    from tkwry import webview as webview_mod
+
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    web._register_pending_eval(lambda _r: None, None)
+    epoch_before = web._eval_epoch
+
+    teardown_calls: list[bool] = []
+    force_calls: list[bool] = []
+
+    def track_teardown() -> None:
+        teardown_calls.append(True)
+        WebView._teardown_native_if_alive(web)
+
+    monkeypatch.setattr(
+        webview_mod.threading,
+        "get_ident",
+        lambda: web._tk_thread_id + 1,
+    )
+    monkeypatch.setattr(web, "_teardown_native_if_alive", track_teardown, raising=False)
+    monkeypatch.setattr(
+        web,
+        "_force_native_teardown",
+        lambda: force_calls.append(True),
+        raising=False,
+    )
+    # Skip the Tk update loop so leftovers hit _run_pending_webview_destroy.
+    monkeypatch.setattr(
+        tk_root,
+        "update",
+        lambda: (_ for _ in ()).throw(tk.TclError("closed")),
+        raising=False,
+    )
+
+    toplevel = frame.winfo_toplevel()
+    setattr(toplevel, "_tkwry_pending_destroy_webviews", [weakref.ref(web)])
+    previous = list(webview_mod._atexit_destroy_toplevels)
+    webview_mod._atexit_destroy_toplevels[:] = [weakref.ref(toplevel)]
+    try:
+        webview_mod._atexit_drain_pending_destroys()
+    finally:
+        webview_mod._atexit_destroy_toplevels[:] = previous
+
+    assert teardown_calls == [True]
+    assert force_calls == []
+    assert web._destroyed is True
+    assert web._eval_epoch == epoch_before + 1
+    assert not web._pending_eval_tokens
+
+
+def test_run_pending_webview_destroy_on_tk_thread(tk_root) -> None:
+    from tkwry.webview import _run_pending_webview_destroy
+
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    web._unbind_frame_events()
+
+    _run_pending_webview_destroy(web)
+
+    assert web.destroyed is True
+
+
+def test_run_pending_webview_destroy_off_thread_uses_teardown(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tkwry import webview as webview_mod
+    from tkwry.webview import _run_pending_webview_destroy
+
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    teardown_calls: list[bool] = []
+    destroy_calls: list[bool] = []
+
+    monkeypatch.setattr(
+        webview_mod.threading,
+        "get_ident",
+        lambda: web._tk_thread_id + 1,
+    )
+    monkeypatch.setattr(
+        web,
+        "_teardown_native_if_alive",
+        lambda: teardown_calls.append(True),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        web,
+        "destroy",
+        lambda: destroy_calls.append(True),
+        raising=False,
+    )
+
+    _run_pending_webview_destroy(web)
+
+    assert teardown_calls == [True]
+    assert destroy_calls == []
+
+
 def test_teardown_native_if_alive_drops_native_without_destroy(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

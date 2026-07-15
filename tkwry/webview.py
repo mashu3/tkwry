@@ -146,6 +146,12 @@ def _toplevel_wakeup_read_fd(toplevel: tk.Misc) -> int | None:
     return getattr(toplevel, "_tkwry_wake_read_fd", None)
 
 
+def _toplevel_wakeup_write_fd(toplevel: tk.Misc) -> int | None:
+    if sys.platform == "darwin":
+        return getattr(toplevel, "_tkwry_mac_wake_write_fd", None)
+    return getattr(toplevel, "_tkwry_wake_write_fd", None)
+
+
 def _pump_toplevel_wakeup_pipe(toplevel: tk.Misc) -> None:
     read_fd = _toplevel_wakeup_read_fd(toplevel)
     if read_fd is None:
@@ -158,6 +164,34 @@ def _pump_toplevel_wakeup_pipe(toplevel: tk.Misc) -> None:
                 break
     except (OSError, ValueError):
         pass
+
+
+def _run_pending_webview_destroy(web: WebView) -> None:
+    """Run a queued ``__del__`` destroy on the Tk thread or via emergency teardown.
+
+    Tk thread: cancel deferred callbacks then :meth:`WebView.destroy`.
+    Any other thread: :meth:`WebView._teardown_native_if_alive` so eval/ready
+    generation stays aligned. Never call bare ``_force_native_teardown`` here —
+    that path is native-only (teardown poll timeout).
+    """
+    if web._destroyed:
+        return
+    if threading.get_ident() == web._tk_thread_id:
+        try:
+            web._cancel_deferred_callbacks()
+            web.destroy()
+        except Exception:
+            traceback.print_exc()
+            if not web._destroyed:
+                try:
+                    web._teardown_native_if_alive()
+                except Exception:
+                    traceback.print_exc()
+        return
+    try:
+        web._teardown_native_if_alive()
+    except Exception:
+        traceback.print_exc()
 
 
 def _drain_toplevel_sync_hooks(toplevel: tk.Misc) -> None:
@@ -193,13 +227,9 @@ def _drain_pending_destroy_webviews(toplevel: tk.Misc) -> None:
         if threading.get_ident() != web._tk_thread_id:
             live.append(ref)
             continue
-        try:
-            web._cancel_deferred_callbacks()
-            web.destroy()
-        except Exception:
-            traceback.print_exc()
-            if not web._destroyed:
-                live.append(ref)
+        _run_pending_webview_destroy(web)
+        if not web._destroyed:
+            live.append(ref)
     if live:
         setattr(toplevel, "_tkwry_pending_destroy_webviews", live)
     elif hasattr(toplevel, "_tkwry_pending_destroy_webviews"):
@@ -245,17 +275,7 @@ def _atexit_drain_pending_destroys() -> None:
             web = pending_ref()
             if web is None or web._destroyed:
                 continue
-            if threading.get_ident() == web._tk_thread_id:
-                try:
-                    web._cancel_deferred_callbacks()
-                    web.destroy()
-                except Exception:
-                    traceback.print_exc()
-            else:
-                try:
-                    web._force_native_teardown()
-                except Exception:
-                    traceback.print_exc()
+            _run_pending_webview_destroy(web)
     _atexit_destroy_toplevels[:] = live
 
 
@@ -791,10 +811,7 @@ class WebView:
         def _run() -> None:
             if threading.get_ident() != tk_thread_id:
                 return
-            if self._destroyed:
-                return
-            self._cancel_deferred_callbacks()
-            self.destroy()
+            _run_pending_webview_destroy(self)
 
         if threading.get_ident() == tk_thread_id:
             try:
@@ -819,10 +836,7 @@ class WebView:
             _track_atexit_destroy_toplevel(toplevel)
             write_fd = self._tk_wakeup_write_fd
             if write_fd is None:
-                if sys.platform == "darwin":
-                    write_fd = getattr(toplevel, "_tkwry_mac_wake_write_fd", None)
-                else:
-                    write_fd = getattr(toplevel, "_tkwry_wake_write_fd", None)
+                write_fd = _toplevel_wakeup_write_fd(toplevel)
             if write_fd is None:
                 self._teardown_native_if_alive()
                 return
@@ -1693,10 +1707,8 @@ class WebView:
 
     def _ensure_tk_wakeup_pipe(self) -> None:
         toplevel = self._frame.winfo_toplevel()
-        if sys.platform == "darwin":
-            write_fd = getattr(toplevel, "_tkwry_mac_wake_write_fd", None)
-        else:
-            write_fd = getattr(toplevel, "_tkwry_wake_write_fd", None)
+        write_fd = _toplevel_wakeup_write_fd(toplevel)
+        if sys.platform != "darwin":
             if write_fd is None:
                 read_fd, write_fd = os.pipe()
                 setattr(toplevel, "_tkwry_wake_read_fd", read_fd)
