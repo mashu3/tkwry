@@ -243,6 +243,57 @@ def test_destroy_drops_pending_eval_callbacks(tk_root) -> None:
     assert results == []
 
 
+def test_teardown_native_clears_eval_and_ready_like_destroy(tk_root) -> None:
+    """Emergency teardown must share terminal bookkeeping with destroy()."""
+    _frame, web = _make_web(tk_root)
+    results: list[str] = []
+    web._register_pending_eval(results.append, None)
+    web._native_eval_wait[7] = (web._eval_epoch, 0, results.append, None)
+    web._pending_eval_js = ("1+1", None)
+    web._eval_js_scheduled = True
+    web._ready_delivered = True
+    web._ready_pending = True
+    web._ready_callbacks.append(lambda: results.append("ready"))
+    epoch_before = web._eval_epoch
+
+    web._teardown_native_if_alive()
+
+    assert web._destroyed is True
+    assert web._eval_epoch == epoch_before + 1
+    assert web._pending_eval_callbacks == 0
+    assert not web._pending_eval_tokens
+    assert not web._native_eval_wait
+    assert web._pending_eval_js is None
+    assert web._eval_js_scheduled is False
+    assert web._ready_delivered is False
+    assert web._ready_pending is False
+    assert web._ready_callbacks == []
+    assert results == []
+
+
+def test_drain_drops_native_eval_when_epoch_mismatches(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _make_web(tk_root)
+    _configure_poll_test(web, monkeypatch)
+    native = MagicMock()
+    web._webview = native
+    results: list[str] = []
+    py_token = web._register_pending_eval(results.append, None)
+    wait_epoch = web._eval_epoch
+    web._native_eval_wait[1] = (wait_epoch, py_token, results.append, None)
+    native.drain_eval_callbacks.return_value = [(1, results.append, "stale")]
+
+    # Generation bumped without clearing waits (destructive race); drain must drop.
+    web._eval_epoch = wait_epoch + 1
+    web._event_poll_active = True
+    web._poll_events()
+
+    assert results == []
+    assert py_token not in web._pending_eval_tokens
+    assert not web._native_eval_wait
+    assert web._eval_epoch == wait_epoch + 1
+
 def test_poll_events_expires_stale_eval_callbacks(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

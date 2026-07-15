@@ -419,6 +419,33 @@ class WebView:
     fire-and-forget (Tk idle, no return value). ``eval_js_with_callback`` is
     asynchronous; the callback receives the result string on the Tk main thread.
 
+    **Eval callback lifetime** (maintainers: triage double-callback / ghost
+    timeout regressions against this table before patching):
+
+    +------------------+-----------------------------------------------------+
+    | Token            | Role                                                |
+    +==================+=====================================================+
+    | ``_eval_epoch``  | Generation counter. Bumped by                       |
+    |                  | ``_invalidate_eval_generation`` on destroy /        |
+    |                  | emergency teardown. Idle runners and drain paths    |
+    |                  | drop work when ``wait_epoch != _eval_epoch``.       |
+    +------------------+-----------------------------------------------------+
+    | Python token     | Key in ``_pending_eval_tokens``                     |
+    |                  | ``(deadline, callback, on_error)``. Registered at   |
+    |                  | ``eval_js_with_callback``; released on deliver,     |
+    |                  | timeout (~30s), destroy, or failed native start.    |
+    +------------------+-----------------------------------------------------+
+    | Native token     | Key in ``_native_eval_wait``                        |
+    |                  | ``(epoch, py_token, callback, on_error)``. Set when |
+    |                  | Rust accepts the eval; drained on the Tk poll.      |
+    +------------------+-----------------------------------------------------+
+
+    Stop rules: ``_ensure_event_poll`` arms while handlers, pending evals, or
+    ``_native_teardown_pending`` remain; ``_stop_event_poll_if_idle`` clears
+    ``_event_poll_active`` when ``_should_keep_polling()`` is false. Timeout
+    and drain share one release path via ``_release_pending_eval`` so the user
+    callback cannot run twice.
+
     Call :meth:`destroy` or destroy the host frame to release the native view.
     After :meth:`destroy`, the instance cannot be reused; create a new
     ``WebView`` on the same or another frame instead.
@@ -816,24 +843,54 @@ class WebView:
         self._pending_eval_tokens.clear()
         self._native_eval_wait.clear()
 
-    def _teardown_native_if_alive(self) -> None:
-        """Release the native WebView when Tk teardown is impossible."""
-        if self._destroyed:
-            return
-        self._destroyed = True
-        self._invalidate_eval_generation()
+    def _begin_terminal_state(
+        self,
+        *,
+        count_eval_drops: bool,
+        clear_ready: bool,
+    ) -> None:
+        """Shared bookkeeping once ``_destroyed`` has been set to True.
+
+        Keeps :meth:`destroy` and :meth:`_teardown_native_if_alive` aligned so
+        eval / fire-and-forget JS / sync hooks cannot diverge per exit path.
+        """
+        self._invalidate_eval_generation(count_pending_drops=count_eval_drops)
+        self._pending_eval_js = None
+        self._eval_js_scheduled = False
         self._abort_sync_hooks()
+        if clear_ready:
+            self._ready_delivered = False
+            self._ready_pending = False
+            self._ready_callbacks.clear()
+
+    def _detach_from_host(self, *, unbind_events: bool) -> None:
+        """Drop frame-host claim and sync-hook registration (Tcl-safe-ish)."""
         try:
             _release_frame_host(self._frame, self)
         except Exception:
             pass
+        if unbind_events:
+            self._unbind_frame_events()
         _unregister_sync_hook_webview(self)
-        self._release_native_view(hide=False)
+
+    def _unregister_platform_webview(self) -> None:
         if sys.platform == "darwin":
             try:
                 _unregister_macos_webview(self)
             except Exception:
                 pass
+
+    def _teardown_native_if_alive(self) -> None:
+        """Release the native WebView when Tk teardown is impossible."""
+        if self._destroyed:
+            return
+        self._destroyed = True
+        # Emergency path: skip Tcl ``after`` cancel / frame unbind; still clear
+        # eval generation and ready callbacks so GC cannot revive work.
+        self._begin_terminal_state(count_eval_drops=False, clear_ready=True)
+        self._detach_from_host(unbind_events=False)
+        self._release_native_view(hide=False)
+        self._unregister_platform_webview()
         # Deferred native teardown still needs the poll (arm via release path).
         self._stop_event_poll_if_idle()
 
@@ -848,16 +905,8 @@ class WebView:
             return
         self._destroyed = True
         self._cancel_deferred_callbacks()
-        self._invalidate_eval_generation(count_pending_drops=True)
-        self._pending_eval_js = None
-        self._eval_js_scheduled = False
-        self._abort_sync_hooks()
-        self._ready_delivered = False
-        self._ready_pending = False
-        self._ready_callbacks.clear()
-        _release_frame_host(self._frame, self)
-        self._unbind_frame_events()
-        _unregister_sync_hook_webview(self)
+        self._begin_terminal_state(count_eval_drops=True, clear_ready=True)
+        self._detach_from_host(unbind_events=True)
         had_native = self._webview is not None
         self._release_native_view(hide=True)
         if self._tk_wakeup_write_fd is not None and sys.platform != "darwin":
@@ -866,9 +915,8 @@ class WebView:
                 _release_tk_wakeup_pipe(self._frame.winfo_toplevel())
             except tk.TclError:
                 pass
-        if sys.platform == "darwin":
-            _unregister_macos_webview(self)
-        elif sys.platform == "linux":
+        self._unregister_platform_webview()
+        if sys.platform == "linux":
             GtkPump.detach(self._frame)
             if had_native or self._native_teardown_pending is not None:
                 from tkwry._linux import pump_gtk_events
