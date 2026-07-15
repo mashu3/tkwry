@@ -46,6 +46,7 @@ try:
         PageLoadHandler,
         TitleChangedHandler,
         WebView,
+        WebViewPhase,
     )
 except ImportError as exc:
     _reraise_linux_core_build_hint(exc)
@@ -71,5 +72,6 @@ __all__ = [
     "WebViewCreationError",
     "WebViewDestroyedError",
     "WebViewNotReadyError",
+    "WebViewPhase",
     "__version__",
 ]

@@ -13,6 +13,7 @@ import tkinter as tk
 import traceback
 import weakref
 from collections.abc import Callable
+from enum import Enum
 from typing import Literal, TypeAlias, TypeVar, cast
 
 from tkwry._core import (
@@ -367,6 +368,23 @@ def _noop_native_eval_callback(_result: str) -> None:
     """Stub passed to Rust; Python delivers via ``_native_eval_wait``."""
 
 
+class WebViewPhase(Enum):
+    """Derived lifecycle phase for triage (not a write-side state machine).
+
+    Computed from ``_destroyed`` / ``_webview`` / layout / visibility flags.
+    Does **not** change the ``ready`` contract: ``ready`` stays layout-based,
+    while ``HIDDEN`` means the native view should be ``set_visible(False)``.
+    """
+
+    PRE_CREATE = "pre_create"
+    CREATE_FAILED = "create_failed"
+    NATIVE = "native"
+    READY = "ready"
+    HIDDEN = "hidden"
+    TEARING_DOWN = "tearing_down"
+    DESTROYED = "destroyed"
+
+
 class WebView:
     """Embed a system WebView (wry) inside an existing Tk ``Frame``.
 
@@ -378,30 +396,39 @@ class WebView:
     Python.
 
     **Lifecycle state** (maintainers: triage ``ready`` / initial load /
-    ``destroy`` regressions against this table before patching):
+    ``destroy`` regressions against this table and :class:`WebViewPhase`
+    before patching):
 
     +---------------+--------+-------+-----------+---------------------------+
-    | State         | native | ready | destroyed | Allowed public API        |
+    | Phase         | native | ready | destroyed | Allowed public API        |
     +===============+========+=======+===========+===========================+
-    | pre-create    | None   | False | False     | ``load_*``,               |
+    | PRE_CREATE    | None   | False | False     | ``load_*``,               |
     |               |        |       |           | ``wait_until_ready``,     |
     |               |        |       |           | handler setters,          |
     |               |        |       |           | ``bind`` / ``when_ready``,|
     |               |        |       |           | ``sync_bounds``,          |
     |               |        |       |           | ``destroy``               |
     +---------------+--------+-------+-----------+---------------------------+
-    | unmapped      | Some   | True*  | False     | Public APIs allowed;      |
-    | (hidden tab)  |        |       |           | native is                 |
+    | CREATE_FAILED | None   | False | False     | ``load_*`` / handlers     |
+    |               |        |       |           | raise                     |
+    |               |        |       |           | ``WebViewCreationError``  |
+    +---------------+--------+-------+-----------+---------------------------+
+    | NATIVE        | Some   | False | False     | Same as PRE_CREATE until  |
+    |               |        |       |           | layout is ready           |
+    +---------------+--------+-------+-----------+---------------------------+
+    | HIDDEN        | Some   | True* | False     | Public APIs allowed;      |
+    | (unmapped tab)|        |       |           | native is                 |
     |               |        |       |           | ``set_visible(False)``.   |
     |               |        |       |           | ``*`` ``ready`` follows   |
     |               |        |       |           | layout size, not map      |
     |               |        |       |           | state (Notebook tabs).    |
-    |               |        |       |           | Prefer calling after map  |
-    |               |        |       |           | for visible results.      |
     +---------------+--------+-------+-----------+---------------------------+
-    | ready+mapped  | Some   | True  | False     | All public methods        |
+    | READY         | Some   | True  | False     | All public methods        |
     +---------------+--------+-------+-----------+---------------------------+
-    | destroyed     | None   | —     | True      | None; raises              |
+    | TEARING_DOWN  | —      | —     | True      | None; poll drains native  |
+    |               |        |       |           | teardown only             |
+    +---------------+--------+-------+-----------+---------------------------+
+    | DESTROYED     | None   | —     | True      | None; raises              |
     |               |        |       |           | ``WebViewDestroyedError`` |
     +---------------+--------+-------+-----------+---------------------------+
 
@@ -615,16 +642,14 @@ class WebView:
 
     def __repr__(self) -> str:
         self._require_tk_thread()
-        if self._destroyed:
-            state = "destroyed"
+        phase = self.phase
+        if phase is WebViewPhase.DESTROYED or phase is WebViewPhase.TEARING_DOWN:
             url = None
         elif self._webview is None:
-            state = "pending"
             url = self._pending_url
             if url is None and self._pending_html is not None:
                 url = "<html>"
         else:
-            state = "ready"
             try:
                 url = self._webview.url()
             except Exception:
@@ -633,7 +658,30 @@ class WebView:
             frame = str(self._frame)
         except Exception:
             frame = "<unavailable>"
-        return f"<WebView state={state} url={url!r} frame={frame}>"
+        return f"<WebView phase={phase.value} url={url!r} frame={frame}>"
+
+    @property
+    def phase(self) -> WebViewPhase:
+        """Derived lifecycle phase (see :class:`WebViewPhase`).
+
+        Read-only snapshot of existing flags — not an independently mutated
+        state machine. ``ready`` remains layout-based; ``HIDDEN`` means the
+        host is not viewable enough to show the native child.
+        """
+        self._require_tk_thread()
+        if self._destroyed:
+            if self._native_teardown_pending is not None:
+                return WebViewPhase.TEARING_DOWN
+            return WebViewPhase.DESTROYED
+        if self._creation_error is not None:
+            return WebViewPhase.CREATE_FAILED
+        if self._webview is None:
+            return WebViewPhase.PRE_CREATE
+        if not self._layout_ready():
+            return WebViewPhase.NATIVE
+        if not self._frame_should_show():
+            return WebViewPhase.HIDDEN
+        return WebViewPhase.READY
 
     @property
     def ready(self) -> bool:

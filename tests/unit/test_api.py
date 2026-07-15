@@ -18,6 +18,7 @@ from tkwry import (
     PageLoadHandler,
     TitleChangedHandler,
     WebView,
+    WebViewPhase,
 )
 from tkwry._core import WebView as NativeWebView
 
@@ -67,6 +68,7 @@ WEBVIEW_PROPERTIES = (
     "native",
     "destroyed",
     "ready",
+    "phase",
     "creation_failed",
     "creation_error",
 )
@@ -93,6 +95,7 @@ def test_public_exports() -> None:
     assert PageLoadEvent is not None
     assert DragDropEvent is not None
     assert NewWindowResponse is not None
+    assert WebViewPhase is not None
     assert tkwry.WebViewNotReadyError is not None
     assert tkwry.WebViewCreationError is not None
     assert tkwry.WebViewDestroyedError is not None
@@ -107,12 +110,12 @@ def test_webview_repr_states(tk_root) -> None:
     web = WebView(frame, url="https://example.com")
     text = repr(web)
     assert "WebView" in text
-    assert "pending" in text
+    assert "phase=pre_create" in text
     assert "https://example.com" in text
     assert str(frame) in text
 
     web.destroy()
-    assert "destroyed" in repr(web)
+    assert "phase=destroyed" in repr(web)
     frame.destroy()
 
 
