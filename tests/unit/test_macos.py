@@ -252,6 +252,7 @@ def test_mac_pump_tick_avoids_zero_delay_when_unfocus_pending(
     web = SimpleNamespace(destroyed=False, native=MagicMock())
     tk_root._tkwry_mac_webviews = [web]  # type: ignore[list-item]
     monkeypatch.setattr(_macos, "_mac_service_wakeup", lambda _t: None)
+    monkeypatch.setattr(_macos, "_peel_stale_tcl_editable_focus", lambda _t: None)
     monkeypatch.setattr(_macos, "_mac_unfocus_pending", lambda _t: True)
     monkeypatch.setattr(_macos, "_mac_pipe_readable", lambda _t: False)
     monkeypatch.setattr(
@@ -273,6 +274,7 @@ def test_mac_pump_tick_stops_when_toplevel_destroyed(
     tk_root._tkwry_mac_webviews = [web]  # type: ignore[list-item]
     tk_root._tkwry_mac_pump_active = True
     monkeypatch.setattr(_macos, "_mac_service_wakeup", lambda _t: None)
+    monkeypatch.setattr(_macos, "_peel_stale_tcl_editable_focus", lambda _t: None)
     monkeypatch.setattr(_macos, "_mac_unfocus_pending", lambda _t: False)
     monkeypatch.setattr(_macos, "_mac_pipe_readable", lambda _t: False)
     monkeypatch.setattr(_macos, "_mac_web_input_active", lambda _t: False)
@@ -513,6 +515,38 @@ def test_mac_web_key_guard_allows_tab_traversal(
 
     assert _macos._mac_web_key_guard(event) is None  # type: ignore[arg-type]
     assert released == [True]
+
+
+def test_mac_web_key_guard_breaks_and_peels_tcl_focus(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    peeled: list[bool] = []
+    monkeypatch.setattr(_macos, "_mac_web_input_active", lambda _t: True)
+    monkeypatch.setattr(_macos, "_mac_unfocus_pending", lambda _t: False)
+    monkeypatch.setattr(
+        _macos, "_release_tk_keyboard_focus", lambda _t: peeled.append(True)
+    )
+
+    event = SimpleNamespace(widget=tk_root, keysym="BackSpace")
+    assert _macos._mac_web_key_guard(event) == "break"  # type: ignore[arg-type]
+    assert peeled == [True]
+
+
+def test_peel_stale_tcl_editable_focus_only_when_web_active(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    peeled: list[bool] = []
+    monkeypatch.setattr(
+        _macos, "_release_tk_keyboard_focus", lambda _t: peeled.append(True)
+    )
+
+    monkeypatch.setattr(_macos, "_mac_web_input_active", lambda _t: False)
+    _macos._peel_stale_tcl_editable_focus(tk_root)
+    assert peeled == []
+
+    monkeypatch.setattr(_macos, "_mac_web_input_active", lambda _t: True)
+    _macos._peel_stale_tcl_editable_focus(tk_root)
+    assert peeled == [True]
 
 
 def test_schedule_mac_window_tabbing_disable_retries_then_succeeds(

@@ -20,7 +20,8 @@
 //! | Tk editable owns keyboard | Python `FocusIn` / editable `Button-1`; Rust outside click | Idempotent resign: always `focus_parent` + `web_wants=false` (FR may stick after flag-only clear) |
 //! | Web + Tab/Esc | `handle_keydown` **and** Python key guard | Rust clears wants + `mac_tk_unfocus`; Python may `focus_parent` (intentional dual path) |
 //! | Pending Tcl unfocus | Rust flag + pipe | `_drain_mac_tk_unfocus` → `_release_tk_keyboard_focus` |
-//! | Key steal block | Python `_mac_web_key_guard` | Web-active → `"break"` (Tab/Esc exempt) |
+//! | Key steal block | Python `_mac_web_key_guard` | Web-active → `"break"` (Tab/Esc exempt) + reinforce Tcl editable unfocus |
+//! | Web active, stale Tcl editable | Pump / key guard | While `web_wants`, peel Tcl focus off Entry/Text so Backspace cannot dual-deliver to the URL bar |
 //! | Cache query (no Tcl SE) | Python `_mac_web_input_active` | Refresh cache ≡ OR(natives) only |
 //! | Cache sync + rising edge | Python `_sync_mac_web_input_cache` | After activate/wakeup: Idle→Web releases Tcl focus |
 //!

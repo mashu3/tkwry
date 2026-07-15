@@ -399,6 +399,16 @@ class WebView:
     ``destroy`` regressions against this table and :class:`WebViewPhase`
     before patching):
 
+    Two independent axes (do **not** merge them in a drive-by fix):
+
+    * **Layout → ``ready`` / ``<<WebViewReady>>``** — host frame has a geometry
+      manager and a real size. Unmap/remap does **not** clear ``ready`` or
+      re-fire the ready event.
+    * **Map/visibility → ``set_visible`` / ``phase``** — ``<Map>`` / ``<Unmap>``
+      (e.g. Notebook tabs) drive ``_frame_should_show`` → native
+      ``set_visible``. When laid out but not shown, ``phase`` is
+      :attr:`WebViewPhase.HIDDEN` while ``ready`` stays ``True``.
+
     +---------------+--------+-------+-----------+---------------------------+
     | Phase         | native | ready | destroyed | Allowed public API        |
     +===============+========+=======+===========+===========================+

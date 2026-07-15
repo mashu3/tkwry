@@ -36,7 +36,13 @@ table before patching ``focus.rs`` or this module — change both together):
 |                           |                           | → ``_release_tk_keyboard…``|
 +---------------------------+---------------------------+---------------------------+
 | Key steal block           | Python ``_mac_web_key_…`` | Web-active → ``"break"``   |
-|                           |                           | (Tab/Esc exempt)           |
+|                           |                           | (Tab/Esc exempt) + reinforce|
+|                           |                           | Tcl editable unfocus       |
++---------------------------+---------------------------+---------------------------+
+| Web active, stale Tcl Ed. | Pump / key guard          | While ``web_wants``, peel  |
+|                           |                           | Tcl focus off Entry/Text   |
+|                           |                           | so Backspace cannot dual-  |
+|                           |                           | deliver to the URL bar     |
 +---------------------------+---------------------------+---------------------------+
 | Cache query (no Tcl SE)   | ``_mac_web_input_active`` | Refresh cache ≡ OR(natives)|
 |                           |                           | only — no focus side effect|
@@ -350,6 +356,17 @@ def _mac_after(toplevel: tk.Misc, delay: int, callback, *args) -> None:
         pass
 
 
+def _peel_stale_tcl_editable_focus(toplevel: tk.Misc) -> None:
+    """While Web owns the keyboard, Tcl must not keep an Entry/Text focused.
+
+    Otherwise real Backspace dual-delivers: AppKit → WKWebView and Tcl → URL bar.
+    Rising-edge unfocus can miss / lag; reinforce from pump and key guard.
+    """
+    if not _mac_web_input_active(toplevel):
+        return
+    _release_tk_keyboard_focus(toplevel)
+
+
 def _mac_pump_tick(toplevel: tk.Misc) -> None:
     if not _toplevel_alive(toplevel):
         return
@@ -359,6 +376,7 @@ def _mac_pump_tick(toplevel: tk.Misc) -> None:
     _mac_service_wakeup(toplevel)
     if not _toplevel_alive(toplevel):
         return
+    _peel_stale_tcl_editable_focus(toplevel)
     if _mac_unfocus_pending(toplevel) or _mac_pipe_readable(toplevel):
         delay = 1
     elif _mac_web_input_active(toplevel):
@@ -426,6 +444,9 @@ def _mac_web_key_guard(event: tk.Event) -> str | None:
         return None
     if _mac_unfocus_pending(toplevel):
         _mac_after(toplevel, 1, _mac_service_wakeup, toplevel)
+    # Steal block: drop the key for Tk *and* peel focus so later Backspaces
+    # cannot land on the URL bar while WK is first responder.
+    _release_tk_keyboard_focus(toplevel)
     return "break"
 
 
@@ -508,6 +529,11 @@ def _ensure_mac_key_guard(toplevel: tk.Misc) -> None:
     toplevel._tkwry_mac_key_guard = True
     toplevel._tkwry_mac_bind_root = bind_root
     toplevel.bind_class(_MAC_KEY_GUARD_TAG, "<KeyPress>", _mac_web_key_guard)
+    # Also bind BackSpace/Delete explicitly: Aqua can deliver them in ways that
+    # still reach TEntry after a lone KeyPress handler in some Tk builds.
+    toplevel.bind_class(_MAC_KEY_GUARD_TAG, "<BackSpace>", _mac_web_key_guard)
+    toplevel.bind_class(_MAC_KEY_GUARD_TAG, "<Delete>", _mac_web_key_guard)
+    toplevel.bind_class(_MAC_KEY_GUARD_TAG, "<KP_Delete>", _mac_web_key_guard)
     # Store funcids so teardown can remove only our handlers (bind_all is global).
     toplevel._tkwry_mac_button1_bind_id = bind_root.bind_all(
         "<Button-1>", _mac_input_wakeup, add="+"
@@ -556,7 +582,8 @@ def _teardown_mac_key_guard(toplevel: tk.Misc) -> None:
         if hasattr(toplevel, attr):
             delattr(toplevel, attr)
     try:
-        toplevel.unbind_class(_MAC_KEY_GUARD_TAG, "<KeyPress>")
+        for sequence in ("<KeyPress>", "<BackSpace>", "<Delete>", "<KP_Delete>"):
+            toplevel.unbind_class(_MAC_KEY_GUARD_TAG, sequence)
     except tk.TclError:
         pass
     toplevel._tkwry_mac_key_guard = False

@@ -102,3 +102,27 @@ def test_phase_destroyed(tk_root) -> None:
     web = WebView(frame, width=200, height=100)
     web.destroy()
     assert web.phase is WebViewPhase.DESTROYED
+
+
+def test_maybe_fire_ready_does_not_rearm_when_hidden(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ready↔map axes stay independent: HIDDEN keeps ready, does not re-fire."""
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    web._webview = object()  # type: ignore[assignment]
+    web._ready_delivered = True
+    monkeypatch.setattr(web, "_layout_ready", lambda: True)
+    monkeypatch.setattr(web, "_frame_should_show", lambda: False)
+
+    firings: list[bool] = []
+    monkeypatch.setattr(web, "_fire_ready", lambda: firings.append(True))
+
+    assert web.phase is WebViewPhase.HIDDEN
+    assert web.ready is True
+    web._maybe_fire_ready()
+    assert firings == []
+    assert web._ready_delivered is True
+
+    web._webview = None
+    web.destroy()

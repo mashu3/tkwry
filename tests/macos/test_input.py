@@ -356,6 +356,10 @@ def test_key_guard_blocks_entry_while_web_active(url_demo_layout) -> None:
         entry.event_generate("<KeyPress-a>")
         url_demo_layout.root.update()
         assert entry.get() == before
+        entry.event_generate("<BackSpace>")
+        url_demo_layout.root.update()
+        assert entry.get() == before
+        assert url_demo_layout.root.focus_get() is not entry
     finally:
         web.destroy()
 
