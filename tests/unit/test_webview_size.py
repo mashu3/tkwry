@@ -533,6 +533,38 @@ def test_sync_bounds_hides_via_hide_native_view(tk_root, monkeypatch) -> None:
     assert hidden == [web._webview]
 
 
+def test_sync_bounds_shows_via_show_native_view(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    shown: list[object] = []
+    bounds: list[tuple[int, int, int, int]] = []
+
+    class Native:
+        def set_bounds(self, x: int, y: int, w: int, h: int) -> None:
+            bounds.append((x, y, w, h))
+
+        def set_visible(self, visible: bool) -> None:
+            raise AssertionError("set_visible should go through _show_native_view")
+
+    web._webview = Native()  # type: ignore[assignment]
+    monkeypatch.setattr(web, "_frame_should_show", lambda: True)
+    monkeypatch.setattr(web, "_bounds_size", lambda: (400, 300))
+    monkeypatch.setattr(
+        "tkwry.webview.tk_embed_origin", lambda _frame, root_relative=False: (10, 20)
+    )
+    monkeypatch.setattr(
+        web,
+        "_show_native_view",
+        lambda native: shown.append(native) or True,
+    )
+
+    assert web._sync_bounds() is True
+    assert bounds == [(10, 20, 400, 300)]
+    assert shown == [web._webview]
+
+
 def test_layout_ready_false_for_init_size_before_map_on_win32(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -1053,6 +1053,14 @@ class WebView:
         except Exception:
             pass
 
+    def _show_native_view(self, native: NativeWebView) -> bool:
+        """Map-axis show counterpart to ``_hide_native_view``."""
+        try:
+            native.set_visible(True)
+            return True
+        except Exception:
+            return False
+
     def _release_native_view(self, *, hide: bool) -> None:
         native = self._webview
         if native is None:
@@ -2568,10 +2576,9 @@ class WebView:
             return False
         try:
             self._webview.set_bounds(x, y, width, height)
-            self._webview.set_visible(True)
         except Exception:
             return False
-        return True
+        return self._show_native_view(self._webview)
 
     def _on_configure(self, event: tk.Event) -> None:
         if event.widget is not self._frame or self._destroyed:
