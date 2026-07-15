@@ -293,9 +293,17 @@ def test_dynamic_entry_gets_key_guard_while_web_active(url_demo_layout) -> None:
         url_demo_layout.root.update_idletasks()
         assert entry.bindtags()[0] == "TkwryMacWebKeyGuard"
 
+        # Focusing a Tk editable resigns Web FR (ownership table); keys must not
+        # dual-deliver. Guard blocking is checked after web reclaims input.
         entry.focus_force()
-        entry.insert(0, "https://example.com")
         url_demo_layout.root.update()
+        assert not web.native.mac_web_input_active()
+
+        entry.insert(0, "https://example.com")
+        web.focus()
+        pump(url_demo_layout.root, seconds=0.05)
+        assert web.native.mac_web_input_active()
+        assert entry.bindtags()[0] == "TkwryMacWebKeyGuard"
 
         before = entry.get()
         entry.event_generate("<KeyPress-a>")
