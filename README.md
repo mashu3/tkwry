@@ -27,8 +27,7 @@ Tkinter is still a solid GUI shell — it just had no first-class way to host mo
 - **IPC bridge** — JavaScript → Python callbacks without freezing the UI
 - **Layout-aware** — tracks `pack` / `grid` / `place`, tabs, and `PanedWindow`
 
-Pre-built **abi3** wheels ship for **Windows (x86_64, arm64)** and **macOS (Apple Silicon + Intel)** — these are the primary release targets.
-**Linux** is **best-effort**: build from source (sdist / git); not a wheel release target in v0.0.x. CI covers Linux under Xvfb, but real-desktop timing is still not a release blocker.
+Pre-built **abi3** wheels ship for **Windows** and **macOS**. **Linux** is source-only (**best-effort** by design) — see [Platform notes](#-platform-notes).
 
 ---
 
@@ -37,11 +36,9 @@ Pre-built **abi3** wheels ship for **Windows (x86_64, arm64)** and **macOS (Appl
 - Python 3.10+
 - Tkinter (included with most Python builds)
 - **Building from source** (git clone, `pip install git+…`, or Linux) — [Rust](https://rustup.rs) toolchain (stable); `pip` uses **maturin** as the build backend
-- **Windows (x86_64, arm64)**
-  - [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) must be installed (pre-installed on many Windows 10/11 systems).
-  - **Without WebView2, tkwry is not supported on Windows** — there is no fallback engine.
-- **macOS** — 11 (Big Sur) or later; Apple Silicon (**arm64**) or Intel (**x86_64**); system WKWebView (no extra runtime)
-- **Linux** — WebKitGTK 4.1 + GTK 3 dev packages; X11 or XWayland (`$DISPLAY`); build the extension from source (see below)
+- **Windows (x86_64, arm64)** — [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (no fallback engine; see [Platform notes](#windows))
+- **macOS** — 11 (Big Sur)+, arm64 or x86_64; system WKWebView
+- **Linux** — WebKitGTK 4.1 + GTK 3; X11 or XWayland (`$DISPLAY`); source build only (see [Installation](#-installation) and [Platform notes](#linux))
 
 ---
 
@@ -71,11 +68,11 @@ Use this for development and for running the [examples](#-examples) from the tre
 pip install git+https://github.com/mashu3/tkwry.git
 ```
 
-This also builds from source (sdist via git), **not** a pre-built wheel. It requires **Rust** and will fail on machines without a working toolchain — same as `pip install .` / `pip install -e .`. Prefer the PyPI wheel on Windows and macOS when you do not need bleeding-edge changes.
+This builds from source (sdist via git), **not** a pre-built wheel — needs **Rust**, same as `pip install .`. Prefer the PyPI wheel on Windows and macOS unless you need unreleased commits.
 
-### Linux (source install, best-effort)
+### Linux (source install)
 
-Linux builds from source and runs for many apps, but **v0.0.x does not treat Linux stability as a release requirement** — focus is on Windows and macOS wheels. Install system dependencies, then:
+Install system dependencies, then build from source (support posture: [Platform notes](#linux)):
 
 ```bash
 # Debian / Ubuntu
@@ -224,15 +221,17 @@ Type aliases: `IpcHandler`, `NavigationHandler`, `PageLoadHandler`, `TitleChange
 
 ## ⚠️ Known limitations
 
-- **Alpha** — APIs may change; not recommended for production yet
-- **Windows** — WebView2 Runtime required; systems without it fail hard with `WebViewCreationError` (install link in the message; no fallback engine)
-- **Linux** — source install only (no PyPI wheel); **best-effort** in v0.0.x (not a wheel release target). CI runs the integration suite under Xvfb; real desktops may still differ
-- **DevTools** — macOS uses private APIs; avoid in Mac App Store release builds
-- **macOS input / IME** — Tk widgets (`Entry`, `Text`, …) and the WebView share one window; tkwry routes focus automatically (see [macOS embedding](#macos-embedding)). **Not** Safari-parity: mid-composition focus switches, candidate-window placement, and dead keys can mis-route or cancel composition when the first responder flips between Tcl and `WKWebView`. Prefer finishing IME input in one surface before changing focus
-- **macOS import order** — import `tkwry` before any library that initializes AppKit / `NSApplication`, or you may see a double titlebar strip (see [macOS embedding](#macos-embedding) and [`examples/macos_double_titlebar_repro.py`](examples/macos_double_titlebar_repro.py))
-- **`url()` on macOS** — may be `None` for inline HTML (`html=` / `load_html`) or when WKWebView has no document `NSURL` (not an error). After `load_url`, `url` becomes the concrete URI; use that or `eval` when you need a stable locator
-- **Hidden Notebook tabs** — inactive tabs call `set_visible(False)` so the native view is hidden (essential on macOS, where tabs share one toplevel `NSView`). `ready` can stay `True` while unmapped; `eval_js` may still succeed — prefer running visible work after the tab is selected again
-- **Drag & drop** — drop target is the WebView area only (not arbitrary Tk widgets; use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for those)
+Short checklist — **details live in [Platform notes](#-platform-notes)** (especially [macOS embedding](#macos-embedding)).
+
+- **Alpha** — APIs may change; not for production yet (see banner above)
+- **Windows** — WebView2 Runtime required; missing runtime → `WebViewCreationError`
+- **Linux** — no PyPI wheel (by design); best-effort source install
+- **macOS DevTools** — private APIs; avoid in Mac App Store builds
+- **macOS IME / focus** — not Safari-parity; mid-composition focus flips can mis-route input
+- **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
+- **`url()` on macOS** — may be `None` for inline HTML until a concrete `load_url`
+- **Hidden Notebook tabs** — native view is hidden; `ready` can stay `True` while unmapped
+- **Drag & drop** — WebView area only (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
 
@@ -240,33 +239,35 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## 🌐 Platform notes
 
-| OS | Arch | Parent handle | Engine | Notes |
-|----|------|---------------|--------|-------|
-| **Windows** | x86_64, arm64 | `Frame.winfo_id()` → HWND | WebView2 | WebView2 Runtime required |
-| **macOS** | arm64, x86_64 | Toplevel content `NSView` | WKWebView | See [macOS embedding](#macos-embedding) below |
-| **Linux** | — | `winfo_id()` → X11 window ID | WebKitGTK | Source install; **best-effort** (not a wheel release target) |
+| OS | Arch | Parent handle | Engine |
+|----|------|---------------|--------|
+| **Windows** | x86_64, arm64 | `Frame.winfo_id()` → HWND | WebView2 |
+| **macOS** | arm64, x86_64 | Toplevel content `NSView` | WKWebView |
+| **Linux** | — | `winfo_id()` → X11 window ID | WebKitGTK |
+
+### Windows
+
+[WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) must be installed (common on Windows 10/11). Without it, creation fails with `WebViewCreationError` (install link in the message). There is **no** fallback engine.
+
+### Linux
+
+**By design in v0.0.x:** no PyPI wheel; install from source (sdist / git). Support is **best-effort** — not a release blocker for Windows/macOS wheels. CI runs the integration suite under **Xvfb**; real-desktop / Wayland timing may still differ. GTK is pumped on a Tk timer automatically after install.
 
 ### macOS embedding
 
-On macOS, Tk child `Frame`s usually **do not** get their own `NSView` — that is a property of the Tk Aqua backend, not something tkwry can turn into per-frame native views without upstream Tk changes.
+Tk child `Frame`s usually **do not** get their own `NSView` (Tk Aqua). tkwry attaches to the **toplevel content view**, positions with `set_bounds` on `<Configure>`, and hides with `set_visible(False)` on `<Unmap>` (e.g. another Notebook tab). Per-frame native views would need upstream Tk changes.
 
-tkwry works around this by:
+**Keyboard focus:** clicks are hit-tested at the `NSEvent` layer; Python drains focus signals on the Tk main thread. Use `web.focus()` / `web.focus_parent()` for explicit control ([`examples/url_demo.py`](examples/url_demo.py)). `focused=True` waits for `<<WebViewReady>>`, then calls `focus()`; call `focus()` yourself after later layout changes.
 
-1. Attaching the WebView to the **toplevel content view**
-2. Positioning it with `set_bounds` to match your `Frame` (`<Configure>`)
-3. Hiding it with `set_visible(False)` when the frame is unmapped (`<Unmap>`) — e.g. another `ttk.Notebook` tab is selected
+**IME:** composition stays with the current first responder. Switching Tk ↔ WebView mid-composition (or fighting the system candidate window) can cancel or mis-deliver input vs Safari. **Not** a v0.1 goal — finish composition before changing focus, or keep IME editing in one surface.
 
-**Keyboard focus (macOS):** tkwry routes input between Tk widgets (`Entry`, `Text`, …) and the WebView automatically. Rust hit-tests clicks at the `NSEvent` layer and switches first responder; Python drains focus signals on the Tk main thread so keystrokes reach the correct target. Use `web.focus()` and `web.focus_parent()` when you need explicit control — see [`examples/url_demo.py`](examples/url_demo.py). On macOS, `focused=True` is deferred until `<<WebViewReady>>` (then `focus()` runs automatically); call `focus()` yourself after layout changes.
+**Import order / double titlebar:** import `tkwry` **before** anything that starts `AppKit` / `NSApplication`. On import, tkwry disables process-level automatic window tabbing on the main thread. If AppKit starts first, macOS may show a **double titlebar** strip — see [`examples/macos_double_titlebar_repro.py`](examples/macos_double_titlebar_repro.py). If per-window tabbing disable during create fails, tkwry logs and retries asynchronously (non-fatal).
 
-**IME (macOS):** Composition stays with whichever surface is first responder. Switching focus mid-composition (Tk ↔ WebView), or relying on the system candidate window while both surfaces compete for keys, can cancel or mis-deliver input compared with Safari. This is **not** a v0.1 goal — work around by completing composition before changing focus, or keep IME-heavy editing in one surface.
+**`url()`:** may be `None` for inline HTML (`html=` / `load_html`) or when WKWebView has no document `NSURL`. After `load_url`, it becomes the concrete URI.
 
-**Import order (macOS):** Import `tkwry` **before** any library that touches `AppKit` / `NSApplication` (e.g. `from AppKit import NSApp` or `NSApplication.sharedApplication()`). If full AppKit starts first, macOS may reserve automatic window-tab chrome and you can see a **double titlebar** strip. On import, tkwry disables process-level automatic window tabbing on the main thread (must run before `NSApplication` initializes). See [Known limitations](#known-limitations) and [`examples/macos_double_titlebar_repro.py`](examples/macos_double_titlebar_repro.py).
+**Notebook / tabs:** unmapped tabs hide the native view (`set_visible(False)`) and show again on `<Map>` — required because frames share the toplevel `NSView`. `ready` is layout-based (can stay `True` while hidden); prefer visible-tab work after the tab is selected. No extra app code for tabs/panes — [`examples/multi_demo.py`](examples/multi_demo.py).
 
-**Window tabbing disable:** If the per-window tabbing disable during WebView create fails, tkwry logs to stderr and retries asynchronously (Python `<Map>` / deferred hooks). This is non-fatal and does not raise `WebViewCreationError`.
-
-**Notebook / tabs:** Selecting another `ttk.Notebook` tab unmaps the host frame; tkwry hides that WebView with `set_visible(False)` and shows it again on `<Map>`. On macOS this is required because child frames share the toplevel content `NSView`. `ready` remains layout-based (it can stay `True` while a tab is hidden); see [Known limitations](#known-limitations).
-
-**You do not need extra code for tabs or panes** — see [`examples/multi_demo.py`](examples/multi_demo.py). IPC, page-load, title, eval, and drag-and-drop handlers are dispatched on the **Tk main thread** via an internal queue (avoids WebKit deadlocks). `on_navigation` and `on_new_window` are synchronous WebKit-thread hooks — see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks).
+IPC, page-load, title, eval, and drag-and-drop handlers run on the **Tk main thread** (queued). `on_navigation` / `on_new_window` stay synchronous on the WebKit thread — see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks).
 
 ---
 
@@ -289,7 +290,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Plotly-ready** — load HTML + `eval_js` for interactive charts
 - **Folium-ready** — embed Leaflet maps from Folium HTML (right-click to pin)
 - **Markdown-ready** — Monaco editor + live preview in a `PanedWindow` (see [`examples/markdown_demo.py`](examples/markdown_demo.py); CDN required)
-- **Alpha, but tested** — CI runs `pytest tests/` on Windows (x86_64 + arm64), macOS, and Linux (Xvfb + WebKitGTK). Linux is **best-effort** (source install, no wheel); the integration suite is largely enabled on Linux CI
+- **CI-tested** — `pytest` on Windows (x86_64 + arm64), macOS, and Linux (Xvfb + WebKitGTK)
 
 ---
 
