@@ -899,6 +899,64 @@ def test_destroy_arms_event_poll_when_teardown_deferred(
     assert web._event_poll_active is False
 
 
+def test_arm_and_clear_native_teardown_helpers(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    sentinel = object()
+    web._arm_native_teardown(sentinel)  # type: ignore[arg-type]
+    assert web._native_teardown_pending is sentinel
+    assert web._native_teardown_attempts == 0
+    web._native_teardown_attempts = 3
+    web._clear_native_teardown()
+    assert web._native_teardown_pending is None
+    assert web._native_teardown_attempts == 0
+
+
+def test_disarm_event_poll_clears_active_latch(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    web._event_poll_active = True
+    web._disarm_event_poll()
+    assert web._event_poll_active is False
+
+
+def test_queue_user_load_supersedes_initial_and_sets_pending(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    web._arm_initial_load(("html", "<p>A</p>"))
+    web._queue_user_load("url", "https://example.com/B")
+    assert web._initial_load is None
+    assert web._pending_load == ("url", "https://example.com/B")
+
+
+def test_set_pending_load_preserves_initial_load(tk_root) -> None:
+    """Linux initial-load path must not clear ``_initial_load`` until flush."""
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    web._arm_initial_load(("html", "<p>A</p>"))
+    web._set_pending_load("html", "<p>A</p>")
+    assert web._initial_load == ("html", "<p>A</p>")
+    assert web._pending_load == ("html", "<p>A</p>")
+    web._clear_pending_load()
+    web._clear_initial_load()
+    assert web._pending_load is None
+    assert web._initial_load is None
+
+
+def test_precreate_pending_helpers_are_mutually_exclusive(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    web._set_precreate_url("https://example.com/a")
+    assert web._pending_url == "https://example.com/a"
+    assert web._pending_html is None
+    web._set_precreate_html("<p>x</p>")
+    assert web._pending_html == "<p>x</p>"
+    assert web._pending_url is None
+    web._clear_precreate_pending()
+    assert web._pending_url is None
+    assert web._pending_html is None
+
+
 def test_ensure_event_poll_allows_destroyed_teardown(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=200, height=100)

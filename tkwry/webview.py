@@ -452,7 +452,9 @@ class WebView:
        geometry.
     3. **User ``load_*`` last-wins** — :meth:`load_url` / :meth:`load_html`
        supersede any pending constructor load and coalesce rapid calls (only
-       the final URL/HTML is applied).
+       the final URL/HTML is applied). Write paths go through
+       ``_queue_user_load`` / ``_clear_initial_load`` /
+       ``_set_pending_load`` / pre-create helpers.
 
     **Navigation hooks** (``on_navigation``, ``on_new_window``) must return
     immediately to WebKit, so the native layer blocks until your handler
@@ -500,10 +502,12 @@ class WebView:
     +------------------+-----------------------------------------------------+
 
     Stop rules: ``_ensure_event_poll`` arms while handlers, pending evals, or
-    ``_native_teardown_pending`` remain; ``_stop_event_poll_if_idle`` clears
-    ``_event_poll_active`` when ``_should_keep_polling()`` is false. Timeout
-    and drain share one release path via ``_release_pending_eval`` so the user
-    callback cannot run twice.
+    ``_native_teardown_pending`` remain; ``_disarm_event_poll`` is the only
+    writer that clears ``_event_poll_active`` (``_stop_event_poll_if_idle``
+    when idle; poll reschedule / TclError paths also disarm). Pair flags are
+    written only via ``_arm_native_teardown`` / ``_clear_native_teardown``
+    (clear does not stop the poll). Timeout and drain share one release path
+    via ``_release_pending_eval`` so the user callback cannot run twice.
 
     Call :meth:`destroy` or destroy the host frame to release the native view.
     After :meth:`destroy`, the instance cannot be reused; create a new
@@ -1009,8 +1013,7 @@ class WebView:
                         pending.force_destroy()
                     except Exception:
                         traceback.print_exc()
-                    self._native_teardown_pending = None
-                    self._native_teardown_attempts = 0
+                    self._clear_native_teardown()
         if self._native_teardown_pending is not None:
             self._ensure_event_poll()
         else:
@@ -1061,6 +1064,16 @@ class WebView:
         except Exception:
             return False
 
+    def _arm_native_teardown(self, native: NativeWebView) -> None:
+        """Remember a native that did not die on ``destroy()`` yet."""
+        self._native_teardown_pending = native
+        self._native_teardown_attempts = 0
+
+    def _clear_native_teardown(self) -> None:
+        """Drop deferred-teardown state only (does not stop the event poll)."""
+        self._native_teardown_pending = None
+        self._native_teardown_attempts = 0
+
     def _release_native_view(self, *, hide: bool) -> None:
         native = self._webview
         if native is None:
@@ -1072,8 +1085,7 @@ class WebView:
         except Exception:
             traceback.print_exc()
         if self._native_is_alive(native):
-            self._native_teardown_pending = native
-            self._native_teardown_attempts = 0
+            self._arm_native_teardown(native)
         self._webview = None
         if self._native_teardown_pending is not None:
             self._ensure_event_poll()
@@ -1089,8 +1101,7 @@ class WebView:
             native.force_destroy()
         except Exception:
             traceback.print_exc()
-        self._native_teardown_pending = None
-        self._native_teardown_attempts = 0
+        self._clear_native_teardown()
         self._webview = None
 
     def _finish_native_teardown(self) -> None:
@@ -1102,8 +1113,7 @@ class WebView:
                 self._hide_native_view(native)
                 native.destroy()
             if not self._native_is_alive(native):
-                self._native_teardown_pending = None
-                self._native_teardown_attempts = 0
+                self._clear_native_teardown()
                 self._stop_event_poll_if_idle()
                 return
             self._native_teardown_attempts += 1
@@ -1118,11 +1128,48 @@ class WebView:
                     native.force_destroy()
                 except Exception:
                     traceback.print_exc()
-                self._native_teardown_pending = None
-                self._native_teardown_attempts = 0
+                self._clear_native_teardown()
                 self._stop_event_poll_if_idle()
         except Exception:
             traceback.print_exc()
+
+    def _clear_initial_load(self) -> None:
+        """Drop constructor deferred load so user nav/reload cannot overwrite it."""
+        self._initial_load = None
+
+    def _arm_initial_load(self, load: _PendingLoad) -> None:
+        """Remember constructor ``url``/``html`` until ``_run_initial_load``."""
+        self._initial_load = load
+
+    def _set_pending_load(self, kind: Literal["url", "html"], payload: str) -> None:
+        """Write coalesced post-create load without touching ``_initial_load``."""
+        if kind == "url":
+            self._pending_load = ("url", payload)
+        else:
+            self._pending_load = ("html", payload)
+
+    def _queue_user_load(self, kind: Literal["url", "html"], payload: str) -> None:
+        """User ``load_*`` last-wins: supersede constructor load and set pending."""
+        self._clear_initial_load()
+        self._set_pending_load(kind, payload)
+
+    def _clear_pending_load(self) -> None:
+        self._pending_load = None
+
+    def _set_precreate_url(self, url: str) -> None:
+        """Store URL applied at native create (clears pending HTML)."""
+        self._pending_url = url
+        self._pending_html = None
+
+    def _set_precreate_html(self, html: str) -> None:
+        """Store HTML applied at native create (clears pending URL)."""
+        self._pending_html = html
+        self._pending_url = None
+
+    def _clear_precreate_pending(self) -> None:
+        """Drop pre-create URL/HTML after they are consumed into ``_initial_load``."""
+        self._pending_url = None
+        self._pending_html = None
 
     def load_url(self, url: str) -> None:
         """Navigate to *url* (``http``/``https``/``file``; scheme optional).
@@ -1144,17 +1191,13 @@ class WebView:
                 "WebView native creation failed; cannot call load_url()"
             ) from self._creation_error
         if self._webview is None:
-            self._pending_url = normalized
-            self._pending_html = None
+            self._set_precreate_url(normalized)
             return
         if self._sync_hook_depth > 0:
-            self._initial_load = None
-            self._pending_load = ("url", normalized)
+            self._queue_user_load("url", normalized)
             self._track_after(self._frame.after_idle(self._flush_load))
             return
-        # Supersede constructor deferred load so it cannot overwrite this nav.
-        self._initial_load = None
-        self._pending_load = ("url", normalized)
+        self._queue_user_load("url", normalized)
         self._dispatch_pending_load()
 
     def load_html(self, html: str) -> None:
@@ -1171,17 +1214,13 @@ class WebView:
                 "WebView native creation failed; cannot call load_html()"
             ) from self._creation_error
         if self._webview is None:
-            self._pending_html = html
-            self._pending_url = None
+            self._set_precreate_html(html)
             return
         if self._sync_hook_depth > 0:
-            self._initial_load = None
-            self._pending_load = ("html", html)
+            self._queue_user_load("html", html)
             self._track_after(self._frame.after_idle(self._flush_load))
             return
-        # Supersede constructor deferred load so it cannot overwrite this nav.
-        self._initial_load = None
-        self._pending_load = ("html", html)
+        self._queue_user_load("html", html)
         self._dispatch_pending_load()
 
     def _dispatch_pending_load(self) -> None:
@@ -1202,10 +1241,10 @@ class WebView:
     def reload(self) -> None:
         native = self._require_ready("reload")
         # Supersede constructor deferred load so it cannot overwrite this reload.
-        self._initial_load = None
+        self._clear_initial_load()
         self._cancel_initial_load_timer()
         # Drop any idle-coalesced load_url/load_html so it cannot overwrite reload.
-        self._pending_load = None
+        self._clear_pending_load()
         self._flush_load_attempt = 0
         if self._sync_hook_depth > 0:
             self._track_after(self._frame.after_idle(self._run_deferred_reload))
@@ -2059,6 +2098,10 @@ class WebView:
                 else:
                     print(f"tkwry: {exc}", file=sys.stderr)
 
+    def _disarm_event_poll(self) -> None:
+        """Unconditionally clear the poll latch (ignores remaining work)."""
+        self._event_poll_active = False
+
     def _ensure_event_poll(self) -> None:
         """Arm the Tk poll when async work remains (including native teardown).
 
@@ -2073,13 +2116,13 @@ class WebView:
         try:
             self._track_after(self._frame.after(1, self._poll_events))
         except tk.TclError:
-            self._event_poll_active = False
+            self._disarm_event_poll()
 
     def _stop_event_poll_if_idle(self) -> None:
         """Clear ``_event_poll_active`` when no poll work remains."""
         if self._should_keep_polling():
             return
-        self._event_poll_active = False
+        self._disarm_event_poll()
 
     def _drain_native_eval_callbacks(self) -> None:
         native = self._webview
@@ -2123,7 +2166,7 @@ class WebView:
                 try:
                     self._track_after(self._frame.after(1, self._poll_events))
                 except tk.TclError:
-                    self._event_poll_active = False
+                    self._disarm_event_poll()
             else:
                 self._stop_event_poll_if_idle()
             return
@@ -2166,10 +2209,10 @@ class WebView:
             try:
                 self._track_after(self._frame.after(delay, self._poll_events))
             except tk.TclError:
-                self._event_poll_active = False
+                self._disarm_event_poll()
         else:
             # Clear before re-check so a concurrent ensure_event_poll can re-arm.
-            self._event_poll_active = False
+            self._disarm_event_poll()
             if self._should_keep_polling():
                 self._ensure_event_poll()
 
@@ -2284,12 +2327,11 @@ class WebView:
             self._ensure_tk_wakeup_pipe()
         self._sync_async_listening()
         self._ensure_gtk_pump_attached()
-        self._pending_url = None
-        self._pending_html = None
+        self._clear_precreate_pending()
         self._sync_bounds()
         self._schedule_bounds_sync()
         if initial_load is not None:
-            self._initial_load = initial_load
+            self._arm_initial_load(initial_load)
             # Defer load until after create returns: sync load_html during
             # _try_create/pack races WebKitGTK (constructor html never finishes).
             self._schedule_initial_load()
@@ -2390,7 +2432,7 @@ class WebView:
             return
         if self._pending_load is not None:
             # A later load_url/load_html already won; drop constructor content.
-            self._initial_load = None
+            self._clear_initial_load()
             return
         if not self._frame_ready_for_initial_load():
             self._maybe_reschedule_initial_load()
@@ -2398,17 +2440,14 @@ class WebView:
         self._sync_bounds()
         # Re-check after sync: load_* may have cleared or replaced this.
         if self._initial_load is not load or self._pending_load is not None:
-            self._initial_load = None
+            self._clear_initial_load()
             return
         kind, payload = load
         if sys.platform == "linux":
-            if kind == "url":
-                self._pending_load = ("url", payload)
-            else:
-                self._pending_load = ("html", payload)
+            self._set_pending_load(kind, payload)
             self._dispatch_pending_load()
             if self._pending_load is None:
-                self._initial_load = None
+                self._clear_initial_load()
             return
         try:
             if kind == "url":
@@ -2424,7 +2463,7 @@ class WebView:
         self._finish_navigation()
         if self._on_page_load is not None:
             self._ensure_event_poll()
-        self._initial_load = None
+        self._clear_initial_load()
 
     def _flush_load(self) -> None:
         self._flush_load_scheduled = False
@@ -2457,9 +2496,9 @@ class WebView:
                 self._flush_load_attempt = 0
             self._schedule_flush_load(delay_ms=delay_ms)
             return
-        self._pending_load = None
+        self._clear_pending_load()
         self._flush_load_attempt = 0
-        self._initial_load = None
+        self._clear_initial_load()
         self._sync_bounds()
         self._finish_navigation()
         if self._on_page_load is not None:
