@@ -803,16 +803,25 @@ class WebView:
         except Exception:
             self._teardown_native_if_alive()
 
+    def _invalidate_eval_generation(self, *, count_pending_drops: bool = False) -> None:
+        """Bump the eval epoch and drop Python/native pending callbacks.
+
+        Shared by :meth:`destroy` and emergency off-thread teardown so stale
+        WebKit delivers cannot invoke user callbacks after a generation ends.
+        """
+        self._eval_epoch += 1
+        if count_pending_drops and self._pending_eval_tokens:
+            self._bump_queue_drop(_QUEUE_DROP_EVAL, len(self._pending_eval_tokens))
+        self._pending_eval_callbacks = 0
+        self._pending_eval_tokens.clear()
+        self._native_eval_wait.clear()
+
     def _teardown_native_if_alive(self) -> None:
         """Release the native WebView when Tk teardown is impossible."""
         if self._destroyed:
             return
         self._destroyed = True
-        self._event_poll_active = False
-        self._eval_epoch += 1
-        self._pending_eval_callbacks = 0
-        self._pending_eval_tokens.clear()
-        self._native_eval_wait.clear()
+        self._invalidate_eval_generation()
         self._abort_sync_hooks()
         try:
             _release_frame_host(self._frame, self)
@@ -825,6 +834,8 @@ class WebView:
                 _unregister_macos_webview(self)
             except Exception:
                 pass
+        # Deferred native teardown still needs the poll (arm via release path).
+        self._stop_event_poll_if_idle()
 
     def destroy(self) -> None:
         """Hide and release the native webview without destroying the host frame.
@@ -837,12 +848,7 @@ class WebView:
             return
         self._destroyed = True
         self._cancel_deferred_callbacks()
-        self._eval_epoch += 1
-        if self._pending_eval_tokens:
-            self._bump_queue_drop(_QUEUE_DROP_EVAL, len(self._pending_eval_tokens))
-        self._pending_eval_callbacks = 0
-        self._pending_eval_tokens.clear()
-        self._native_eval_wait.clear()
+        self._invalidate_eval_generation(count_pending_drops=True)
         self._pending_eval_js = None
         self._eval_js_scheduled = False
         self._abort_sync_hooks()
@@ -889,7 +895,7 @@ class WebView:
         if self._native_teardown_pending is not None:
             self._ensure_event_poll()
         else:
-            self._event_poll_active = False
+            self._stop_event_poll_if_idle()
 
     def _unbind_frame_events(self) -> None:
         """Drop host-frame binds so ``destroy()`` does not pin this instance."""
@@ -971,8 +977,7 @@ class WebView:
             if not self._native_is_alive(native):
                 self._native_teardown_pending = None
                 self._native_teardown_attempts = 0
-                if self._destroyed and not self._should_keep_polling():
-                    self._event_poll_active = False
+                self._stop_event_poll_if_idle()
                 return
             self._native_teardown_attempts += 1
             if self._native_teardown_attempts >= _NATIVE_TEARDOWN_MAX_ATTEMPTS:
@@ -988,8 +993,7 @@ class WebView:
                     traceback.print_exc()
                 self._native_teardown_pending = None
                 self._native_teardown_attempts = 0
-                if self._destroyed and not self._should_keep_polling():
-                    self._event_poll_active = False
+                self._stop_event_poll_if_idle()
         except Exception:
             traceback.print_exc()
 
@@ -1931,10 +1935,26 @@ class WebView:
                     print(f"tkwry: {exc}", file=sys.stderr)
 
     def _ensure_event_poll(self) -> None:
-        if self._event_poll_active or self._destroyed:
+        """Arm the Tk poll when async work remains (including native teardown).
+
+        Destroyed instances still poll while ``_native_teardown_pending`` is set
+        so deferred ``is_alive`` cleanup cannot stall forever.
+        """
+        if self._event_poll_active:
+            return
+        if self._destroyed and self._native_teardown_pending is None:
             return
         self._event_poll_active = True
-        self._track_after(self._frame.after(1, self._poll_events))
+        try:
+            self._track_after(self._frame.after(1, self._poll_events))
+        except tk.TclError:
+            self._event_poll_active = False
+
+    def _stop_event_poll_if_idle(self) -> None:
+        """Clear ``_event_poll_active`` when no poll work remains."""
+        if self._should_keep_polling():
+            return
+        self._event_poll_active = False
 
     def _drain_native_eval_callbacks(self) -> None:
         native = self._webview
@@ -1975,9 +1995,12 @@ class WebView:
         self._finish_native_teardown()
         if self._destroyed:
             if self._native_teardown_pending is not None:
-                self._track_after(self._frame.after(1, self._poll_events))
+                try:
+                    self._track_after(self._frame.after(1, self._poll_events))
+                except tk.TclError:
+                    self._event_poll_active = False
             else:
-                self._event_poll_active = False
+                self._stop_event_poll_if_idle()
             return
         if sys.platform == "linux":
             _pump_toplevel_wakeup_pipe(self._toplevel)
@@ -2015,7 +2038,10 @@ class WebView:
 
         if self._should_keep_polling():
             delay = 1 if sys.platform == "linux" else 10
-            self._track_after(self._frame.after(delay, self._poll_events))
+            try:
+                self._track_after(self._frame.after(delay, self._poll_events))
+            except tk.TclError:
+                self._event_poll_active = False
         else:
             # Clear before re-check so a concurrent ensure_event_poll can re-arm.
             self._event_poll_active = False

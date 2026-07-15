@@ -754,6 +754,109 @@ def test_destroy_stops_event_poll_after_native_teardown(
     assert web._event_poll_active is False
 
 
+@pytest.mark.skipif(
+    sys.platform == "linux",
+    reason="Linux destroy() flushes native teardown synchronously",
+)
+def test_destroy_arms_event_poll_when_teardown_deferred(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deferred native teardown must arm the poll even if it was idle."""
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+
+    class _Native:
+        def __init__(self) -> None:
+            self.alive = True
+            self.destroy_calls = 0
+
+        def set_visible(self, _visible: bool) -> None:
+            return None
+
+        def is_alive(self) -> bool:
+            return self.alive
+
+        def destroy(self) -> None:
+            self.destroy_calls += 1
+            if self.destroy_calls >= 2:
+                self.alive = False
+
+    native = _Native()
+    web._webview = native
+    assert web._event_poll_active is False
+
+    scheduled: list[str] = []
+    original_after = frame.after
+
+    def after(delay, func=None, *args):
+        if callable(func) and getattr(func, "__name__", None) == "_poll_events":
+            scheduled.append("_poll_events")
+            return "poll-id"
+        if func is None:
+            return original_after(delay)
+        return original_after(delay, func, *args)
+
+    monkeypatch.setattr(frame, "after", after)
+    web.destroy()
+
+    assert web._native_teardown_pending is native
+    assert web._event_poll_active is True
+    assert scheduled == ["_poll_events"]
+
+    for _ in range(5):
+        web._poll_events()
+        if web._native_teardown_pending is None:
+            break
+
+    assert web._native_teardown_pending is None
+    assert web._event_poll_active is False
+
+
+def test_ensure_event_poll_allows_destroyed_teardown(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    web._destroyed = True
+    web._native_teardown_pending = object()  # type: ignore[assignment]
+    web._event_poll_active = False
+
+    scheduled: list[object] = []
+    web._frame.after = lambda delay, func=None, *args: (  # type: ignore[method-assign]
+        scheduled.append(func) or "id"
+    )
+
+    web._ensure_event_poll()
+
+    assert web._event_poll_active is True
+    assert scheduled == [web._poll_events]
+
+
+def test_ensure_event_poll_rejects_destroyed_without_teardown(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    web._destroyed = True
+    web._native_teardown_pending = None
+    web._event_poll_active = False
+
+    web._ensure_event_poll()
+
+    assert web._event_poll_active is False
+
+
+def test_stop_event_poll_if_idle_keeps_active_during_teardown(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    web._event_poll_active = True
+    web._native_teardown_pending = object()  # type: ignore[assignment]
+
+    web._stop_event_poll_if_idle()
+
+    assert web._event_poll_active is True
+
+    web._native_teardown_pending = None
+    web._stop_event_poll_if_idle()
+    assert web._event_poll_active is False
+
+
 def test_unmap_does_not_detach_gtk_pump(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
