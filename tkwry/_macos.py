@@ -1,4 +1,39 @@
-"""macOS-specific focus management and wakeup pipe utilities."""
+"""macOS-specific focus management and wakeup pipe utilities.
+
+**Keyboard ownership** (maintainers: name the broken transition against this
+table before patching ``focus.rs`` or this module — change both together):
+
++---------------------------+---------------------------+---------------------------+
+| Transition                | Writer                    | Flags / Python reaction     |
++===========================+===========================+===========================+
+| Idle → Web                | Rust ``activate_entry`` / | ``web_wants_keyboard=true``|
+|                           | Python ``WebView.focus``  | (one owner); often         |
+|                           | → ``_set_mac_webviews_…`` | ``mac_tk_unfocus``. Cache  |
+|                           |                           | sync; rising-edge Tcl      |
+|                           |                           | ``_release_tk_keyboard_…`` |
++---------------------------+---------------------------+---------------------------+
+| Web → Idle (outside click)| Rust ``release_all_web_…``| ``web_wants=false`` +      |
+|                           |                           | wakeup byte; pump drains  |
++---------------------------+---------------------------+---------------------------+
+| Web → Idle (API)          | ``focus_parent`` /        | ``set_mac_web_input_…`` /  |
+|                           | ``_release_web_input_…``  | ``release_web_input``;     |
+|                           |                           | resync cache               |
++---------------------------+---------------------------+---------------------------+
+| Web + Tab/Esc             | Rust ``handle_keydown``   | Rust clears wants +        |
+|                           | **and** Python key guard  | ``mac_tk_unfocus``; Python |
+|                           |                           | may ``focus_parent``. Dual |
+|                           |                           | path is intentional.       |
++---------------------------+---------------------------+---------------------------+
+| Pending Tcl unfocus       | Rust stores flag + pipe   | ``_drain_mac_tk_unfocus``  |
+|                           |                           | → ``_release_tk_keyboard…``|
++---------------------------+---------------------------+---------------------------+
+| Key steal block           | Python ``_mac_web_key_…`` | Web-active → ``"break"``   |
+|                           |                           | (Tab/Esc exempt)           |
++---------------------------+---------------------------+---------------------------+
+
+Flag identity: Rust ``web_wants_keyboard`` ≡ ``native.mac_web_input_active()``
+≡ toplevel ``_tkwry_mac_web_input_active`` (OR of natives after sync).
+"""
 
 from __future__ import annotations
 

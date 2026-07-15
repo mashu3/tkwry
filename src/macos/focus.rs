@@ -8,6 +8,21 @@
 //! Tk.  Instead write one byte to a pipe and set a flag; Python drains on the
 //! Tk thread via a lightweight ``after`` pump (WKWebView breaks Tcl
 //! ``fileevent`` on the same root).
+//!
+//! **Keyboard ownership** (keep in sync with ``tkwry/_macos.py`` module docs;
+//! patch Rust + Python together):
+//!
+//! | Transition | Writer | Flags / Python reaction |
+//! |---|---|---|
+//! | Idle → Web | `activate_entry` / Python `WebView.focus` | `web_wants_keyboard=true` (one owner); often `mac_tk_unfocus`; cache sync + rising-edge Tcl release |
+//! | Web → Idle (outside click) | `release_all_web_focus` | `web_wants=false` + wakeup byte; pump drains |
+//! | Web → Idle (API) | `focus_parent` / `_release_web_input_…` | `set_mac_web_input_active` / `release_web_input`; resync cache |
+//! | Web + Tab/Esc | `handle_keydown` **and** Python key guard | Rust clears wants + `mac_tk_unfocus`; Python may `focus_parent` (intentional dual path) |
+//! | Pending Tcl unfocus | Rust flag + pipe | `_drain_mac_tk_unfocus` → `_release_tk_keyboard_focus` |
+//! | Key steal block | Python `_mac_web_key_guard` | Web-active → `"break"` (Tab/Esc exempt) |
+//!
+//! Flag identity: `web_wants_keyboard` ≡ `native.mac_web_input_active()` ≡
+//! toplevel `_tkwry_mac_web_input_active` (OR of natives after sync).
 
 use std::cell::RefCell;
 use std::collections::HashMap;

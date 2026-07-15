@@ -101,7 +101,10 @@ def test_teardown_unbinds_via_toplevel_when_bind_root_differs(
     ]
 
 
-def test_mac_web_input_active_reads_native_state(tk_root) -> None:
+def test_mac_web_input_active_reads_native_state(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_macos, "_release_tk_keyboard_focus", lambda _t: None)
     active_native = MagicMock()
     active_native.mac_web_input_active.return_value = True
     inactive_native = MagicMock()
@@ -122,7 +125,42 @@ def test_mac_web_input_active_reads_native_state(tk_root) -> None:
     assert tk_root._tkwry_mac_web_input_active is False
 
 
-def test_set_mac_webviews_input_active_syncs_cache_from_natives(tk_root) -> None:
+def test_mac_web_input_cache_matches_or_of_natives(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Invariant from the ownership table: cache ≡ OR(native.mac_web_input_active)."""
+    monkeypatch.setattr(_macos, "_release_tk_keyboard_focus", lambda _t: None)
+    a = MagicMock()
+    b = MagicMock()
+    a.mac_web_input_active.return_value = False
+    b.mac_web_input_active.return_value = False
+    tk_root._tkwry_mac_webviews = [
+        SimpleNamespace(destroyed=False, native=a),
+        SimpleNamespace(destroyed=False, native=b),
+    ]
+    tk_root._tkwry_mac_web_input_active = True  # stale cache
+
+    assert _macos._mac_web_input_active(tk_root) is False
+    assert tk_root._tkwry_mac_web_input_active is False
+
+    a.mac_web_input_active.return_value = True
+    assert _macos._mac_web_input_active(tk_root) is True
+    assert tk_root._tkwry_mac_web_input_active is True
+
+    a.mac_web_input_active.return_value = False
+    b.mac_web_input_active.return_value = True
+    assert _macos._mac_web_input_active(tk_root) is True
+    assert tk_root._tkwry_mac_web_input_active is True
+
+    b.mac_web_input_active.return_value = False
+    assert _macos._mac_web_input_active(tk_root) is False
+    assert tk_root._tkwry_mac_web_input_active is False
+
+
+def test_set_mac_webviews_input_active_syncs_cache_from_natives(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_macos, "_release_tk_keyboard_focus", lambda _t: None)
     native = MagicMock()
     native.mac_web_input_active.return_value = True
     web = SimpleNamespace(destroyed=False, native=native)
@@ -420,6 +458,7 @@ def test_schedule_mac_window_tabbing_disable_retries_then_succeeds(
         lambda _toplevel: 1,
         raising=False,
     )
+    monkeypatch.setattr(tk_root, "update_idletasks", lambda: None)
     monkeypatch.setattr(
         _macos,
         "_mac_after",
@@ -477,27 +516,29 @@ def test_install_tabbing_disable_off_main_defers_to_tk_init(
         fake_disable,
         raising=False,
     )
-    tk.Tk.__init__ = fake_orig  # type: ignore[method-assign]
+    try:
+        tk.Tk.__init__ = fake_orig  # type: ignore[method-assign]
 
-    done = threading.Event()
+        done = threading.Event()
 
-    def worker() -> None:
-        _macos.install_automatic_window_tabbing_disable()
-        done.set()
+        def worker() -> None:
+            _macos.install_automatic_window_tabbing_disable()
+            done.set()
 
-    threading.Thread(target=worker).start()
-    done.wait(timeout=2.0)
+        threading.Thread(target=worker).start()
+        done.wait(timeout=2.0)
 
-    assert disable_calls == []
-    patched_init = tk.Tk.__init__
-    assert getattr(patched_init, _macos._TABBING_PATCH_ATTR, False)
+        assert disable_calls == []
+        patched_init = tk.Tk.__init__
+        assert getattr(patched_init, _macos._TABBING_PATCH_ATTR, False)
 
-    patched_init(object(), "test")  # type: ignore[call-arg]
+        patched_init(object(), "test")  # type: ignore[call-arg]
 
-    assert disable_calls == [True]
-    assert init_calls == [True]
-
-    tk.Tk.__init__ = orig_init
+        assert disable_calls == [True]
+        assert init_calls == [True]
+    finally:
+        tk.Tk.__init__ = orig_init
+        _macos._tabbing_disable_done = False
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
