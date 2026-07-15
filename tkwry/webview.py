@@ -405,9 +405,10 @@ class WebView:
       manager and a real size. Unmap/remap does **not** clear ``ready`` or
       re-fire the ready event.
     * **Map/visibility → ``set_visible`` / ``phase``** — ``<Map>`` / ``<Unmap>``
-      (e.g. Notebook tabs) drive ``_frame_should_show`` → native
-      ``set_visible``. When laid out but not shown, ``phase`` is
-      :attr:`WebViewPhase.HIDDEN` while ``ready`` stays ``True``.
+      (e.g. Notebook tabs) drive ``_host_is_viewable_for_map`` →
+      ``_frame_should_show`` → native ``set_visible``. When laid out but not
+      shown, ``phase`` is :attr:`WebViewPhase.HIDDEN` while ``ready`` stays
+      ``True``.
 
     +---------------+--------+-------+-----------+---------------------------+
     | Phase         | native | ready | destroyed | Allowed public API        |
@@ -2314,12 +2315,10 @@ class WebView:
         try:
             if not self._frame.winfo_exists() or self._webview is None:
                 return False
+            # Real mapped size only — do not use ``_bounds_size()`` init fallback.
             if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
                 return False
-            # Xvfb headless: winfo_viewable() stays False while geometry is valid.
-            if sys.platform == "linux":
-                return True
-            return bool(self._frame.winfo_viewable())
+            return self._host_is_viewable_for_map()
         except tk.TclError:
             return False
 
@@ -2474,18 +2473,23 @@ class WebView:
         except tk.TclError:
             return None
 
+    def _host_is_viewable_for_map(self) -> bool:
+        """Map/visibility axis only (HIDDEN vs READY) — never used by ``ready``.
+
+        Xvfb headless: ``winfo_viewable()`` stays False while geometry is valid,
+        so Linux treats the map axis as always viewable.
+        """
+        if sys.platform == "linux":
+            return True
+        return bool(self._frame.winfo_viewable())
+
     def _frame_should_show(self) -> bool:
         try:
             if not self._frame.winfo_exists():
                 return False
             if self._bounds_size() is None:
                 return False
-            # Xvfb headless: winfo_viewable() stays False while geometry is valid.
-            if sys.platform == "linux":
-                return True
-            if not self._frame.winfo_viewable():
-                return False
-            return True
+            return self._host_is_viewable_for_map()
         except tk.TclError:
             return False
 
@@ -2550,17 +2554,11 @@ class WebView:
         if self._webview is None:
             return False
         if not self._frame_should_show():
-            try:
-                self._webview.set_visible(False)
-            except Exception:
-                return False
+            self._hide_native_view(self._webview)
             return False
         size = self._bounds_size()
         if size is None:
-            try:
-                self._webview.set_visible(False)
-            except Exception:
-                return False
+            self._hide_native_view(self._webview)
             return False
         width, height = size
         try:

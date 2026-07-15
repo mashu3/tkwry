@@ -7,7 +7,7 @@ import tkinter as tk
 
 import pytest
 
-from tkwry import WebView
+from tkwry import WebView, WebViewPhase
 from tkwry._linux import GtkPump
 from tkwry.exceptions import WebViewCreationError, WebViewDestroyedError
 from tkwry.webview import _CREATE_MAX_ATTEMPTS, _FLUSH_LOAD_MAX_ATTEMPTS
@@ -492,6 +492,45 @@ def test_frame_should_show_true_when_viewable(tk_root, monkeypatch) -> None:
     monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
 
     assert web._frame_should_show() is True
+
+
+def test_map_axis_viewable_shared_by_show_and_initial_load(
+    tk_root, monkeypatch
+) -> None:
+    """Map predicates share ``_host_is_viewable_for_map``; layout ``ready`` does not."""
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    web._webview = object()
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_manager", lambda: "pack")
+    monkeypatch.setattr(frame, "winfo_width", lambda: 400)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 300)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
+    monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
+
+    assert web._host_is_viewable_for_map() is False
+    assert web._frame_should_show() is False
+    assert web._frame_ready_for_initial_load() is False
+    assert web._layout_ready() is True
+    assert web.ready is True
+    assert web.phase is WebViewPhase.HIDDEN
+
+
+def test_sync_bounds_hides_via_hide_native_view(tk_root, monkeypatch) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    hidden: list[object] = []
+
+    class Native:
+        def set_visible(self, visible: bool) -> None:
+            raise AssertionError("set_visible should go through _hide_native_view")
+
+    web._webview = Native()  # type: ignore[assignment]
+    monkeypatch.setattr(web, "_frame_should_show", lambda: False)
+    monkeypatch.setattr(web, "_hide_native_view", lambda native: hidden.append(native))
+
+    assert web._sync_bounds() is False
+    assert hidden == [web._webview]
 
 
 def test_layout_ready_false_for_init_size_before_map_on_win32(
