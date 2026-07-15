@@ -385,7 +385,7 @@ def test_unregister_tears_down_when_toplevel_already_destroyed(
     assert teardown_calls == [tk_root]
 
 
-def test_focus_in_tags_widget_without_releasing_web_input(
+def test_focus_in_resigns_web_input_for_editable(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import tkinter as tk
@@ -402,7 +402,6 @@ def test_focus_in_tags_widget_without_releasing_web_input(
         "_prepend_mac_key_guard",
         lambda widget: tagged.append(widget),
     )
-    monkeypatch.setattr(_macos, "_mac_web_input_active", lambda _t: True)
 
     entry = tk.Entry(tk_root)
     tk_root._tkwry_mac_webviews = [SimpleNamespace()]  # type: ignore[list-item]
@@ -411,7 +410,7 @@ def test_focus_in_tags_widget_without_releasing_web_input(
     _macos._mac_focus_in_handler(event)  # type: ignore[arg-type]
 
     assert tagged == [entry]
-    assert released == []
+    assert released == [True]
 
 
 def test_input_wakeup_releases_web_input_on_editable_click(
@@ -431,7 +430,6 @@ def test_input_wakeup_releases_web_input_on_editable_click(
         "_refocus_tk_widget",
         lambda widget: refocused.append(widget),
     )
-    monkeypatch.setattr(_macos, "_mac_web_input_active", lambda _t: True)
     monkeypatch.setattr(_macos, "_mac_after", lambda _t, _d, cb, *args: cb(*args))
     monkeypatch.setattr(_macos, "_mac_service_wakeup", lambda _t: None)
     monkeypatch.setattr(_macos, "_mac_webviews", lambda _t: [object()])
@@ -445,6 +443,55 @@ def test_input_wakeup_releases_web_input_on_editable_click(
 
     assert released == [True]
     assert refocused == [entry]
+
+
+def test_input_wakeup_resigns_even_when_web_input_inactive(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stale FR: wants already false but WK may still be first responder."""
+    import tkinter as tk
+
+    released: list[bool] = []
+    monkeypatch.setattr(
+        _macos,
+        "_release_web_input_for_tk_traversal",
+        lambda _t: released.append(True),
+    )
+    monkeypatch.setattr(_macos, "_mac_web_input_active", lambda _t: False)
+    monkeypatch.setattr(_macos, "_mac_after", lambda _t, _d, cb, *args: cb(*args))
+    monkeypatch.setattr(_macos, "_mac_service_wakeup", lambda _t: None)
+    monkeypatch.setattr(_macos, "_mac_webviews", lambda _t: [object()])
+    monkeypatch.setattr(_macos, "_ensure_mac_pump", lambda _t: None)
+    monkeypatch.setattr(_macos, "_refocus_tk_widget", lambda _w: None)
+
+    entry = tk.Entry(tk_root)
+    tk_root._tkwry_mac_webviews = [SimpleNamespace()]  # type: ignore[list-item]
+    event = SimpleNamespace(widget=entry)
+
+    _macos._mac_input_wakeup(event)  # type: ignore[arg-type]
+
+    assert released == [True]
+
+
+def test_release_web_input_calls_focus_parent_even_when_inactive(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Native:
+        def mac_web_input_active(self) -> bool:
+            return False
+
+    focused: list[bool] = []
+    web = SimpleNamespace(
+        destroyed=False,
+        native=Native(),
+        focus_parent=lambda: focused.append(True),
+    )
+    monkeypatch.setattr(_macos, "_mac_service_wakeup", lambda _t: None)
+    tk_root._tkwry_mac_webviews = [web]  # type: ignore[list-item]
+
+    _macos._release_web_input_for_tk_traversal(tk_root)
+
+    assert focused == [True]
 
 
 def test_mac_web_key_guard_allows_tab_traversal(

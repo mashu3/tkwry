@@ -15,8 +15,9 @@
 //! | Transition | Writer | Flags / Python reaction |
 //! |---|---|---|
 //! | Idle → Web | `activate_entry` / Python `WebView.focus` | `web_wants_keyboard=true` (one owner); often `mac_tk_unfocus`; cache sync + rising-edge Tcl release |
-//! | Web → Idle (outside click) | `release_all_web_focus` | `web_wants=false` + wakeup byte; pump drains |
+//! | Web → Idle (outside click) | `release_all_web_focus` | Idempotent `focus_parent` + `web_wants=false` even if flag already false; wakeup; pump drains |
 //! | Web → Idle (API) | `focus_parent` / `_release_web_input_…` | `set_mac_web_input_active` / `release_web_input`; resync cache |
+//! | Tk editable owns keyboard | Python `FocusIn` / editable `Button-1`; Rust outside click | Idempotent resign: always `focus_parent` + `web_wants=false` (FR may stick after flag-only clear) |
 //! | Web + Tab/Esc | `handle_keydown` **and** Python key guard | Rust clears wants + `mac_tk_unfocus`; Python may `focus_parent` (intentional dual path) |
 //! | Pending Tcl unfocus | Rust flag + pipe | `_drain_mac_tk_unfocus` → `_release_tk_keyboard_focus` |
 //! | Key steal block | Python `_mac_web_key_guard` | Web-active → `"break"` (Tab/Esc exempt) |
@@ -443,19 +444,18 @@ fn activate_entry(entries: &[FocusEntry], idx: usize, wakeup: &AtomicI32) {
 }
 
 fn release_all_web_focus(entries: &[FocusEntry], wakeup: &AtomicI32) {
-    let mut changed = false;
+    // Always resign FR + clear wants — skipping when the flag is already false
+    // leaves WKWebView as first responder and dual-delivers keys to Tk Entry.
+    let mut any = false;
     for entry in entries {
-        if !entry.web_wants_keyboard.load(Ordering::SeqCst) {
-            continue;
-        }
         if let Ok(guard) = entry.inner.lock() {
             if let Some(ref wv) = *guard {
                 release_web_focus_locked(wv, &entry.web_wants_keyboard);
-                changed = true;
+                any = true;
             }
         }
     }
-    if changed {
+    if any {
         notify_wakeup(wakeup);
     }
 }

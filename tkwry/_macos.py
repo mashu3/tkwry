@@ -12,12 +12,20 @@ table before patching ``focus.rs`` or this module — change both together):
 |                           |                           | sync; rising-edge Tcl      |
 |                           |                           | ``_release_tk_keyboard_…`` |
 +---------------------------+---------------------------+---------------------------+
-| Web → Idle (outside click)| Rust ``release_all_web_…``| ``web_wants=false`` +      |
-|                           |                           | wakeup byte; pump drains  |
+| Web → Idle (outside click)| Rust ``release_all_web_…``| Idempotent ``focus_parent`` |
+|                           |                           | + ``web_wants=false`` even  |
+|                           |                           | if flag already false;     |
+|                           |                           | wakeup byte; pump drains   |
 +---------------------------+---------------------------+---------------------------+
 | Web → Idle (API)          | ``focus_parent`` /        | ``set_mac_web_input_…`` /  |
 |                           | ``_release_web_input_…``  | ``release_web_input``;     |
 |                           |                           | resync cache               |
++---------------------------+---------------------------+---------------------------+
+| Tk editable owns keyboard | Python ``FocusIn`` /      | Idempotent resign: always  |
+|                           | editable ``Button-1``;    | ``focus_parent`` +         |
+|                           | Rust outside click        | ``web_wants=false`` (FR    |
+|                           |                           | may stick after flag-only  |
+|                           |                           | clear)                     |
 +---------------------------+---------------------------+---------------------------+
 | Web + Tab/Esc             | Rust ``handle_keydown``   | Rust clears wants +        |
 |                           | **and** Python key guard  | ``mac_tk_unfocus``; Python |
@@ -383,7 +391,8 @@ def _mac_input_wakeup(event: tk.Event) -> None:
     toplevel = widget.winfo_toplevel()
     if not getattr(toplevel, "_tkwry_mac_webviews", None):
         return
-    if _widget_accepts_tk_keys(widget) and _mac_web_input_active(toplevel):
+    if _widget_accepts_tk_keys(widget):
+        # Always resign Web FR — wants may already be false while WK is still FR.
         _release_web_input_for_tk_traversal(toplevel)
         _mac_after(toplevel, 1, _refocus_tk_widget, widget)
     _mac_service_wakeup(toplevel)
@@ -393,7 +402,7 @@ def _mac_input_wakeup(event: tk.Event) -> None:
 
 
 def _mac_focus_in_handler(event: tk.Event) -> None:
-    """Tag editable widgets on focus for the web-active key guard."""
+    """Tag editable widgets and resign Web first responder for Tk ownership."""
     widget = event.widget
     toplevel = widget.winfo_toplevel()
     if not getattr(toplevel, "_tkwry_mac_webviews", None):
@@ -401,6 +410,7 @@ def _mac_focus_in_handler(event: tk.Event) -> None:
     if not _widget_accepts_tk_keys(widget):
         return
     _prepend_mac_key_guard(widget)
+    _release_web_input_for_tk_traversal(toplevel)
 
 
 def _mac_web_key_guard(event: tk.Event) -> str | None:
@@ -420,15 +430,18 @@ def _mac_web_key_guard(event: tk.Event) -> str | None:
 
 
 def _release_web_input_for_tk_traversal(toplevel: tk.Misc) -> None:
+    """Idempotent Web → Idle for Tk editable ownership.
+
+    Always call ``focus_parent`` so AppKit first responder resigns even when
+    ``web_wants_keyboard`` is already false (flag-only clear / stale FR).
+    """
     for web in _mac_webviews(toplevel):
-        native = web.native
-        if native is None or not native.mac_web_input_active():
+        if web.native is None:
             continue
         try:
             web.focus_parent()
         except Exception:
             pass
-        break
     _mac_service_wakeup(toplevel)
 
 
