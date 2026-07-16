@@ -4,6 +4,50 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.0] - 2026-07-16
+
+First minor release after the 0.0.x series. Windows/macOS wheels remain the
+supported install path; Linux stays source-only (best-effort) by design.
+
+### Added
+
+- `WebViewPhase` — derived lifecycle snapshot (`PRE_CREATE` … `DESTROYED`)
+- Hard-fail with a clear install hint when the Windows WebView2 Runtime is missing
+- Documented size contract: mapped host `winfo_*` is authoritative; constructor /
+  `place(..., width=, height=)` sizes apply only before Tk reports a real size
+- README contracts for sync-hook wait (~60s), async queue caps (2048), Linux
+  concurrent `eval_js_with_callback` stalls, and optional macOS DevTools
+
+### Fixed
+
+- macOS keyboard ownership: resign WebView when Tk editable takes focus; peel
+  stale Tcl Entry focus while Web owns the keyboard; separate cache query from
+  Idle→Web Tcl rising-edge
+- Linux GtkPump: yield under Xvfb so multi-WebView `page_load` works; nest drains
+  through `pump_gtk_unless_active`; queue-only service when GtkPump owns the
+  toplevel; create/destroy pumps use the same path
+- Linux initial load deferred through pending/`_dispatch_pending_load` (GTK /
+  `place` layouts); geometry manager required for `ready`
+- Viewport/`place` sizing pinned to host `winfo_*` (place size is pre-layout
+  fallback only); mypy-safe `place_info` parsing
+- Teardown poll armed after `destroy`; off-thread destroy drain/atexit/schedule
+  unified; `__del__` logs exceptions instead of swallowing them
+- Eval lifetime table + shared terminal-state bookkeeping; poll stop unified
+
+### Changed
+
+- Lifecycle / load / event-poll flags routed through write helpers; map-axis
+  viewable helper shared; ready funnel via `_sync_bounds_and_stacking`
+- README Known limitations deduped into Platform notes; sync hooks documented as
+  Tk-thread + WebKit-blocking; `WebViewNotReadyError` / `url` docs corrected
+- Linux CI: shared runner with Docker, larger shm, split pytest suites, WebKit
+  reaped between suites; most content/layout/viewport/lifecycle/IPC tests enabled
+
+### Known limitations
+
+Unchanged posture — see README: Alpha APIs, Linux no wheel, Linux concurrent
+eval, macOS IME / import-order / DevTools private APIs, Notebook `ready`≠map.
+
 ## [0.0.9] - 2026-07-12
 
 ### Added
@@ -216,6 +260,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.1.0]: https://github.com/mashu3/tkwry/releases/tag/v0.1.0
 [0.0.9]: https://github.com/mashu3/tkwry/releases/tag/v0.0.9
 [0.0.8]: https://github.com/mashu3/tkwry/releases/tag/v0.0.8
 [0.0.7]: https://github.com/mashu3/tkwry/releases/tag/v0.0.7

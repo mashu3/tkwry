@@ -259,7 +259,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ### Linux
 
-**By design in v0.0.x:** no PyPI wheel; install from source (sdist / git). Support is **best-effort** — not a release blocker for Windows/macOS wheels. CI runs the integration suite under **Xvfb**; real-desktop / Wayland timing may still differ. GTK is pumped on a Tk timer automatically after install.
+**By design in v0.1.x:** no PyPI wheel; install from source (sdist / git). Support is **best-effort** — not a release blocker for Windows/macOS wheels. CI runs the integration suite under **Xvfb**; real-desktop / Wayland timing may still differ. GTK is pumped on a Tk timer automatically after install.
 
 For `place` layouts, pass explicit `width`/`height` so host `winfo_*` settles; native size follows those `winfo_*` values (see [Layout / resize](#layout--resize)).
 
