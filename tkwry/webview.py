@@ -1040,18 +1040,12 @@ class WebView:
     def _ensure_gtk_pump_attached(self) -> None:
         if sys.platform != "linux" or self._destroyed or self._webview is None:
             return
-        try:
-            GtkPump.ensure_attached(self._frame)
-        except tk.TclError:
-            GtkPump._schedule_attach_retry(self._frame)
+        GtkPump.ensure_attached(self._frame)
 
     def _attach_gtk_pump_for_native(self) -> None:
         if sys.platform != "linux" or self._destroyed:
             return
-        try:
-            GtkPump.ensure_attached(self._frame)
-        except tk.TclError:
-            GtkPump._schedule_attach_retry(self._frame)
+        GtkPump.ensure_attached(self._frame)
 
     def _native_is_alive(self, native: NativeWebView) -> bool:
         try:
@@ -1774,6 +1768,8 @@ class WebView:
         return self._dispatch_sync_hook(
             lambda: self._invoke_navigation_handler(url),
             default=False,
+            kind="on_navigation",
+            detail=url,
         )
 
     def _native_title_changed(self, title: str) -> None:
@@ -1808,6 +1804,8 @@ class WebView:
         return self._dispatch_sync_hook(
             lambda: self._invoke_new_window_handler(url),
             default=NewWindowResponse.Deny,
+            kind="on_new_window",
+            detail=url,
         )
 
     def _enqueue_ipc(self, message: str) -> None:
@@ -1873,7 +1871,14 @@ class WebView:
         except (tk.TclError, RuntimeError):
             pass
 
-    def _dispatch_sync_hook(self, invoke: Callable[[], _T], default: _T) -> _T:
+    def _dispatch_sync_hook(
+        self,
+        invoke: Callable[[], _T],
+        default: _T,
+        *,
+        kind: str = "sync hook",
+        detail: str | None = None,
+    ) -> _T:
         if threading.get_ident() == self._tk_thread_id:
             return self._run_sync_hook_invoke(invoke, default)
 
@@ -1898,15 +1903,17 @@ class WebView:
         enqueued_at = time.monotonic()
         deadline = enqueued_at + _SYNC_HOOK_TIMEOUT_S
         absolute_deadline = enqueued_at + _SYNC_HOOK_MAX_WAIT_S
+        suffix = f" ({detail})" if detail else ""
+
+        def _timeout_msg(prefix: str) -> None:
+            print(f"tkwry: {prefix}{suffix}", file=sys.stderr)
+
         while not done.is_set():
             if not started[0]:
                 remaining = min(deadline, absolute_deadline) - time.monotonic()
                 if remaining <= 0:
                     cancelled[0] = True
-                    print(
-                        f"tkwry: sync hook timed out after {_SYNC_HOOK_TIMEOUT_S:g}s",
-                        file=sys.stderr,
-                    )
+                    _timeout_msg(f"{kind} timed out after {_SYNC_HOOK_TIMEOUT_S:g}s")
                     return default
                 done.wait(timeout=min(0.05, remaining))
             else:
@@ -1915,16 +1922,13 @@ class WebView:
                 if remaining <= 0:
                     cancelled[0] = True
                     if time.monotonic() >= absolute_deadline:
-                        print(
-                            "tkwry: sync hook timed out after "
-                            f"{_SYNC_HOOK_MAX_WAIT_S:g}s total",
-                            file=sys.stderr,
+                        _timeout_msg(
+                            f"{kind} timed out after {_SYNC_HOOK_MAX_WAIT_S:g}s total"
                         )
                     else:
-                        print(
-                            "tkwry: sync hook handler timed out after "
-                            f"{_SYNC_HOOK_HANDLER_TIMEOUT_S:g}s",
-                            file=sys.stderr,
+                        _timeout_msg(
+                            f"{kind} handler timed out after "
+                            f"{_SYNC_HOOK_HANDLER_TIMEOUT_S:g}s"
                         )
                     return default
                 done.wait(timeout=min(0.05, remaining))
@@ -2518,9 +2522,9 @@ class WebView:
             )
             if self._flush_load_attempt >= _FLUSH_LOAD_MAX_ATTEMPTS:
                 print(
-                    "tkwry: load failed after "
-                    f"{self._flush_load_attempt} attempt(s); retrying in "
-                    f"{delay_ms}ms",
+                    "tkwry: load still failing after "
+                    f"{self._flush_load_attempt} attempt(s); continuing to retry "
+                    f"in {delay_ms}ms",
                     file=sys.stderr,
                 )
                 self._flush_load_attempt = 0

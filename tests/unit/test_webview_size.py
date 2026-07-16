@@ -1248,7 +1248,7 @@ def test_try_create_passes_visible_from_frame_should_show(
 
 
 def test_flush_load_retries_without_clearing_pending_on_failure(
-    tk_root, monkeypatch: pytest.MonkeyPatch
+    tk_root, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
     from unittest.mock import MagicMock
 
@@ -1274,6 +1274,28 @@ def test_flush_load_retries_without_clearing_pending_on_failure(
     web._flush_load()
     assert web._pending_load == ("url", "https://example.com")
     assert web._flush_load_attempt == 0
+    err = capsys.readouterr().err
+    assert "load still failing" in err
+    assert "continuing to retry" in err
+
+
+def test_create_only_setters_reject_after_native_exists(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    web._webview = object()  # type: ignore[assignment]
+    with pytest.raises(ValueError, match="user_agent cannot be changed"):
+        web.set_user_agent("tkwry-test")
+    with pytest.raises(ValueError, match="initialization_script cannot be changed"):
+        web.set_initialization_script("void 0")
+
+
+def test_create_only_setters_ok_before_native(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=200, height=100)
+    web.set_user_agent("tkwry-test")
+    web.set_initialization_script("void 0")
+    assert web._user_agent == "tkwry-test"
+    assert web._initialization_script == "void 0"
 
 
 def _web_with_creation_failure(

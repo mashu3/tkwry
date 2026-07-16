@@ -10,6 +10,7 @@ from tkwry import (
     DragDropEvent,
     DragDropHandler,
     EvalCallback,
+    EvalErrorHandler,
     IpcHandler,
     NavigationHandler,
     NewWindowHandler,
@@ -25,6 +26,7 @@ from tkwry._core import WebView as NativeWebView
 PUBLIC_TYPE_ALIASES = (
     DragDropHandler,
     EvalCallback,
+    EvalErrorHandler,
     IpcHandler,
     NavigationHandler,
     NewWindowHandler,
