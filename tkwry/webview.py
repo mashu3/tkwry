@@ -1451,6 +1451,10 @@ class WebView:
         Call this manually after layout changes that do not emit Configure
         (e.g. custom geometry) so the WebView reflows — useful for centered
         images and responsive content.
+
+        Size source of truth is the host's mapped ``winfo_width`` /
+        ``winfo_height`` (when ``> 1``). Constructor or ``place`` dimensions
+        are only used before Tk reports a real size.
         """
         self._require_tk_thread()
         if self._destroyed:
@@ -1655,20 +1659,64 @@ class WebView:
         script, on_error = pending
         self._run_eval_js(script, on_error)
 
+    def _place_info_size(self) -> tuple[int | None, int | None]:
+        """Explicit ``place(..., width=, height=)`` on the host, if any.
+
+        Used only as a pre-layout fallback when ``winfo_*`` is still ``<= 1``.
+        Mapped ``winfo_width`` / ``winfo_height`` remain authoritative.
+        """
+        try:
+            if self._frame.winfo_manager() != "place":
+                return None, None
+            info = self._frame.place_info()
+        except tk.TclError:
+            return None, None
+
+        def _axis(name: str) -> int | None:
+            raw = info.get(name)
+            if raw is None or raw == "":
+                return None
+            try:
+                value = int(float(raw))
+            except (TypeError, ValueError):
+                return None
+            return value if value > 1 else None
+
+        return _axis("width"), _axis("height")
+
+    def _size_with_fallbacks(
+        self, frame_w: int, frame_h: int
+    ) -> tuple[int, int] | None:
+        """Resolve host size for create/sync.
+
+        Contract: when either axis reports ``winfo_* > 1``, that value wins.
+        Before layout, fall back to constructor ``width``/``height``, then to
+        explicit ``place`` width/height on the host.
+        """
+        place_w, place_h = self._place_info_size()
+        if frame_w > 1:
+            width = frame_w
+        elif self._init_width is not None:
+            width = self._init_width
+        else:
+            width = place_w
+        if frame_h > 1:
+            height = frame_h
+        elif self._init_height is not None:
+            height = self._init_height
+        else:
+            height = place_h
+        if width is None or height is None or width <= 1 or height <= 1:
+            return None
+        return width, height
+
     def _creation_size(self) -> tuple[int, int] | None:
         self._frame.update_idletasks()
         frame_w = self._frame.winfo_width()
         frame_h = self._frame.winfo_height()
         if frame_w > 1 and frame_h > 1:
             return frame_w, frame_h
-
-        width = frame_w if frame_w > 1 else self._init_width
-        height = frame_h if frame_h > 1 else self._init_height
-        if width is None or height is None:
-            return None
-        if width <= 1 or height <= 1:
-            return None
-        return width, height
+        return self._size_with_fallbacks(frame_w, frame_h)
 
     def _layout_ready(self) -> bool:
         """Whether the host frame has real geometry for callbacks and API use."""
@@ -2539,17 +2587,17 @@ class WebView:
             self._ensure_event_poll()
 
     def _bounds_size(self) -> tuple[int, int] | None:
-        """Return the width/height to push, or None when geometry is not meaningful."""
+        """Return the width/height to push, or None when geometry is not meaningful.
+
+        Mapped ``winfo_*`` is authoritative; see ``_size_with_fallbacks``.
+        """
         try:
             if not self._frame.winfo_exists():
                 return None
-            frame_w = self._frame.winfo_width()
-            frame_h = self._frame.winfo_height()
-            width = frame_w if frame_w > 1 else self._init_width
-            height = frame_h if frame_h > 1 else self._init_height
-            if width is None or height is None or width <= 1 or height <= 1:
-                return None
-            return width, height
+            return self._size_with_fallbacks(
+                self._frame.winfo_width(),
+                self._frame.winfo_height(),
+            )
         except tk.TclError:
             return None
 

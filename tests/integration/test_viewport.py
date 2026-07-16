@@ -210,13 +210,11 @@ def test_viewport_matches_frame_after_grid(tk_root) -> None:
 def test_viewport_matches_frame_after_place(tk_root) -> None:
     import tkinter as tk
 
-    from support.viewport import VIEWPORT_TOLERANCE
-
     tk_root.geometry("520x380")
     host = tk.Frame(tk_root, bg="#222")
     placed = (480, 320)
-    # Pass width/height to place() — configured Frame size is not always
-    # reflected by winfo_* under Linux/Xvfb for place geometry.
+    # Pass width/height to place() so Tk allocates a real size; without them
+    # Linux/Xvfb may leave winfo_* at 1 until later Configure.
     host.place(
         relx=0.5,
         rely=0.5,
@@ -231,17 +229,15 @@ def test_viewport_matches_frame_after_place(tk_root) -> None:
     web.pack(fill="both", expand=True)
 
     wait_ready(tk_root, web)
-    viewport = read_viewport(web, tk_root)
-    assert viewport is not None, "expected viewport measurement"
-    matched_host = viewport_matches_frame(viewport, host)
-    matched_place = (
-        abs(viewport[0] - placed[0]) <= VIEWPORT_TOLERANCE
-        and abs(viewport[1] - placed[1]) <= VIEWPORT_TOLERANCE
-    )
-    # Linux/Xvfb may report toplevel size via winfo_* while the WebView still
-    # respects the place() request; accept either contract.
-    assert matched_host or matched_place, (
-        f"viewport={viewport}, placed={placed[0]}x{placed[1]}, "
+
+    def _viewport_tracks_winfo() -> bool:
+        web.sync_bounds()
+        return viewport_matches_frame(read_viewport(web, tk_root), host)
+
+    # Contract: viewport must track host winfo_* (not the place() request alone).
+    assert wait_until(tk_root, _viewport_tracks_winfo, steps=300), (
+        f"viewport should track host winfo after place; "
+        f"placed={placed[0]}x{placed[1]}, "
         f"winfo={host.winfo_width()}x{host.winfo_height()}"
     )
 

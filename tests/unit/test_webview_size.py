@@ -162,6 +162,51 @@ def test_bounds_size_uses_explicit_dimensions_before_layout(
     assert web._bounds_size() == (300, 200)
 
 
+def test_bounds_size_uses_place_dimensions_before_layout(tk_root, monkeypatch) -> None:
+    frame = tk.Frame(tk_root)
+    frame.place(x=8, y=8, width=480, height=320)
+    web = WebView(frame)
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 1)
+
+    assert web._bounds_size() == (480, 320)
+
+
+def test_bounds_size_prefers_winfo_over_place(tk_root, monkeypatch) -> None:
+    frame = tk.Frame(tk_root)
+    frame.place(x=8, y=8, width=480, height=320)
+    web = WebView(frame)
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 400)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 300)
+
+    assert web._bounds_size() == (400, 300)
+
+
+def test_bounds_size_prefers_init_over_place(tk_root, monkeypatch) -> None:
+    frame = tk.Frame(tk_root)
+    frame.place(x=8, y=8, width=480, height=320)
+    web = WebView(frame, width=200, height=100)
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 1)
+
+    assert web._bounds_size() == (200, 100)
+
+
+def test_creation_size_uses_place_dimensions_before_layout(
+    tk_root, monkeypatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    frame.place(x=8, y=8, width=480, height=320)
+    web = WebView(frame)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 1)
+
+    assert web._creation_size() == (480, 320)
+
+
 def test_bounds_size_uses_frame_width_with_explicit_height(
     tk_root, monkeypatch
 ) -> None:
