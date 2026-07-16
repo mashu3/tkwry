@@ -1,8 +1,4 @@
-"""Ready events, initial size, and destroy safety.
-
-Linux: most tests are enabled. ``test_no_eval_callback_after_destroy`` stays
-skipped (page-load callback delivery under Xvfb).
-"""
+"""Ready events, initial size, and destroy safety."""
 
 from __future__ import annotations
 

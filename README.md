@@ -171,7 +171,9 @@ web = WebView(
 
 `on_page_load` fires `PageLoadEvent.Started` and `PageLoadEvent.Finished` **for every navigation** while a handler is registered (native listening follows the handler). Events are **not** replayed for navigations that happened before `set_on_page_load` / constructor `on_page_load`.
 
-**Callback threads:** all user handlers run on the **Tk main thread**. `on_page_load`, `on_title_changed`, IPC, and drag-and-drop are queued asynchronously. `on_navigation` and `on_new_window` are also invoked on Tk, but WebKit **blocks** until they return a value — keep them fast (heavy work → return deny/default and defer with `root.after`).
+**Callback threads:** all user handlers run on the **Tk main thread**. `on_page_load`, `on_title_changed`, IPC, and drag-and-drop are queued asynchronously. `on_navigation` and `on_new_window` are also invoked on Tk, but WebKit **blocks** until they return a value — keep them fast (heavy work → return deny/default and defer with `root.after`). Timed-out sync hooks are canceled after about **60s** total wait.
+
+Async queues (IPC, page-load, title, drag-drop, eval) cap at **2048** pending items each; further events are compacted or dropped. Use `take_queue_drop_counts()` to observe overflows.
 
 Callback exceptions are printed to stderr and do not stop event delivery.
 
@@ -236,6 +238,7 @@ Short checklist — **details live in [Platform notes](#-platform-notes)** (espe
 - **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
 - **`url()` on macOS** — may be `None` for inline HTML until a concrete `load_url`
 - **Hidden Notebook tabs** — native view is hidden; `ready` can stay `True` while unmapped
+- **Sync hooks / queues** — `on_navigation` / `on_new_window` may block WebKit up to ~60s; async event queues cap at 2048 (see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks))
 - **Drag & drop** — WebView area only (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
