@@ -54,6 +54,31 @@ def test_del_calls_destroy_on_tk_thread(
     assert destroyed == [True]
 
 
+def test_del_prints_traceback_when_destroy_fails(
+    tk_root, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    teardown_calls: list[bool] = []
+
+    def boom() -> None:
+        raise RuntimeError("destroy failed in __del__")
+
+    def track_teardown() -> None:
+        teardown_calls.append(True)
+
+    monkeypatch.setattr(web, "destroy", boom, raising=False)
+    monkeypatch.setattr(web, "_teardown_native_if_alive", track_teardown, raising=False)
+    web._unbind_frame_events()
+    web.__del__()
+
+    err = capsys.readouterr().err
+    assert "destroy failed in __del__" in err
+    assert "RuntimeError" in err
+    assert teardown_calls == [True]
+
+
 def test_schedule_destroy_on_tk_thread_runs_destroy(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

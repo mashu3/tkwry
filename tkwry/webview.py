@@ -866,11 +866,13 @@ class WebView:
             else:
                 self._schedule_destroy_on_tk_thread()
         except Exception:
+            # Still GC-safe (never raise from ``__del__``), but do not hide errors.
+            traceback.print_exc()
             if hasattr(self, "_destroyed") and not self._destroyed:
                 try:
                     self._teardown_native_if_alive()
                 except Exception:
-                    pass
+                    traceback.print_exc()
 
     def _schedule_destroy_on_tk_thread(self) -> None:
         """Best-effort ``destroy()`` when ``__del__`` runs off the Tk thread."""
