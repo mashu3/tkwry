@@ -459,10 +459,9 @@ class WebView:
        ``_queue_user_load`` / ``_clear_initial_load`` /
        ``_set_pending_load`` / pre-create helpers.
 
-    **Navigation hooks** (``on_navigation``, ``on_new_window``) must return
-    immediately to WebKit, so the native layer blocks until your handler
-    finishes. Handlers run on the **Tk main thread** (queued from WebKit).
-    Keep them fast.
+    **Navigation hooks** (``on_navigation``, ``on_new_window``) run on the
+    **Tk main thread**, but WebKit **blocks** until they return a value.
+    Keep them fast (heavy work → deny/default and defer with ``after``).
 
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
@@ -476,8 +475,10 @@ class WebView:
     ``_sync_bounds_and_stacking`` (plus create) into ``_maybe_fire_ready``.
 
     **Page load** (``on_page_load``): fires ``Started`` and ``Finished`` for
-    every navigation. Events are buffered (up to a fixed cap) until a handler
-    is registered and delivered when :meth:`set_on_page_load` attaches one.
+    every navigation **while a handler is registered** (native listening
+    follows the handler). Events are queued up to a fixed cap while listening;
+    navigations that occurred with no handler are **not** replayed when one is
+    attached later.
 
     **JavaScript** (``eval_js`` / ``eval_js_with_callback``): ``eval_js`` is
     fire-and-forget (Tk idle, no return value). ``eval_js_with_callback`` is
@@ -639,18 +640,21 @@ class WebView:
         _claim_frame_host(frame, self)
 
     def pack(self, **kwargs) -> None:
+        """``pack`` the host frame, then schedule bounds sync / native create."""
         self._require_not_destroyed("pack")
         self._frame.pack(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
 
     def grid(self, **kwargs) -> None:
+        """``grid`` the host frame, then schedule bounds sync / native create."""
         self._require_not_destroyed("grid")
         self._frame.grid(**kwargs)
         self._schedule_bounds_sync()
         self._schedule_try_create()
 
     def place(self, **kwargs) -> None:
+        """``place`` the host frame, then schedule bounds sync / native create."""
         self._require_not_destroyed("place")
         self._frame.place(**kwargs)
         self._schedule_bounds_sync()
@@ -1244,6 +1248,11 @@ class WebView:
         self._schedule_flush_load()
 
     def reload(self) -> None:
+        """Reload the current document.
+
+        Clears pending constructor / coalesced ``load_*`` so they cannot
+        overwrite this reload.
+        """
         native = self._require_ready("reload")
         # Supersede constructor deferred load so it cannot overwrite this reload.
         self._clear_initial_load()
@@ -1345,6 +1354,7 @@ class WebView:
             _set_mac_webviews_input_active(self._frame.winfo_toplevel(), None)
 
     def set_background_color(self, r: int, g: int, b: int, a: int = 255) -> None:
+        """Set the native WebView background color (RGBA 0–255)."""
         native = self._require_ready("set_background_color")
         for val, name in ((r, "r"), (g, "g"), (b, "b"), (a, "a")):
             _validate_color_component(val, name)
@@ -1375,15 +1385,19 @@ class WebView:
         self._initialization_script = script
 
     def open_devtools(self) -> None:
+        """Open the platform DevTools / inspector (private APIs on macOS)."""
         self._require_ready("open_devtools").open_devtools()
 
     def close_devtools(self) -> None:
+        """Close DevTools if open."""
         self._require_ready("close_devtools").close_devtools()
 
     def is_devtools_open(self) -> bool:
+        """Return whether DevTools is currently open."""
         return self._require_ready("is_devtools_open").is_devtools_open()
 
     def set_ipc_handler(self, handler: IpcHandler | None) -> None:
+        """Register or clear the JS → Python IPC handler (Tk main thread)."""
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
@@ -1398,7 +1412,7 @@ class WebView:
             self._ensure_event_poll()
 
     def set_on_navigation(self, handler: NavigationHandler | None) -> None:
-        """Register a navigation hook (runs on the Tk main thread)."""
+        """Register a navigation allow/deny hook (Tk main thread; WebKit waits)."""
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
@@ -1417,6 +1431,11 @@ class WebView:
             self._ensure_event_poll()
 
     def set_on_page_load(self, handler: PageLoadHandler | None) -> None:
+        """Register a page-load handler (Tk main thread; listening follows handler).
+
+        Navigations that occurred with no handler are not replayed. Clearing
+        with ``None`` stops native page-load collection.
+        """
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
@@ -1452,9 +1471,8 @@ class WebView:
         """Return overflow drop counts since the last call.
 
         Returns ``(ipc, page_load, title, drag_drop, eval)``. Each internal
-        Each internal queue caps at 2048 pending items; additional events are
-        compacted or discarded and counted here so applications can detect
-        handler backlogs.
+        queue caps at 2048 pending items; additional events are compacted or
+        discarded and counted here so applications can detect handler backlogs.
         """
         self._require_tk_thread()
         local = self._take_local_queue_drop_counts()
@@ -1470,6 +1488,7 @@ class WebView:
         )
 
     def set_on_title_changed(self, handler: TitleChangedHandler | None) -> None:
+        """Register a document-title handler (Tk main thread)."""
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
@@ -1484,7 +1503,7 @@ class WebView:
             self._ensure_event_poll()
 
     def set_on_new_window(self, handler: NewWindowHandler | None) -> None:
-        """Register a new-window hook (runs on the Tk main thread)."""
+        """Register a new-window hook (Tk main thread; WebKit waits for a response)."""
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")

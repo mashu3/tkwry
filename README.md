@@ -167,9 +167,9 @@ web = WebView(
 )
 ```
 
-`on_page_load` fires `PageLoadEvent.Started` and `PageLoadEvent.Finished` **for every navigation**. Events that occurred before a handler was registered are **discarded** when you call `set_on_page_load` (or pass `on_page_load` in the constructor from the start).
+`on_page_load` fires `PageLoadEvent.Started` and `PageLoadEvent.Finished` **for every navigation** while a handler is registered (native listening follows the handler). Events are **not** replayed for navigations that happened before `set_on_page_load` / constructor `on_page_load`.
 
-**Callback threads:** `on_page_load` and `on_title_changed` run on the **Tk main thread** (queued). `on_navigation` and `on_new_window` run **synchronously on the WebKit thread** — wry needs an immediate return value, so they cannot be queued. Keep those handlers fast and avoid Tk widget calls; defer work with `root.after` if needed.
+**Callback threads:** all user handlers run on the **Tk main thread**. `on_page_load`, `on_title_changed`, IPC, and drag-and-drop are queued asynchronously. `on_navigation` and `on_new_window` are also invoked on Tk, but WebKit **blocks** until they return a value — keep them fast (heavy work → return deny/default and defer with `root.after`).
 
 Callback exceptions are printed to stderr and do not stop event delivery.
 
@@ -207,13 +207,15 @@ web.destroy()   # release native webview; host Frame is kept
 | IPC | `set_ipc_handler` |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler` |
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
+| Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
 | Layout | `pack`, `grid`, `place`, `sync_bounds` (delegate to host `Frame` except `sync_bounds`) |
-| Lifecycle | `destroy`, `destroyed`, `native` |
+| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `wait_until_ready`, `bind`, `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error` |
+| Diagnostics | `take_queue_drop_counts` |
 
 Constructor options: `url`, `html`, `ipc_handler`, `devtools`, `background_color`,
 `user_agent`, `initialization_script`, `focused`, plus the callback hooks above.
 
-Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`.
+Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`, `WebViewPhase`.
 
 Type aliases: `IpcHandler`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`.
 
@@ -267,7 +269,7 @@ Tk child `Frame`s usually **do not** get their own `NSView` (Tk Aqua). tkwry att
 
 **Notebook / tabs:** unmapped tabs hide the native view (`set_visible(False)`) and show again on `<Map>` — required because frames share the toplevel `NSView`. `ready` is layout-based (can stay `True` while hidden); prefer visible-tab work after the tab is selected. No extra app code for tabs/panes — [`examples/multi_demo.py`](examples/multi_demo.py).
 
-IPC, page-load, title, eval, and drag-and-drop handlers run on the **Tk main thread** (queued). `on_navigation` / `on_new_window` stay synchronous on the WebKit thread — see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks).
+All user handlers run on the **Tk main thread**. `on_navigation` / `on_new_window` still make WebKit wait for a return value — see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks).
 
 ---
 
@@ -285,7 +287,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **URL safety** — normalizes and validates URLs before navigation
 - **DevTools** — `open_devtools()` / `devtools=True` for debugging
 - **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)
-- **Navigation hooks** — `on_page_load`, `on_title_changed` (Tk thread); `on_navigation`, `on_new_window` (WebKit thread, synchronous)
+- **Navigation hooks** — all handlers on the Tk thread; `on_navigation` / `on_new_window` block WebKit until they return
 - **Multiple layouts** — works with `pack`, `grid`, `place`, `Notebook`, and `PanedWindow` (see examples)
 - **Plotly-ready** — load HTML + `eval_js` for interactive charts
 - **Folium-ready** — embed Leaflet maps from Folium HTML (right-click to pin)
