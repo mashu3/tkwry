@@ -1145,6 +1145,7 @@ class WebView:
 
     def _clear_initial_load(self) -> None:
         """Drop constructor deferred load so user nav/reload cannot overwrite it."""
+        self._cancel_initial_load_timer()
         self._initial_load = None
 
     def _arm_initial_load(self, load: _PendingLoad) -> None:
@@ -1257,7 +1258,6 @@ class WebView:
         native = self._require_ready("reload")
         # Supersede constructor deferred load so it cannot overwrite this reload.
         self._clear_initial_load()
-        self._cancel_initial_load_timer()
         # Drop any idle-coalesced load_url/load_html so it cannot overwrite reload.
         self._clear_pending_load()
         self._flush_load_attempt = 0

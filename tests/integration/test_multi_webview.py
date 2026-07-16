@@ -136,30 +136,51 @@ def test_two_webviews_url_independent(tk_root, tmp_path: Path) -> None:
     page_b = tmp_path / "pane-b.html"
     page_a.write_text("<p>a</p>", encoding="utf-8")
     page_b.write_text("<p>b</p>", encoding="utf-8")
+    uri_a = page_a.absolute().as_uri()
+    uri_b = page_b.absolute().as_uri()
 
-    web_a = WebView(left, html="<p>a</p>")
-    web_b = WebView(right, html="<p>b</p>")
+    finished: dict[str, list[PageLoadEvent]] = {"a": [], "b": []}
+    web_a = WebView(
+        left,
+        html="<p>a</p>",
+        on_page_load=lambda evt, _url: finished["a"].append(evt),
+    )
+    web_b = WebView(
+        right,
+        html="<p>b</p>",
+        on_page_load=lambda evt, _url: finished["b"].append(evt),
+    )
 
     assert wait_until(tk_root, lambda: web_a.ready and web_b.ready, steps=200)
-
-    web_a.load_url(str(page_a))
-    web_b.load_url(str(page_b))
-    pump(tk_root, steps=60)
-
-    assert web_a.native is not None and web_b.native is not None
-
-    def urls_match() -> bool:
-        try:
-            return (
-                web_a.url == page_a.absolute().as_uri()
-                and web_b.url == page_b.absolute().as_uri()
-            )
-        except Exception:
-            return False
-
-    assert wait_until(tk_root, urls_match, steps=300), (
-        f"expected independent document URLs, got {web_a.url!r} and {web_b.url!r}"
+    # Let constructor HTML settle before file navigation (avoids racing the
+    # macOS deferred initial-load timer against concurrent load_url).
+    assert wait_until(
+        tk_root,
+        lambda: (
+            PageLoadEvent.Finished in finished["a"]
+            and PageLoadEvent.Finished in finished["b"]
+        ),
+        steps=300,
     )
+    finished["a"].clear()
+    finished["b"].clear()
+
+    # Sequential loads — same posture as independent eval on multi-WebView.
+    web_a.load_url(str(page_a))
+    assert wait_until(
+        tk_root,
+        lambda: web_a.url == uri_a and PageLoadEvent.Finished in finished["a"],
+        steps=300,
+    ), f"expected pane A URL {uri_a!r}, got {web_a.url!r}"
+
+    web_b.load_url(str(page_b))
+    assert wait_until(
+        tk_root,
+        lambda: web_b.url == uri_b and PageLoadEvent.Finished in finished["b"],
+        steps=300,
+    ), f"expected pane B URL {uri_b!r}, got {web_b.url!r}"
+
+    assert web_a.url == uri_a and web_b.url == uri_b
 
     web_a.destroy()
     web_b.destroy()

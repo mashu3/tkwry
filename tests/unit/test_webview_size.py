@@ -965,12 +965,25 @@ def test_disarm_event_poll_clears_active_latch(tk_root) -> None:
     assert web._event_poll_active is False
 
 
-def test_queue_user_load_supersedes_initial_and_sets_pending(tk_root) -> None:
+def test_queue_user_load_supersedes_initial_and_cancels_timer(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=200, height=100)
     web._arm_initial_load(("html", "<p>A</p>"))
+    web._initial_load_after_id = "fake-timer"
+    cancelled: list[str] = []
+
+    monkeypatch.setattr(
+        web._frame.winfo_toplevel(),
+        "after_cancel",
+        lambda after_id: cancelled.append(after_id),
+        raising=False,
+    )
     web._queue_user_load("url", "https://example.com/B")
     assert web._initial_load is None
+    assert web._initial_load_after_id is None
+    assert cancelled == ["fake-timer"]
     assert web._pending_load == ("url", "https://example.com/B")
 
 

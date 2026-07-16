@@ -33,6 +33,8 @@ supported install path; Linux stays source-only (best-effort) by design.
 - Teardown poll armed after `destroy`; off-thread destroy drain/atexit/schedule
   unified; `__del__` logs exceptions instead of swallowing them
 - Eval lifetime table + shared terminal-state bookkeeping; poll stop unified
+- Cancel deferred initial-load timer when user `load_*` supersedes constructor
+  content (fixes multi-WebView `url()` races on macOS)
 
 ### Changed
 
