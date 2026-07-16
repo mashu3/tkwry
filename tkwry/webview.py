@@ -713,7 +713,12 @@ class WebView:
 
     @property
     def url(self) -> str | None:
-        """Current document URL, or the pending URL before creation."""
+        """Current document URL.
+
+        Before native creation: the pending URL, or ``"<html>"`` when only
+        inline HTML is pending. After creation: the engine URL (may be
+        ``None`` for inline HTML on some platforms — see README).
+        """
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")

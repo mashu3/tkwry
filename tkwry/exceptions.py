@@ -2,7 +2,11 @@
 
 
 class WebViewNotReadyError(RuntimeError):
-    """Raised when a WebView API is called before native initialization completes."""
+    """Raised when a WebView API needs layout-ready state and ``ready`` is false.
+
+    Native creation may already have succeeded; wait for ``<<WebViewReady>>``
+    or :meth:`~tkwry.WebView.wait_until_ready` before calling ready-gated APIs.
+    """
 
 
 class WebViewCreationError(RuntimeError):
