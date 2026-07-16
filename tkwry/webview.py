@@ -1674,7 +1674,7 @@ class WebView:
 
         def _axis(name: str) -> int | None:
             raw = info.get(name)
-            if raw is None or raw == "":
+            if not isinstance(raw, str) or raw == "":
                 return None
             try:
                 value = int(float(raw))
@@ -1694,6 +1694,8 @@ class WebView:
         explicit ``place`` width/height on the host.
         """
         place_w, place_h = self._place_info_size()
+        width: int | None
+        height: int | None
         if frame_w > 1:
             width = frame_w
         elif self._init_width is not None:

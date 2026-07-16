@@ -230,7 +230,7 @@ Short checklist — **details live in [Platform notes](#-platform-notes)** (espe
 - **Alpha** — APIs may change; not for production yet (see banner above)
 - **Windows** — WebView2 Runtime required; missing runtime → `WebViewCreationError`
 - **Linux** — no PyPI wheel (by design); best-effort source install
-- **macOS DevTools** — private APIs; avoid in Mac App Store builds
+- **macOS DevTools** — optional (`devtools=True` / `open_devtools()`); uses private APIs — avoid in Mac App Store builds
 - **macOS IME / focus** — not Safari-parity; mid-composition focus flips can mis-route input
 - **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
 - **`url()` on macOS** — may be `None` for inline HTML until a concrete `load_url`
