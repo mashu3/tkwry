@@ -230,6 +230,7 @@ Short checklist — **details live in [Platform notes](#-platform-notes)** (espe
 - **Alpha** — APIs may change; not for production yet (see banner above)
 - **Windows** — WebView2 Runtime required; missing runtime → `WebViewCreationError`
 - **Linux** — no PyPI wheel (by design); best-effort source install
+- **Linux concurrent `eval_js_with_callback`** — evaluating on multiple WebViews at once can stall WebKitGTK; prefer sequential evals (see [Linux](#linux))
 - **macOS DevTools** — optional (`devtools=True` / `open_devtools()`); uses private APIs — avoid in Mac App Store builds
 - **macOS IME / focus** — not Safari-parity; mid-composition focus flips can mis-route input
 - **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
@@ -258,6 +259,8 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 **By design in v0.0.x:** no PyPI wheel; install from source (sdist / git). Support is **best-effort** — not a release blocker for Windows/macOS wheels. CI runs the integration suite under **Xvfb**; real-desktop / Wayland timing may still differ. GTK is pumped on a Tk timer automatically after install.
 
 For `place` layouts, pass explicit `width`/`height` so host `winfo_*` settles; native size follows those `winfo_*` values (see [Layout / resize](#layout--resize)).
+
+**Concurrent eval:** calling `eval_js_with_callback` on **multiple** WebViews at the same time can stall under WebKitGTK (especially headless / Xvfb). Prefer one eval at a time — wait for each callback (or error) before starting the next — when you have several views.
 
 ### macOS embedding
 
