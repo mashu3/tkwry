@@ -137,6 +137,12 @@ web.load_url("https://example.com")
 web.reload()
 print(web.url)
 web.focus()
+```
+
+DevTools need `devtools=True` at construction, then `open_devtools()` (calling `open_devtools()` alone is a no-op on macOS if the flag was false).
+
+```python
+web = WebView(frame, html="<h1>Hello</h1>", devtools=True)
 web.open_devtools()
 ```
 
@@ -233,7 +239,7 @@ Short checklist — **details live in [Platform notes](#-platform-notes)** (espe
 - **Windows** — WebView2 Runtime required; missing runtime → `WebViewCreationError`
 - **Linux** — no PyPI wheel (by design); best-effort source install
 - **Linux concurrent `eval_js_with_callback`** — evaluating on multiple WebViews at once can stall WebKitGTK; prefer sequential evals (see [Linux](#linux))
-- **macOS DevTools** — optional (`devtools=True` / `open_devtools()`); uses private APIs — avoid in Mac App Store builds
+- **macOS DevTools** — create with `devtools=True`, then `open_devtools()` (flag alone does not open; `open_devtools()` without the flag is a no-op on macOS); uses private APIs — avoid in Mac App Store builds
 - **macOS IME / focus** — not Safari-parity; mid-composition focus flips can mis-route input
 - **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
 - **`url()` on macOS** — may be `None` for inline HTML until a concrete `load_url`
@@ -295,7 +301,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` work out of the box on macOS)
 - **Deferred callbacks** — IPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
 - **URL safety** — normalizes and validates URLs before navigation
-- **DevTools** — `open_devtools()` / `devtools=True` for debugging
+- **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()` (macOS: private APIs)
 - **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)
 - **Navigation hooks** — all handlers on the Tk thread; `on_navigation` / `on_new_window` block WebKit until they return
 - **Multiple layouts** — works with `pack`, `grid`, `place`, `Notebook`, and `PanedWindow` (see examples)
