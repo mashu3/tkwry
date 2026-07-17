@@ -7,6 +7,7 @@ These are bug nests: regressions look like a healthy WebView with wrong
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 from support.tk import bare_frame, host_frame, layout_bare_frame, wait_until
@@ -32,7 +33,9 @@ def _decode_eval_payload(raw: str) -> object:
     return data
 
 
-def _eval_js_value(web: WebView, root, script: str, *, steps: int = 200) -> object | None:
+def _eval_js_value(
+    web: WebView, root, script: str, *, steps: int = 200
+) -> object | None:
     """Return the JS value from ``eval_js_with_callback`` (JSON-decoded)."""
     results: list[object] = []
 
@@ -47,8 +50,31 @@ def _eval_js_value(web: WebView, root, script: str, *, steps: int = 200) -> obje
     return None
 
 
-def _assert_ua_and_init(web: WebView, root, *, ua: str, init_token: str) -> None:
+def _wait_page_loaded(web: WebView, root) -> None:
+    """Wait past layout ``ready`` until constructor/pending HTML is in the DOM.
+
+    ``ready`` can race deferred initial load; init scripts only apply once the
+    document exists (notable on WebView2).
+    """
     assert wait_until(root, lambda: web.ready, steps=200)
+
+    def marker_present() -> bool:
+        got = _eval_js_value(
+            web,
+            root,
+            "document.getElementById('t') && "
+            "document.getElementById('t').textContent",
+            steps=40,
+        )
+        return got == "create-opts"
+
+    assert wait_until(root, marker_present, steps=200), (
+        "expected page marker #t=create-opts before UA/init checks"
+    )
+
+
+def _assert_ua_and_init(web: WebView, root, *, ua: str, init_token: str) -> None:
+    _wait_page_loaded(web, root)
     got_ua = _eval_js_value(web, root, "navigator.userAgent")
     assert isinstance(got_ua, str), f"expected UA string, got {got_ua!r}"
     assert ua in got_ua, f"expected {ua!r} in navigator.userAgent={got_ua!r}"
@@ -94,6 +120,10 @@ def test_devtools_open_close_roundtrip(tk_root) -> None:
     Native DevTools must be enabled at create (``devtools=True``); otherwise
     ``open_devtools()`` is a no-op on some platforms (observed on macOS).
     May open an inspector window briefly; always close in finally.
+
+    On Windows, wry's WebView2 backend always reports ``is_devtools_open()`` as
+    ``False`` and ``close_devtools()`` is a no-op — only assert open does not
+    raise there.
     """
     frame = host_frame(tk_root)
     web = WebView(frame, html=_PAGE, devtools=True)
@@ -105,6 +135,10 @@ def test_devtools_open_close_roundtrip(tk_root) -> None:
             web.open_devtools()
         except Exception as exc:
             pytest.skip(f"DevTools unavailable on this platform/runtime: {exc}")
+
+        if sys.platform == "win32":
+            web.close_devtools()
+            return
 
         assert wait_until(tk_root, lambda: web.is_devtools_open(), steps=100), (
             "expected is_devtools_open() after open_devtools()"
