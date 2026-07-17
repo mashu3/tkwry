@@ -62,8 +62,7 @@ def _wait_page_loaded(web: WebView, root) -> None:
         got = _eval_js_value(
             web,
             root,
-            "document.getElementById('t') && "
-            "document.getElementById('t').textContent",
+            "document.getElementById('t') && document.getElementById('t').textContent",
             steps=40,
         )
         return got == "create-opts"
