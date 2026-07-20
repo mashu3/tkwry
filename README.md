@@ -263,6 +263,8 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) must be installed (common on Windows 10/11). Without it, creation fails with `WebViewCreationError` (install link in the message). There is **no** fallback engine.
 
+**DPI:** `set_bounds` uses **physical** pixels on Windows. After process DPI awareness (e.g. `tkface.win.enable_dpi_awareness()` before `tk.Tk()`), Tk `winfo_*` already reports physical sizes — passing them as wry `Logical` would double-scale. Prefer awareness + design-pixel→physical sizing in the host app; do not monkeypatch tkwry bounds from app code.
+
 ### Linux
 
 **By design in v0.1.x:** no PyPI wheel; install from source (sdist / git). Support is **best-effort** — not a release blocker for Windows/macOS wheels. CI runs the integration suite under **Xvfb**; real-desktop / Wayland timing may still differ. GTK is pumped on a Tk timer automatically after install.

@@ -13,9 +13,29 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 fn make_rect(x: f64, y: f64, width: f64, height: f64) -> wry::Rect {
-    wry::Rect {
-        position: wry::dpi::Position::Logical(wry::dpi::LogicalPosition::new(x, y)),
-        size: wry::dpi::Size::Logical(wry::dpi::LogicalSize::new(width, height)),
+    // Tk `winfo_*` on Windows matches the Win32 child coordinate space used by
+    // the embed HWND. When the process is DPI-aware those values are physical
+    // pixels; wry `Logical` would scale them again and mis-size the WebView.
+    // macOS/Linux keep logical coordinates (existing embed math).
+    #[cfg(target_os = "windows")]
+    {
+        wry::Rect {
+            position: wry::dpi::Position::Physical(wry::dpi::PhysicalPosition::new(
+                x.round() as i32,
+                y.round() as i32,
+            )),
+            size: wry::dpi::Size::Physical(wry::dpi::PhysicalSize::new(
+                width.max(1.0).round() as u32,
+                height.max(1.0).round() as u32,
+            )),
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        wry::Rect {
+            position: wry::dpi::Position::Logical(wry::dpi::LogicalPosition::new(x, y)),
+            size: wry::dpi::Size::Logical(wry::dpi::LogicalSize::new(width, height)),
+        }
     }
 }
 
