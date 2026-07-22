@@ -580,8 +580,11 @@ class WebView:
         self._user_agent = user_agent
         self._initialization_script = initialization_script
         self._focus_when_ready = False
-        if sys.platform == "darwin" and focused:
-            # Child WKWebView + focused=True fights Tk for first responder at create.
+        if focused and sys.platform in ("darwin", "win32"):
+            # macOS: child WKWebView + focused=True fights Tk for first responder
+            # at create. Windows: WebView2 MoveFocus during create returns
+            # E_INVALIDARG (0x80070057) when the host HWND cannot take focus
+            # (e.g. Tk ``-alpha`` 0 startup cloak, minimized owner).
             self._focus_when_ready = True
             focused = False
         self._focused = focused

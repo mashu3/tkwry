@@ -277,7 +277,7 @@ For `place` layouts, pass explicit `width`/`height` so host `winfo_*` settles; n
 
 Tk child `Frame`s usually **do not** get their own `NSView` (Tk Aqua). tkwry attaches to the **toplevel content view**, positions with `set_bounds` on `<Configure>`, and hides with `set_visible(False)` on `<Unmap>` (e.g. another Notebook tab). Per-frame native views would need upstream Tk changes.
 
-**Keyboard focus:** clicks are hit-tested at the `NSEvent` layer; Python drains focus signals on the Tk main thread. Use `web.focus()` / `web.focus_parent()` for explicit control ([`examples/url_demo.py`](examples/url_demo.py)). `focused=True` waits for `<<WebViewReady>>`, then calls `focus()`; call `focus()` yourself after later layout changes.
+**Keyboard focus:** clicks are hit-tested at the `NSEvent` layer; Python drains focus signals on the Tk main thread. Use `web.focus()` / `web.focus_parent()` for explicit control ([`examples/url_demo.py`](examples/url_demo.py)). On macOS/Windows, `focused=True` waits for `<<WebViewReady>>`, then calls `focus()` (create-time focus breaks child WKWebView / WebView2). Call `focus()` yourself after later layout changes.
 
 **IME:** composition stays with the current first responder. Switching Tk ↔ WebView mid-composition (or fighting the system candidate window) can cancel or mis-deliver input vs Safari. **Not** a v0.1 goal — finish composition before changing focus, or keep IME editing in one surface.
 

@@ -354,13 +354,14 @@ def test_destroy_rejects_layout_and_bind(tk_root) -> None:
         web.bind("<<WebViewReady>>", lambda _evt: None)
 
 
-def test_macos_focused_true_defers_until_ready(
-    tk_root, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_focused_true_defers_until_ready_on_darwin_and_win32(
+    tk_root, monkeypatch: pytest.MonkeyPatch, platform: str
 ) -> None:
     from tkwry._parent import EmbedParent
 
     frame = tk.Frame(tk_root)
-    monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
+    monkeypatch.setattr("tkwry.webview.sys.platform", platform)
     monkeypatch.setattr(
         "tkwry.webview.tk_embed_parent",
         lambda _frame: EmbedParent(1),
