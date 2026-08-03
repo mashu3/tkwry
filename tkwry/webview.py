@@ -2454,15 +2454,32 @@ class WebView:
                 traceback.print_exc()
 
     def _frame_ready_for_initial_load(self) -> bool:
-        """Whether the host frame is laid out enough to load content."""
+        """Whether the host frame is laid out enough to load content.
+
+        Default: real mapped size **and** viewable (Notebook tabs stay unloaded
+        until shown). Constructor ``width``/``height`` also unlock Navigate while
+        the host is still hidden or 1×1 — used for off-screen warmup (e.g. a
+        paned pane with ``hide=True``).
+        """
         try:
             if not self._frame.winfo_exists() or self._webview is None:
                 return False
-            # Real mapped size only — do not use ``_bounds_size()`` init fallback.
-            if self._frame.winfo_width() <= 1 or self._frame.winfo_height() <= 1:
-                return False
-            return self._host_is_viewable_for_map()
-        except tk.TclError:
+            fw = int(self._frame.winfo_width())
+            fh = int(self._frame.winfo_height())
+            has_init_size = (
+                self._init_width is not None
+                and self._init_height is not None
+                and self._init_width > 1
+                and self._init_height > 1
+            )
+            if fw > 1 and fh > 1:
+                if self._host_is_viewable_for_map():
+                    return True
+                # Sized but not viewable: only with explicit early-create size.
+                return has_init_size
+            # Unmapped / 1×1: constructor size enables hidden warmup Navigate.
+            return has_init_size
+        except (tk.TclError, TypeError, ValueError):
             return False
 
     def _bump_initial_load_attempt(self) -> None:
@@ -2529,8 +2546,40 @@ class WebView:
             self._clear_initial_load()
             return
         if not self._frame_ready_for_initial_load():
+            if os.environ.get("TKWRY_LOAD_PROFILE") or os.environ.get(
+                "TKLAB_STARTUP_PROFILE"
+            ) or os.environ.get("TKIPW_STARTUP_PROFILE"):
+                if not getattr(self, "_initial_load_defer_logged", False):
+                    self._initial_load_defer_logged = True
+                    try:
+                        print(
+                            "tkwry: initial load deferred "
+                            f"viewable={self._frame.winfo_viewable()} "
+                            f"size={self._frame.winfo_width()}x"
+                            f"{self._frame.winfo_height()} "
+                            f"init={self._init_width}x{self._init_height}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                    except tk.TclError:
+                        pass
             self._maybe_reschedule_initial_load()
             return
+        if os.environ.get("TKWRY_LOAD_PROFILE") or os.environ.get(
+            "TKLAB_STARTUP_PROFILE"
+        ) or os.environ.get("TKIPW_STARTUP_PROFILE"):
+            try:
+                print(
+                    "tkwry: initial load firing "
+                    f"viewable={self._frame.winfo_viewable()} "
+                    f"size={self._frame.winfo_width()}x"
+                    f"{self._frame.winfo_height()} "
+                    f"init={self._init_width}x{self._init_height}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            except tk.TclError:
+                pass
         self._sync_bounds()
         # Re-check after sync: load_* may have cleared or replaced this.
         if self._initial_load is not load or self._pending_load is not None:

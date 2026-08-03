@@ -103,6 +103,39 @@ def _toplevel_alive(toplevel: tk.Misc) -> bool:
         return False
 
 
+def _mac_event_widget(event: tk.Event) -> tk.Misc | None:
+    """Resolve ``event.widget`` to a live Misc (may be a path ``str`` after destroy)."""
+    widget = getattr(event, "widget", None)
+    if widget is None:
+        return None
+    if isinstance(widget, str):
+        root = getattr(tk, "_default_root", None)
+        if root is None:
+            return None
+        try:
+            widget = root.nametowidget(widget)
+        except (KeyError, tk.TclError):
+            return None
+    if not hasattr(widget, "winfo_toplevel"):
+        return None
+    try:
+        if not widget.winfo_exists():
+            return None
+    except tk.TclError:
+        return None
+    return widget  # type: ignore[return-value]
+
+
+def _mac_event_toplevel(event: tk.Event) -> tk.Misc | None:
+    widget = _mac_event_widget(event)
+    if widget is None:
+        return None
+    try:
+        return widget.winfo_toplevel()
+    except (tk.TclError, AttributeError):
+        return None
+
+
 def _widget_takefocus_enabled(widget: tk.Misc) -> bool:
     try:
         takefocus = widget.cget("takefocus")
@@ -397,17 +430,22 @@ def _ensure_mac_pump(toplevel: tk.Misc) -> None:
 
 def _mac_widget_mapped(event: tk.Event) -> None:
     """Tag text-like widgets when they (or a subtree) is mapped at runtime."""
-    toplevel = event.widget.winfo_toplevel()
-    if not getattr(toplevel, "_tkwry_mac_webviews", None):
+    widget = _mac_event_widget(event)
+    if widget is None:
         return
-    _tag_mac_text_widgets(event.widget)
+    toplevel = _mac_event_toplevel(event)
+    if toplevel is None or not getattr(toplevel, "_tkwry_mac_webviews", None):
+        return
+    _tag_mac_text_widgets(widget)
 
 
 def _mac_input_wakeup(event: tk.Event) -> None:
     """Drain Rust focus flags promptly when Tcl sees a click."""
-    widget = event.widget
-    toplevel = widget.winfo_toplevel()
-    if not getattr(toplevel, "_tkwry_mac_webviews", None):
+    widget = _mac_event_widget(event)
+    if widget is None:
+        return
+    toplevel = _mac_event_toplevel(event)
+    if toplevel is None or not getattr(toplevel, "_tkwry_mac_webviews", None):
         return
     if _widget_accepts_tk_keys(widget):
         # Always resign Web FR — wants may already be false while WK is still FR.
@@ -421,9 +459,11 @@ def _mac_input_wakeup(event: tk.Event) -> None:
 
 def _mac_focus_in_handler(event: tk.Event) -> None:
     """Tag editable widgets and resign Web first responder for Tk ownership."""
-    widget = event.widget
-    toplevel = widget.winfo_toplevel()
-    if not getattr(toplevel, "_tkwry_mac_webviews", None):
+    widget = _mac_event_widget(event)
+    if widget is None:
+        return
+    toplevel = _mac_event_toplevel(event)
+    if toplevel is None or not getattr(toplevel, "_tkwry_mac_webviews", None):
         return
     if not _widget_accepts_tk_keys(widget):
         return
@@ -432,8 +472,8 @@ def _mac_focus_in_handler(event: tk.Event) -> None:
 
 
 def _mac_web_key_guard(event: tk.Event) -> str | None:
-    toplevel = event.widget.winfo_toplevel()
-    if not _mac_web_input_active(toplevel):
+    toplevel = _mac_event_toplevel(event)
+    if toplevel is None or not _mac_web_input_active(toplevel):
         return None
     keysym = getattr(event, "keysym", "")
     if keysym in _TAB_TRAVERSAL_KEYS:
@@ -555,8 +595,8 @@ def _ensure_mac_key_guard(toplevel: tk.Misc) -> None:
 
 
 def _mac_tab_traversal_handler(event: tk.Event) -> str | None:
-    toplevel = event.widget.winfo_toplevel()
-    if not getattr(toplevel, "_tkwry_mac_webviews", None):
+    toplevel = _mac_event_toplevel(event)
+    if toplevel is None or not getattr(toplevel, "_tkwry_mac_webviews", None):
         return None
     if not _mac_web_input_active(toplevel):
         return None
@@ -592,10 +632,11 @@ def _teardown_mac_key_guard(toplevel: tk.Misc) -> None:
 
 
 def _mac_toplevel_destroy(event: tk.Event) -> None:
-    widget = event.widget
-    try:
-        toplevel = widget.winfo_toplevel()
-    except tk.TclError:
+    widget = _mac_event_widget(event)
+    if widget is None:
+        return
+    toplevel = _mac_event_toplevel(event)
+    if toplevel is None:
         return
     if getattr(toplevel, "_tkwry_mac_torn_down", False):
         return
@@ -719,10 +760,11 @@ def _schedule_mac_window_tabbing_disable(toplevel: tk.Misc, *, attempt: int) -> 
 
 def _mac_toplevel_mapped(event: tk.Event) -> None:
     """Retry window tabbing disable once the NSWindow is mapped."""
-    widget = event.widget
-    try:
-        toplevel = widget.winfo_toplevel()
-    except tk.TclError:
+    widget = _mac_event_widget(event)
+    if widget is None:
+        return
+    toplevel = _mac_event_toplevel(event)
+    if toplevel is None:
         return
     if widget is not toplevel:
         return

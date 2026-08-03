@@ -545,7 +545,8 @@ def test_map_axis_viewable_shared_by_show_and_initial_load(
 ) -> None:
     """Map predicates share ``_host_is_viewable_for_map``; layout ``ready`` does not."""
     frame = tk.Frame(tk_root)
-    web = WebView(frame, width=300, height=200)
+    # No constructor size: initial load still waits for viewable (Notebook tabs).
+    web = WebView(frame)
     web._webview = object()
     monkeypatch.setattr(frame, "winfo_exists", lambda: True)
     monkeypatch.setattr(frame, "winfo_manager", lambda: "pack")
@@ -560,6 +561,27 @@ def test_map_axis_viewable_shared_by_show_and_initial_load(
     assert web._layout_ready() is True
     assert web.ready is True
     assert web.phase is WebViewPhase.HIDDEN
+
+
+def test_frame_ready_for_initial_load_allows_hidden_with_init_size(
+    tk_root, monkeypatch
+) -> None:
+    """Constructor width/height unlock Navigate while the host is still hidden."""
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=640, height=480)
+    web._webview = object()
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 1)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
+    monkeypatch.setattr("tkwry.webview.sys.platform", "darwin")
+
+    assert web._frame_should_show() is False
+    assert web._frame_ready_for_initial_load() is True
+
+    monkeypatch.setattr(frame, "winfo_width", lambda: 400)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 300)
+    assert web._frame_ready_for_initial_load() is True
 
 
 def test_sync_bounds_hides_via_hide_native_view(tk_root, monkeypatch) -> None:
@@ -631,7 +653,8 @@ def test_frame_ready_for_initial_load_checks_geometry_on_linux(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     frame = tk.Frame(tk_root)
-    web = WebView(frame, width=400, height=300)
+    # No constructor size — partial / full geometry only (Linux viewable=always).
+    web = WebView(frame)
     web._webview = object()
     monkeypatch.setattr("tkwry.webview.sys.platform", "linux")
     monkeypatch.setattr(frame, "winfo_exists", lambda: True)
