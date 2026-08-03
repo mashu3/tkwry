@@ -145,9 +145,18 @@ jobs:
           sleep 3
           bash scripts/run-linux-ci-tests.sh
 
-      - name: Run tests (Windows / macOS)
-        if: runner.os != 'Linux'
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
         shell: bash
         env:
           TK_SILENCE_DEPRECATION: "1"
-        run: pytest tests/ -v
+          PYTHONUNBUFFERED: "1"
+        run: bash scripts/run-windows-ci-tests.sh
+
+      - name: Run tests (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          TK_SILENCE_DEPRECATION: "1"
+          PYTHONUNBUFFERED: "1"
+        run: pytest tests/ -v --tb=short

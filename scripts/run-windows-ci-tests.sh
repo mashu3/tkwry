@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Windows CI test runner (GitHub Actions bash shell).
+#
+# WebView2 (especially arm64) can wedge Tk / hang ``update()`` after many
+# create/destroy cycles in one process — same class of issue as WebKitGTK on
+# Linux (see run-linux-ci-tests.sh) and tkipw's Windows e2e isolation.
+# Run unit first, then each integration module in its own pytest process.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+export TK_SILENCE_DEPRECATION="${TK_SILENCE_DEPRECATION:-1}"
+export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
+
+pytest tests/unit/ -v --tb=short
+pytest tests/integration/test_content.py -v --tb=short
+pytest tests/integration/test_create_options.py -v --tb=short
+pytest tests/integration/test_layout.py -v --tb=short
+pytest tests/integration/test_lifecycle.py -v --tb=short
+pytest tests/integration/test_multi_webview.py -v --tb=short
+pytest tests/integration/test_notebook.py -v --tb=short
+pytest tests/integration/test_viewport.py -v --tb=short
