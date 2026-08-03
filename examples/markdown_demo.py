@@ -51,6 +51,7 @@ preview = WebView(right_frame, html=PREVIEW_HTML)
 - Syntax highlighting in the editor
 - GitHub-flavoured markdown in the preview
 - VS Code-style document tabs in a single Monaco editor
+  (``+`` after the tab strip; preview pane toggle in right ``editor-actions``)
 - Dark / light appearance for editor and preview (independently)
 - Two WebViews in one `PanedWindow`
 
@@ -217,19 +218,60 @@ class HtmlPages:
       height: 16px;
       fill: currentColor;
     }}
+    /* VS Code: + stays after the tab strip; editor-actions pin to the right. */
     #new-tab {{
-      width: 32px;
+      width: 28px;
       border: none;
-      border-left: 1px solid #1e1e1e;
-      background: #252526;
+      background: transparent;
       color: #cccccc;
-      font-size: 18px;
+      font-size: 16px;
       line-height: 1;
       cursor: pointer;
       flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      margin: 0 2px;
+      border-radius: 4px;
     }}
     #new-tab:hover {{
-      background: #2a2d2e;
+      background: rgba(255, 255, 255, 0.08);
+    }}
+    #editor-actions {{
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+      margin-left: auto;
+      padding: 0 4px 0 8px;
+      gap: 2px;
+    }}
+    #toggle-side-pane {{
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 5px;
+      background: transparent;
+      color: #cccccc;
+      cursor: pointer;
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }}
+    #toggle-side-pane:hover {{
+      background: rgba(255, 255, 255, 0.08);
+    }}
+    #toggle-side-pane[aria-pressed="true"] {{
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.12);
+    }}
+    #toggle-side-pane svg {{
+      display: block;
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
     }}
     #editor {{
       flex: 1;
@@ -269,12 +311,20 @@ class HtmlPages:
       color: #000000;
     }}
     html[data-theme="light"] #new-tab {{
-      background: #ececec;
-      border-left-color: #d4d4d4;
       color: #424242;
     }}
     html[data-theme="light"] #new-tab:hover {{
-      background: #e0e0e0;
+      background: rgba(0, 0, 0, 0.06);
+    }}
+    html[data-theme="light"] #toggle-side-pane {{
+      color: #424242;
+    }}
+    html[data-theme="light"] #toggle-side-pane:hover {{
+      background: rgba(0, 0, 0, 0.06);
+    }}
+    html[data-theme="light"] #toggle-side-pane[aria-pressed="true"] {{
+      color: #000000;
+      background: rgba(0, 0, 0, 0.08);
     }}
   </style>
 </head>
@@ -282,7 +332,24 @@ class HtmlPages:
   <div id="workbench">
     <div id="tab-bar">
       <div id="tabs"></div>
-      <button id="new-tab" type="button" title="New tab">+</button>
+      <button id="new-tab" type="button" title="New Tab">+</button>
+      <div id="editor-actions">
+        <button
+          id="toggle-side-pane"
+          type="button"
+          title="Toggle Preview Pane"
+          aria-label="Toggle Preview Pane"
+          aria-pressed="true"
+        >
+          <!-- Secondary side bar / preview-to-the-side glyph -->
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              d="M2 1.5L1 2.5v11l1 1h12l1-1v-11l-1-1H2zm0 12V2.5h8.5v11H2zm12
+                0h-2.5V2.5H14v11z"
+            />
+          </svg>
+        </button>
+      </div>
     </div>
     <div id="editor"></div>
   </div>
@@ -599,6 +666,19 @@ class HtmlPages:
 
       document.getElementById("new-tab").addEventListener("click", () => {{
         window.editorNewTab();
+      }});
+
+      const toggleSidePaneBtn = document.getElementById("toggle-side-pane");
+      window.editorSetPreviewVisible = function (visible) {{
+        const on = !!visible;
+        toggleSidePaneBtn.setAttribute("aria-pressed", on ? "true" : "false");
+        toggleSidePaneBtn.title = on
+          ? "Hide Preview Pane"
+          : "Show Preview Pane";
+      }};
+      toggleSidePaneBtn.addEventListener("click", () => {{
+        if (!window.ipc) return;
+        window.ipc.postMessage(JSON.stringify({{ type: "toggle-preview" }}));
       }});
 
       if (INITIAL_TABS.length === 0) {{
@@ -2363,12 +2443,22 @@ class MarkdownEditorDemo:
     def _toggle_preview(self) -> None:
         if self._paned is None or self._preview_frame is None:
             return
-        hide = not self._preview_var.get()
+        visible = self._preview_var.get()
+        hide = not visible
         self._paned.paneconfigure(self._preview_frame, hide=hide)
         self.root.update_idletasks()
         self._sync_pane_bounds()
+        self._sync_preview_toggle_button(visible)
         if not hide:
             self._push_preview_now(self._last_markdown)
+
+    def _sync_preview_toggle_button(self, visible: bool | None = None) -> None:
+        if visible is None:
+            visible = self._preview_var.get()
+        self._eval_editor(
+            "window.editorSetPreviewVisible && "
+            f"window.editorSetPreviewVisible({json.dumps(visible)});"
+        )
 
     def _sync_pane_bounds(self) -> None:
         if self._editor_web is not None:
@@ -2409,6 +2499,9 @@ class MarkdownEditorDemo:
             self._editor_ready = True
             self._toggle_minimap()
             self._apply_editor_appearance()
+            self._sync_preview_toggle_button()
+        elif data.get("type") == "toggle-preview":
+            self._preview_var.set(not self._preview_var.get())
         elif data.get("type") == "markdown":
             self._schedule_preview(data.get("text", ""))
 
