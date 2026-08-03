@@ -2546,9 +2546,11 @@ class WebView:
             self._clear_initial_load()
             return
         if not self._frame_ready_for_initial_load():
-            if os.environ.get("TKWRY_LOAD_PROFILE") or os.environ.get(
-                "TKLAB_STARTUP_PROFILE"
-            ) or os.environ.get("TKIPW_STARTUP_PROFILE"):
+            if (
+                os.environ.get("TKWRY_LOAD_PROFILE")
+                or os.environ.get("TKLAB_STARTUP_PROFILE")
+                or os.environ.get("TKIPW_STARTUP_PROFILE")
+            ):
                 if not getattr(self, "_initial_load_defer_logged", False):
                     self._initial_load_defer_logged = True
                     try:
@@ -2565,9 +2567,11 @@ class WebView:
                         pass
             self._maybe_reschedule_initial_load()
             return
-        if os.environ.get("TKWRY_LOAD_PROFILE") or os.environ.get(
-            "TKLAB_STARTUP_PROFILE"
-        ) or os.environ.get("TKIPW_STARTUP_PROFILE"):
+        if (
+            os.environ.get("TKWRY_LOAD_PROFILE")
+            or os.environ.get("TKLAB_STARTUP_PROFILE")
+            or os.environ.get("TKIPW_STARTUP_PROFILE")
+        ):
             try:
                 print(
                     "tkwry: initial load firing "
