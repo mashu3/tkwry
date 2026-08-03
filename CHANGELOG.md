@@ -4,6 +4,32 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.1] - 2026-08-04
+
+Patch release: Windows DPI/focus fixes, macOS destroy-safe event handlers, and
+hidden-host initial-load warmup when constructor size is set.
+
+### Fixed
+
+- Windows: use physical WebView bounds when the process is DPI-aware (Tk
+  `winfo_*` already matches the embed HWND; wry `Logical` double-scaled)
+- Windows: defer `focused=True` until `<<WebViewReady>>` (WebView2 `MoveFocus`
+  during create can return `E_INVALIDARG` on cloaked / unfocused hosts)
+- macOS: resolve `event.widget` safely when it is a path `str` after destroy
+  (focus / key-guard / map / destroy handlers no longer raise)
+- Allow initial Navigate while the host is still hidden or 1×1 when constructor
+  `width`/`height` are set (off-screen warmup); without size, viewable wait is
+  unchanged (Notebook tabs)
+- Stabilize create-options integration tests on Windows WebView2
+
+### Changed
+
+- Document that DevTools requires the constructor `devtools=True` flag; expand
+  create-only option coverage
+- `examples/markdown_demo.py`: preview pane toggle in the editor tab strip
+- Windows CI: split unit / integration pytest processes (avoid WebView2 hangs
+  after many create/destroy cycles, especially on arm64)
+
 ## [0.1.0] - 2026-07-16
 
 First minor release after the 0.0.x series. Windows/macOS wheels remain the
@@ -262,6 +288,7 @@ eval, macOS IME / import-order / DevTools private APIs, Notebook `ready`≠map.
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.1.1]: https://github.com/mashu3/tkwry/releases/tag/v0.1.1
 [0.1.0]: https://github.com/mashu3/tkwry/releases/tag/v0.1.0
 [0.0.9]: https://github.com/mashu3/tkwry/releases/tag/v0.0.9
 [0.0.8]: https://github.com/mashu3/tkwry/releases/tag/v0.0.8
