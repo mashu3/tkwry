@@ -1515,6 +1515,7 @@ class WebView:
             self._initialization_script,
             rpc_enabled=bool(self._rpc_methods),
         )
+
     def set_on_navigation(self, handler: NavigationHandler | None) -> None:
         """Register a navigation allow/deny hook (Tk main thread; WebKit waits)."""
         self._require_tk_thread()

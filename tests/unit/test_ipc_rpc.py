@@ -14,9 +14,7 @@ from tkwry.ipc import (
 
 
 def test_parse_rpc_request_ok() -> None:
-    raw = json.dumps(
-        {"__tkwry": "rpc", "id": "r1", "method": "add", "params": [1, 2]}
-    )
+    raw = json.dumps({"__tkwry": "rpc", "id": "r1", "method": "add", "params": [1, 2]})
     req = parse_rpc_request(raw)
     assert req is not None
     assert req.id == "r1"

@@ -35,9 +35,7 @@ def resolve_app(app: str | Path) -> tuple[str, str]:
     path = path.absolute()
     if path.is_file():
         if path.suffix.lower() not in {".html", ".htm"}:
-            raise ValueError(
-                f"app file must be HTML (.html/.htm), got: {path.name!r}"
-            )
+            raise ValueError(f"app file must be HTML (.html/.htm), got: {path.name!r}")
         root = path.parent
         entry = path.name
     elif path.is_dir():

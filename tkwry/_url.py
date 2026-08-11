@@ -540,8 +540,7 @@ def _validate_tkwry_url(parsed) -> None:
     host = parsed.hostname or ""
     if host and host.lower() not in {"localhost", "app"}:
         raise ValueError(
-            f"unsupported tkwry URL host: {host!r} "
-            "(use tkwry://localhost/...)"
+            f"unsupported tkwry URL host: {host!r} (use tkwry://localhost/...)"
         )
     path = parsed.path or ""
     if not path or path == "/":
@@ -556,8 +555,7 @@ def _normalize_tkwry_url(url: str) -> str:
     host = (parsed.hostname or "localhost").lower()
     if host not in {"localhost", "app"}:
         raise ValueError(
-            f"unsupported tkwry URL host: {host!r} "
-            "(use tkwry://localhost/...)"
+            f"unsupported tkwry URL host: {host!r} (use tkwry://localhost/...)"
         )
     path = parsed.path or "/"
     if path == "/":
