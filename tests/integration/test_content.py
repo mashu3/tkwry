@@ -526,16 +526,18 @@ def test_app_custom_protocol_resolves_relative_resources(
     )
 
     assert wait_until(tk_root, lambda: web.ready, steps=200)
-    assert wait_until(
-        tk_root,
-        lambda: any(evt == PageLoadEvent.Finished for evt, _ in events),
-        steps=400,
-    ), f"expected page load, got {events!r}"
-    pump(tk_root, steps=50)
 
-    finished_urls = [url for evt, url in events if evt == PageLoadEvent.Finished]
-    assert finished_urls
-    assert "tkwry" in finished_urls[-1] or finished_urls[-1].startswith("https://tkwry")
+    def app_finished() -> bool:
+        return any(
+            evt == PageLoadEvent.Finished
+            and ("tkwry" in url or url.startswith("https://tkwry"))
+            for evt, url in events
+        )
+
+    assert wait_until(tk_root, app_finished, steps=400), (
+        f"expected tkwry:// (or https://tkwry.localhost) Finished, got {events!r}"
+    )
+    pump(tk_root, steps=50)
 
     colors: list[str] = []
 

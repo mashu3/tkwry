@@ -5,6 +5,27 @@ use std::path::{Component, Path, PathBuf};
 
 use wry::http::{header::CONTENT_TYPE, Request, Response, StatusCode};
 
+/// Map a ``tkwry://`` URL to the WebView2 navigation form used with
+/// ``with_https_scheme(true)``.
+///
+/// wry rewrites ``{scheme}://localhost/...`` → ``https://{scheme}.localhost/...``
+/// for ``with_url`` at create time, but **not** for later ``WebView::load_url``.
+/// tkwry always loads ``app=`` content via deferred ``load_url``, so Windows
+/// needs the same rewrite here.
+#[cfg(target_os = "windows")]
+pub(crate) fn navigate_url(url: &str) -> Cow<'_, str> {
+    if let Some(rest) = url.strip_prefix("tkwry://") {
+        Cow::Owned(format!("https://tkwry.{rest}"))
+    } else {
+        Cow::Borrowed(url)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn navigate_url(url: &str) -> Cow<'_, str> {
+    Cow::Borrowed(url)
+}
+
 /// Resolve a request path under ``root``, rejecting ``..`` and absolute escapes.
 pub(crate) fn safe_join(root: &Path, url_path: &str) -> Option<PathBuf> {
     let trimmed = url_path.trim_start_matches('/');
@@ -126,6 +147,21 @@ mod tests {
         assert_eq!(
             safe_join(root, "/assets/main.js").unwrap(),
             PathBuf::from("/tmp/app/assets/main.js")
+        );
+    }
+
+    #[test]
+    fn navigate_url_rewrites_tkwry_on_windows_only() {
+        let input = "tkwry://localhost/index.html";
+        let out = navigate_url(input);
+        if cfg!(target_os = "windows") {
+            assert_eq!(out.as_ref(), "https://tkwry.localhost/index.html");
+        } else {
+            assert_eq!(out.as_ref(), input);
+        }
+        assert_eq!(
+            navigate_url("https://example.com/").as_ref(),
+            "https://example.com/"
         );
     }
 }

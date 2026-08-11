@@ -1248,8 +1248,9 @@ impl WebView {
     }
 
     fn load_url(&self, url: &str) -> PyResult<()> {
+        let url = app_protocol::navigate_url(url);
         with_webview(self, |wv| {
-            wv.load_url(url)
+            wv.load_url(url.as_ref())
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
         })
     }

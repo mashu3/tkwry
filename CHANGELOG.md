@@ -26,6 +26,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Windows custom-protocol origins use HTTPS scheme (wry
   ``with_https_scheme``) so they align more closely with macOS/Linux
 
+### Fixed
+
+- Windows: rewrite ``tkwry://`` → ``https://tkwry.localhost/...`` on
+  ``load_url`` so deferred ``app=`` navigation reaches the custom protocol
+  (wry only rewrote ``with_url`` at create)
+
 ## [0.1.1] - 2026-08-04
 
 Patch release: Windows DPI/focus fixes, macOS destroy-safe event handlers, and
