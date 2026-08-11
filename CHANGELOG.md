@@ -4,6 +4,28 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.2] - 2026-08-11
+
+### Added
+
+- ``WebView(app=...)`` — serve a local HTML/CSS/JS tree via the ``tkwry://``
+  custom protocol (no localhost HTTP server). Pass a directory with
+  ``index.html`` or a path to an HTML entry file.
+- ``examples/local_assets_demo.py`` + ``examples/local_assets/`` offline sample
+- Unit / integration coverage for ``tkwry://`` URL rules and relative CSS via
+  ``app=``
+- Thin RPC: ``WebView.expose`` / ``@web.expose`` and ``window.tkwry.call``
+  (JSON envelope over existing IPC; ``ipc_handler`` unchanged)
+- ``expose`` handlers may return a ``concurrent.futures.Future``; the Promise
+  settles when the Future completes (Tk-thread ``after_idle``)
+- ``examples/rpc_demo.py`` and ``tkwry.ipc`` helpers
+
+### Changed
+
+- URL layer accepts ``tkwry://localhost/...`` (requires ``app=`` at create)
+- Windows custom-protocol origins use HTTPS scheme (wry
+  ``with_https_scheme``) so they align more closely with macOS/Linux
+
 ## [0.1.1] - 2026-08-04
 
 Patch release: Windows DPI/focus fixes, macOS destroy-safe event handlers, and

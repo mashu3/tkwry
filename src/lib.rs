@@ -1,11 +1,13 @@
 //! wry bindings for embedding a WebView into a Tkinter host window.
 
+mod app_protocol;
 #[cfg(target_os = "macos")]
 mod macos;
 
 use pyo3::prelude::*;
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
@@ -879,6 +881,7 @@ impl WebView {
         height = 600,
         url = None,
         html = None,
+        app_root = None,
         visible = true,
         devtools = false,
         focused = true,
@@ -900,6 +903,7 @@ impl WebView {
         height: u32,
         url: Option<String>,
         html: Option<String>,
+        app_root: Option<String>,
         visible: bool,
         devtools: bool,
         focused: bool,
@@ -1135,6 +1139,26 @@ impl WebView {
             .with_document_title_changed_handler(title_handler)
             .with_new_window_req_handler(newwin_handler)
             .with_drag_drop_handler(drag_drop_handler);
+
+        if let Some(root) = app_root {
+            let root_path = PathBuf::from(root);
+            if !root_path.is_dir() {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "app_root is not a directory: {}",
+                    root_path.display()
+                )));
+            }
+            let root_for_protocol = root_path;
+            builder = builder.with_custom_protocol("tkwry".into(), move |_id, request| {
+                app_protocol::serve_app_request(&root_for_protocol, request)
+            });
+            #[cfg(target_os = "windows")]
+            {
+                use wry::WebViewBuilderExtWindows;
+                // Match macOS/Linux ``tkwry://`` origins more closely for CORS.
+                builder = builder.with_https_scheme(true);
+            }
+        }
 
         if let Some(bg) = background_color {
             builder = builder.with_background_color(bg);

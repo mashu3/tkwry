@@ -347,3 +347,20 @@ def test_validate_rejects_nonexistent_file_uri(tmp_path: Path) -> None:
 def test_bare_unicode_without_extension_is_not_file_path() -> None:
     with pytest.raises(ValueError, match="invalid URL host"):
         _validate_url(_normalize_url("日本語"))
+
+
+def test_normalize_tkwry_url() -> None:
+    assert _normalize_url("tkwry://localhost/") == "tkwry://localhost/index.html"
+    assert (
+        _normalize_url("tkwry://localhost/assets/main.js")
+        == "tkwry://localhost/assets/main.js"
+    )
+    assert _normalize_url("tkwry://app/foo.html") == "tkwry://localhost/foo.html"
+
+
+def test_validate_tkwry_url() -> None:
+    _validate_url("tkwry://localhost/index.html")
+    with pytest.raises(ValueError, match="host"):
+        _validate_url("tkwry://evil.example/index.html")
+    with pytest.raises(ValueError, match=r"\.\."):
+        _validate_url("tkwry://localhost/../secret")

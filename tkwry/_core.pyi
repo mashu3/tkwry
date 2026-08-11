@@ -41,6 +41,7 @@ class WebView:
         height: int = 600,
         url: str | None = None,
         html: str | None = None,
+        app_root: str | None = None,
         visible: bool = True,
         devtools: bool = False,
         focused: bool = True,

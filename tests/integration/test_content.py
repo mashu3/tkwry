@@ -308,6 +308,91 @@ def test_ipc_post_message_reaches_handler(tk_root) -> None:
     frame.destroy()
 
 
+def test_rpc_expose_call_roundtrip(tk_root) -> None:
+    """``@web.expose`` + ``window.tkwry.call`` settles a Promise with the result."""
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<title>rpc</title><p>rpc</p>")
+
+    @web.expose
+    def add(a: int, b: int) -> int:
+        return int(a) + int(b)
+
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=30)
+
+    web.eval_js(
+        """
+        (function () {
+          if (!window.tkwry || !window.tkwry.call) {
+            document.title = "no-tkwry";
+            return;
+          }
+          window.tkwry.call("add", 2, 3).then(function (n) {
+            document.title = "sum=" + n;
+          }).catch(function (e) {
+            document.title = "err=" + e;
+          });
+        })();
+        """
+    )
+
+    titles: list[str] = []
+
+    def read_title() -> None:
+        web.eval_js_with_callback("document.title", titles.append)
+
+    def title_ready() -> bool:
+        read_title()
+        return any("sum=5" in str(t) for t in titles)
+
+    assert wait_until(tk_root, title_ready, steps=400), (
+        f"expected document.title sum=5, got {titles!r}"
+    )
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_rpc_unknown_method_rejects(tk_root) -> None:
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<title>rpc</title><p>rpc</p>")
+
+    @web.expose
+    def ping() -> str:
+        return "pong"
+
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=30)
+
+    web.eval_js(
+        """
+        (function () {
+          window.tkwry.call("missing").then(function () {
+            document.title = "unexpected-ok";
+          }).catch(function (e) {
+            document.title = "err=" + e;
+          });
+        })();
+        """
+    )
+
+    titles: list[str] = []
+
+    def read_title() -> None:
+        web.eval_js_with_callback("document.title", titles.append)
+
+    def title_ready() -> bool:
+        read_title()
+        return any("unknown method" in str(t) for t in titles)
+
+    assert wait_until(tk_root, title_ready, steps=400), (
+        f"expected reject title, got {titles!r}"
+    )
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_title_changed_delivers_on_document_title_set(tk_root) -> None:
     titles: list[str] = []
 
@@ -411,6 +496,56 @@ def test_load_local_html_resolves_relative_resources(tk_root, tmp_path: Path) ->
     web.eval_js_with_callback(script, on_color)
     assert wait_until(tk_root, lambda: colors, steps=100), "expected computed color"
     assert "255" in colors[0] or "rgb(255" in colors[0].replace(" ", "")
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_app_custom_protocol_resolves_relative_resources(
+    tk_root, tmp_path: Path
+) -> None:
+    """``app=`` serves local files via ``tkwry://`` (relative CSS works)."""
+    (tmp_path / "style.css").write_text(
+        "p { color: rgb(0, 128, 0); }", encoding="utf-8"
+    )
+    (tmp_path / "index.html").write_text(
+        (
+            "<!doctype html><html><head>"
+            '<link rel="stylesheet" href="style.css">'
+            "</head><body><p id='t'>app</p></body></html>"
+        ),
+        encoding="utf-8",
+    )
+
+    events: list[tuple[PageLoadEvent, str]] = []
+    frame = host_frame(tk_root)
+    web = WebView(
+        frame,
+        app=tmp_path,
+        on_page_load=lambda evt, url: events.append((evt, url)),
+    )
+
+    assert wait_until(tk_root, lambda: web.ready, steps=200)
+    assert wait_until(
+        tk_root,
+        lambda: any(evt == PageLoadEvent.Finished for evt, _ in events),
+        steps=400,
+    ), f"expected page load, got {events!r}"
+    pump(tk_root, steps=50)
+
+    finished_urls = [url for evt, url in events if evt == PageLoadEvent.Finished]
+    assert finished_urls
+    assert "tkwry" in finished_urls[-1] or finished_urls[-1].startswith("https://tkwry")
+
+    colors: list[str] = []
+
+    def on_color(value: str) -> None:
+        colors.append(value)
+
+    script = "getComputedStyle(document.getElementById('t')).color"
+    web.eval_js_with_callback(script, on_color)
+    assert wait_until(tk_root, lambda: colors, steps=100), "expected computed color"
+    assert "128" in colors[0] or "rgb(0" in colors[0].replace(" ", "")
 
     web.destroy()
     frame.destroy()

@@ -126,6 +126,54 @@ web = WebView(
 )
 ```
 
+### Local app assets (``app=`` / ``tkwry://``)
+
+Serve a directory of HTML/CSS/JS through a custom protocol — no localhost HTTP
+server. Relative links resolve offline (React/Vue/Svelte/Monaco bundles, etc.).
+
+```text
+web/
+├── index.html
+├── style.css
+└── assets/
+    └── main.js
+```
+
+```python
+web = WebView(frame, app="./web")          # loads tkwry://localhost/index.html
+# or: WebView(frame, app="./web/index.html")
+```
+
+Constructor ``app=`` fixes the filesystem root at create time. Later
+``load_url("tkwry://localhost/other.html")`` can navigate within that root.
+Monaco / CDN scripts may still be loaded from the network inside that HTML when
+you choose not to vendor them yet.
+
+See [`examples/local_assets_demo.py`](examples/local_assets_demo.py).
+
+### Thin RPC (``expose`` / ``window.tkwry.call``)
+
+Keep raw ``ipc_handler`` + ``window.ipc.postMessage`` for free-form messages.
+On top, expose callables and await them from JS:
+
+```python
+web = WebView(frame, html=HTML)
+
+@web.expose
+def read_file(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8")
+```
+
+```js
+const text = await window.tkwry.call("read_file", path);
+```
+
+Wire format is a small JSON envelope (`{"__tkwry":"rpc","id","method","params"}`);
+Python settles the Promise with `result` or `error`. Position args only;
+return values must be JSON-serializable. Handlers may return a
+`concurrent.futures.Future` for async work (Promise settles when it completes).
+See [`examples/rpc_demo.py`](examples/rpc_demo.py).
+
 ### Load HTML / evaluate JavaScript
 
 ```python
@@ -214,7 +262,7 @@ web.destroy()   # release native webview; host Frame is kept
 |----------|---------|
 | Content | `load_url`, `load_html`, `reload`, `url` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback` |
-| IPC | `set_ipc_handler` |
+| IPC | `set_ipc_handler`, `expose` (thin ``window.tkwry.call`` RPC) |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler` |
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
@@ -222,7 +270,7 @@ web.destroy()   # release native webview; host Frame is kept
 | Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `wait_until_ready`, `bind`, `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error` |
 | Diagnostics | `take_queue_drop_counts` |
 
-Constructor options: `url`, `html`, `ipc_handler`, `devtools`, `background_color`,
+Constructor options: `url`, `html`, `app`, `ipc_handler`, `devtools`, `background_color`,
 `user_agent`, `initialization_script`, `focused`, plus the callback hooks above.
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`, `WebViewPhase`.
@@ -299,6 +347,8 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 
 ## 🧩 Features
 
+- **Local app assets** — `app=` + `tkwry://` custom protocol (offline relative CSS/JS; no localhost server)
+- **Thin RPC** — `@web.expose` / `window.tkwry.call` over IPC (Promise in, JSON result/error out)
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
 - **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` work out of the box on macOS)
 - **Deferred callbacks** — IPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
@@ -309,7 +359,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Multiple layouts** — works with `pack`, `grid`, `place`, `Notebook`, and `PanedWindow` (see examples)
 - **Plotly-ready** — load HTML + `eval_js` for interactive charts
 - **Folium-ready** — embed Leaflet maps from Folium HTML (right-click to pin)
-- **Markdown-ready** — Monaco editor + live preview in a `PanedWindow` (see [`examples/markdown_demo.py`](examples/markdown_demo.py); CDN required)
+- **Markdown-ready** — Monaco editor + live preview in a `PanedWindow` (see [`examples/markdown_demo.py`](examples/markdown_demo.py); CDN required — or vendor under `app=`)
 - **CI-tested** — `pytest` on Windows (x86_64 + arm64), macOS, and Linux (Xvfb + WebKitGTK)
 
 ---
@@ -325,7 +375,9 @@ pip install -e .
 | Script | Description |
 |--------|-------------|
 | [`examples/url_demo.py`](examples/url_demo.py) | URL bar + embedded page |
+| [`examples/local_assets_demo.py`](examples/local_assets_demo.py) | Offline local app via `app=` / `tkwry://` |
 | [`examples/ipc_demo.py`](examples/ipc_demo.py) | JavaScript ↔ Tkinter IPC |
+| [`examples/rpc_demo.py`](examples/rpc_demo.py) | Thin RPC (`expose` / `window.tkwry.call`) |
 | [`examples/multi_demo.py`](examples/multi_demo.py) | Multiple WebViews, tabs, panes |
 | [`examples/plotly_demo.py`](examples/plotly_demo.py) | Plotly charts (`pip install plotly`) |
 | [`examples/folium_demo.py`](examples/folium_demo.py) | Folium maps (`pip install folium`) |
@@ -335,7 +387,9 @@ pip install -e .
 
 ```bash
 python examples/url_demo.py
+python examples/local_assets_demo.py
 python examples/ipc_demo.py
+python examples/rpc_demo.py
 python examples/multi_demo.py
 python examples/plotly_demo.py
 python examples/folium_demo.py

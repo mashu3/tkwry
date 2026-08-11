@@ -14,8 +14,10 @@ import traceback
 import weakref
 from collections.abc import Callable
 from enum import Enum
+from pathlib import Path
 from typing import Literal, TypeAlias, TypeVar, cast
 
+from tkwry._app import resolve_app
 from tkwry._core import (
     DragDropEvent,
     NewWindowResponse,
@@ -36,6 +38,17 @@ from tkwry.exceptions import (
     WebViewCreationError,
     WebViewDestroyedError,
     WebViewNotReadyError,
+)
+from tkwry.ipc import (
+    RPC_BOOTSTRAP_JS as _RPC_BOOTSTRAP_JS,
+)
+from tkwry.ipc import (
+    RpcHandler,
+    RpcRequest,
+    dispatch_rpc,
+    merge_initialization_script,
+    parse_rpc_request,
+    settle_script,
 )
 
 if sys.platform == "darwin":
@@ -443,9 +456,9 @@ class WebView:
     |               |        |       |           | ``WebViewDestroyedError`` |
     +---------------+--------+-------+-----------+---------------------------+
 
-    **Initial load** (constructor ``url`` / ``html`` vs user ``load_*``):
+    **Initial load** (constructor ``url`` / ``html`` / ``app`` vs user ``load_*``):
 
-    1. **At create** — pending ``url``/``html`` is captured once in
+    1. **At create** — pending ``url``/``html``/``app`` is captured once in
        ``_try_create`` as ``_initial_load``.
     2. **Post-ready** — after native creation, ``_run_initial_load`` is
        scheduled once (delayed) when the host frame is viewable with real
@@ -459,6 +472,11 @@ class WebView:
        ``_queue_user_load`` / ``_clear_initial_load`` /
        ``_set_pending_load`` / pre-create helpers.
 
+    **Local apps** (``app=``): a directory (with ``index.html``) or an HTML
+    entry file is served through the ``tkwry://`` custom protocol — relative
+    CSS/JS/assets resolve without a localhost HTTP server. Relative navigation
+    uses ``tkwry://localhost/...``. The app root is fixed at create time.
+
     **Navigation hooks** (``on_navigation``, ``on_new_window``) run on the
     **Tk main thread**, but WebKit **blocks** until they return a value.
     Keep them fast (heavy work → deny/default and defer with ``after``).
@@ -466,8 +484,9 @@ class WebView:
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
     Before the native view exists, the last pending load is applied at creation
-    (``load_html`` overrides a pending URL). If both ``url`` and ``html`` are
-    passed to the constructor, ``html`` wins and a warning is printed to stderr.
+    (``load_html`` overrides a pending URL). If more than one of ``url``,
+    ``html``, and ``app`` is passed to the constructor, precedence is
+    ``html`` > ``app`` > ``url`` (a warning is printed to stderr).
 
     **Ready** (``<<WebViewReady>>`` / :meth:`when_ready`): fires once per
     instance when the native view first becomes laid out; unmap/remap does not
@@ -530,6 +549,7 @@ class WebView:
         height: int | None = None,
         url: str | None = None,
         html: str | None = None,
+        app: str | Path | None = None,
         ipc_handler: IpcHandler | None = None,
         devtools: bool = False,
         background_color: tuple[int, int, int, int] | None = None,
@@ -570,6 +590,8 @@ class WebView:
         self._embed = tk_embed_parent(frame)
         self._webview: NativeWebView | None = None
         self._ipc_handler = ipc_handler
+        self._rpc_methods: dict[str, RpcHandler] = {}
+        self._rpc_bootstrap_injected = False
         self._on_navigation = on_navigation
         self._on_page_load = on_page_load
         self._on_title_changed = on_title_changed
@@ -599,15 +621,33 @@ class WebView:
         self._tk_wakeup_write_fd: int | None = None
         # Bumped on destroy so late WebKit-thread delivers are discarded.
         self._eval_epoch = 0
-        if url is not None and html is not None:
+        content_sources = sum(x is not None for x in (url, html, app))
+        if content_sources > 1:
+            if html is not None:
+                winner = "html"
+            elif app is not None:
+                winner = "app"
+            else:
+                winner = "url"
             print(
-                "tkwry: html= takes precedence over url= when both are given",
+                f"tkwry: {winner}= takes precedence when multiple of "
+                "url=/html=/app= are given",
                 file=sys.stderr,
             )
+        self._app_root: str | None = None
+        if app is not None:
+            app_root, app_entry_url = resolve_app(app)
+            self._app_root = app_root
+            if html is None:
+                url = app_entry_url
         if url is not None:
             url = _normalize_url(url)
             _validate_url(url)
-        self._pending_url = url
+            if url.startswith("tkwry:") and self._app_root is None:
+                raise ValueError(
+                    "tkwry:// URLs require app= (custom protocol root) at create"
+                )
+        self._pending_url = None if html is not None else url
         self._pending_html = html
         self._pending_load: _PendingLoad | None = None
         self._flush_load_scheduled = False
@@ -1186,10 +1226,12 @@ class WebView:
         self._pending_html = None
 
     def load_url(self, url: str) -> None:
-        """Navigate to *url* (``http``/``https``/``file``; scheme optional).
+        """Navigate to *url* (``http``/``https``/``file``/``tkwry``; scheme optional).
 
         Local filesystem paths (``/path/to/page.html``, ``C:\\page.html``) are
         normalized to ``file://`` URLs so relative assets resolve correctly.
+        ``tkwry://localhost/...`` URLs require constructor ``app=`` (custom
+        protocol root fixed at create time).
 
         Multiple rapid calls are coalesced (**last-wins**): only the final URL
         is loaded. Before the native view exists, the URL is stored and applied
@@ -1200,6 +1242,10 @@ class WebView:
             raise WebViewDestroyedError("WebView.destroy() was called")
         normalized = _normalize_url(url)
         _validate_url(normalized)
+        if normalized.startswith("tkwry:") and self._app_root is None:
+            raise ValueError(
+                "tkwry:// URLs require app= (custom protocol root) at create"
+            )
         if self._webview is None and self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call load_url()"
@@ -1411,10 +1457,64 @@ class WebView:
             ) from self._creation_error
         self._ipc_handler = handler
         if self._webview is not None:
-            self._webview.set_ipc_listening(handler is not None)
-        if handler is not None:
+            self._webview.set_ipc_listening(self._ipc_listening_wanted())
+        if self._ipc_listening_wanted():
             self._ensure_event_poll()
 
+    def expose(
+        self,
+        fn: RpcHandler | None = None,
+        /,
+        *,
+        name: str | None = None,
+    ) -> RpcHandler | Callable[[RpcHandler], RpcHandler]:
+        """Expose a Python callable to ``window.tkwry.call(name, ...)``.
+
+        Use as ``@web.expose`` / ``@web.expose(name="foo")`` or
+        ``web.expose(fn)``. Position arguments only; return values must be
+        JSON-serializable. The low-level ``ipc_handler`` remains available for
+        raw ``window.ipc.postMessage`` traffic.
+        """
+        self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
+        if self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call expose()"
+            ) from self._creation_error
+
+        def register(handler: RpcHandler) -> RpcHandler:
+            method = name if name is not None else handler.__name__
+            if not method:
+                raise ValueError("exposed RPC method name must be non-empty")
+            self._rpc_methods[method] = handler
+            self._enable_rpc()
+            return handler
+
+        if fn is not None:
+            return register(fn)
+        return register
+
+    def _ipc_listening_wanted(self) -> bool:
+        return self._ipc_handler is not None or bool(self._rpc_methods)
+
+    def _enable_rpc(self) -> None:
+        """Turn on IPC listening and ensure the JS bootstrap is present."""
+        if self._webview is not None:
+            self._webview.set_ipc_listening(True)
+            if not self._rpc_bootstrap_injected:
+                try:
+                    self._webview.eval_js(_RPC_BOOTSTRAP_JS)
+                    self._rpc_bootstrap_injected = True
+                except Exception:
+                    traceback.print_exc()
+        self._ensure_event_poll()
+
+    def _effective_initialization_script(self) -> str | None:
+        return merge_initialization_script(
+            self._initialization_script,
+            rpc_enabled=bool(self._rpc_methods),
+        )
     def set_on_navigation(self, handler: NavigationHandler | None) -> None:
         """Register a navigation allow/deny hook (Tk main thread; WebKit waits)."""
         self._require_tk_thread()
@@ -1784,7 +1884,7 @@ class WebView:
     def _needs_event_poll(self) -> bool:
         return any(
             (
-                self._ipc_handler is not None,
+                self._ipc_listening_wanted(),
                 self._on_navigation is not None,
                 self._on_new_window is not None,
                 self._on_page_load is not None,
@@ -1870,7 +1970,7 @@ class WebView:
 
     def _enqueue_ipc(self, message: str) -> None:
         native = self._webview
-        if native is None or self._ipc_handler is None:
+        if native is None or not self._ipc_listening_wanted():
             return
         native.set_ipc_listening(True)
         native._enqueue_ipc_message(message)
@@ -1880,7 +1980,7 @@ class WebView:
         native = self._webview
         if native is None:
             return
-        native.set_ipc_listening(self._ipc_handler is not None)
+        native.set_ipc_listening(self._ipc_listening_wanted())
         native.set_page_load_listening(self._on_page_load is not None)
         native.set_title_listening(self._on_title_changed is not None)
         native.set_drag_drop_listening(self._drag_drop_handler is not None)
@@ -2047,12 +2147,66 @@ class WebView:
             done.set()
 
     def _deliver_ipc_messages(self) -> None:
-        handler = self._ipc_handler
         native = self._webview
-        if handler is None or native is None:
+        if native is None or not self._ipc_listening_wanted():
             return
         for message in native.drain_ipc_messages():
-            self._invoke_callback(handler, message)
+            request = parse_rpc_request(message)
+            if request is not None:
+                self._handle_rpc_request(request)
+                continue
+            handler = self._ipc_handler
+            if handler is not None:
+                self._invoke_callback(handler, message)
+
+    def _handle_rpc_request(self, request: RpcRequest) -> None:
+        from concurrent.futures import Future
+
+        outcome = dispatch_rpc(self._rpc_methods, request)
+        if isinstance(outcome, Future):
+            req_id = request.id
+
+            def _done(fut: Future[object]) -> None:
+                def _settle() -> None:
+                    try:
+                        value = fut.result()
+                    except Exception as exc:
+                        self._settle_rpc(
+                            req_id, ok=False, value=str(exc) or type(exc).__name__
+                        )
+                        return
+                    try:
+                        import json as _json
+
+                        _json.dumps(value)
+                    except (TypeError, ValueError):
+                        self._settle_rpc(
+                            req_id,
+                            ok=False,
+                            value="rpc result is not JSON-serializable",
+                        )
+                        return
+                    self._settle_rpc(req_id, ok=True, value=value)
+
+                try:
+                    self._frame.after_idle(_settle)
+                except tk.TclError:
+                    pass
+
+            outcome.add_done_callback(_done)
+            return
+        ok, value = outcome
+        self._settle_rpc(request.id, ok=ok, value=value)
+
+    def _settle_rpc(self, req_id: str, *, ok: bool, value: object) -> None:
+        script = settle_script(req_id, ok=ok, value=value)
+        native = self._webview
+        if native is None:
+            return
+        try:
+            native.eval_js(script)
+        except Exception:
+            traceback.print_exc()
 
     def _deliver_title_events(self) -> None:
         handler = self._on_title_changed
@@ -2085,7 +2239,7 @@ class WebView:
         if native is not None:
             native.drain_sync_hooks()
         self._drain_sync_hooks()
-        if self._ipc_handler is not None:
+        if self._ipc_listening_wanted():
             self._deliver_ipc_messages()
         self._deliver_page_load_events()
         if self._on_title_changed is not None:
@@ -2281,8 +2435,7 @@ class WebView:
             native.drain_sync_hooks()
         self._drain_sync_hooks()
 
-        handler = self._ipc_handler
-        if handler is not None:
+        if self._ipc_listening_wanted():
             self._deliver_ipc_messages()
 
         self._deliver_page_load_events()
@@ -2348,14 +2501,19 @@ class WebView:
             kwargs["background_color"] = self._background_color
         if self._user_agent is not None:
             kwargs["user_agent"] = self._user_agent
-        if self._initialization_script is not None:
-            kwargs["initialization_script"] = self._initialization_script
+        init_script = self._effective_initialization_script()
+        if init_script is not None:
+            kwargs["initialization_script"] = init_script
+            if self._rpc_methods:
+                self._rpc_bootstrap_injected = True
+        if self._app_root is not None:
+            kwargs["app_root"] = self._app_root
         if self._on_navigation is not None:
             kwargs["on_navigation"] = self._native_navigation
         if self._on_new_window is not None:
             kwargs["on_new_window"] = self._native_new_window
         kwargs["page_load_listening"] = self._on_page_load is not None
-        kwargs["ipc_listening"] = self._ipc_handler is not None
+        kwargs["ipc_listening"] = self._ipc_listening_wanted()
         kwargs["title_listening"] = self._on_title_changed is not None
         kwargs["drag_drop_listening"] = self._drag_drop_handler is not None
 

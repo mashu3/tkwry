@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse, urlunparse
 from urllib.request import url2pathname
 
-_SUPPORTED_SCHEMES = frozenset({"http", "https", "file"})
+_SUPPORTED_SCHEMES = frozenset({"http", "https", "file", "tkwry"})
 _UNSUPPORTED_NAV_SCHEMES = frozenset(
     {"about", "blob", "data", "javascript", "mailto", "vbscript"}
 )
@@ -468,6 +468,8 @@ def _normalize_url(url: str) -> str:
         parsed = urlparse(cleaned)
     if parsed.scheme == "file":
         return _normalize_file_url(cleaned)
+    if parsed.scheme == "tkwry":
+        return _normalize_tkwry_url(cleaned)
     if parsed.scheme in {"http", "https"}:
         return _fix_https_ipv6_netloc(cleaned)
     if not parsed.scheme:
@@ -533,6 +535,39 @@ def _validate_file_url(url: str) -> None:
     _require_local_path_exists(local_path, display=url)
 
 
+def _validate_tkwry_url(parsed) -> None:
+    """Accept ``tkwry://localhost/...`` (and bare ``tkwry:///...``) app URLs."""
+    host = parsed.hostname or ""
+    if host and host.lower() not in {"localhost", "app"}:
+        raise ValueError(
+            f"unsupported tkwry URL host: {host!r} "
+            "(use tkwry://localhost/...)"
+        )
+    path = parsed.path or ""
+    if not path or path == "/":
+        # ``tkwry://localhost`` / ``tkwry://localhost/`` → index.html via protocol.
+        return
+    if ".." in path.split("/"):
+        raise ValueError("tkwry URL path must not contain '..'")
+
+
+def _normalize_tkwry_url(url: str) -> str:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "localhost").lower()
+    if host not in {"localhost", "app"}:
+        raise ValueError(
+            f"unsupported tkwry URL host: {host!r} "
+            "(use tkwry://localhost/...)"
+        )
+    path = parsed.path or "/"
+    if path == "/":
+        path = "/index.html"
+    # Keep query/fragment if present (rarely used for static apps).
+    return urlunparse(
+        ("tkwry", "localhost", path, parsed.params, parsed.query, parsed.fragment)
+    )
+
+
 def _validate_url(url: str) -> None:
     if "\x00" in url:
         raise ValueError("invalid URL")
@@ -546,3 +581,5 @@ def _validate_url(url: str) -> None:
         _validate_http_url(parsed)
     if parsed.scheme == "file":
         _validate_file_url(url)
+    if parsed.scheme == "tkwry":
+        _validate_tkwry_url(parsed)
