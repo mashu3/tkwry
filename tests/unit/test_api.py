@@ -51,6 +51,7 @@ WEBVIEW_METHODS = (
     "close_devtools",
     "is_devtools_open",
     "set_ipc_handler",
+    "expose",
     "set_on_navigation",
     "set_on_page_load",
     "set_on_title_changed",
