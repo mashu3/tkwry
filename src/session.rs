@@ -1,7 +1,10 @@
 //! Shared wry [`WebContext`] exposed as ``WebSession``.
 
+#[cfg(any(target_os = "macos", test))]
 use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "macos", test))]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
