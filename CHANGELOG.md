@@ -4,7 +4,10 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.1.2] - Unreleased
+## [0.1.2] - 2026-08-12
+
+Local ``app=`` / ``tkwry://`` apps, JS↔Python RPC and ``emit``, shared
+``WebSession``, and example cleanup (tabbed browser + Plotly CDN/local).
 
 ### Added
 
@@ -359,6 +362,7 @@ eval, macOS IME / import-order / DevTools private APIs, Notebook `ready`≠map.
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.1.2]: https://github.com/mashu3/tkwry/releases/tag/v0.1.2
 [0.1.1]: https://github.com/mashu3/tkwry/releases/tag/v0.1.1
 [0.1.0]: https://github.com/mashu3/tkwry/releases/tag/v0.1.0
 [0.0.9]: https://github.com/mashu3/tkwry/releases/tag/v0.0.9

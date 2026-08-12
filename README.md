@@ -155,7 +155,8 @@ web = WebView(frame, app="./web")          # loads tkwry://localhost/index.html
 ```
 
 Constructor ``app=`` fixes the filesystem root at create time. Later
-``load_url("tkwry://localhost/other.html")`` can navigate within that root.
+``load_url("tkwry://localhost/other.html")`` can navigate within that root
+(Windows WebView2 rewrites this to ``https://tkwry.localhost/...`` internally).
 Monaco / CDN scripts may still be loaded from the network inside that HTML when
 you choose not to vendor them yet. The Plotly demo toggles **CDN** vs **Local**
 (``app=``); Local caches ``plotly.js`` under ``examples/.vendor/``.
@@ -290,9 +291,12 @@ the **Tk main thread**. RPC handlers default to the same thread; use
 ``@web.expose(thread=True)`` for background work. `on_navigation` and
 `on_new_window` are also invoked on Tk, but WebKit **blocks** until they return
 a value — keep them fast (heavy work → return deny/default and defer with
-`root.after`). Timed-out sync hooks are canceled after about **60s** total wait.
+`root.after`). Do **not** create another WebView from `on_new_window` (even
+deferred): WKWebView deadlocks. Intercept links in JS instead (see
+[`examples/browser_demo.py`](examples/browser_demo.py)). Timed-out sync hooks
+are canceled after about **60s** total wait.
 
-Async queues (IPC, RPC, page-load, title, drag-drop, eval) cap at **2048** pending items each; further events are compacted or dropped. RPC is a separate queue from IPC. Use `take_queue_drop_counts()` to observe overflows.
+Async queues (IPC, RPC, page-load, title, drag-drop, eval) cap at **2048** pending items each; further events are compacted or dropped. RPC is a separate queue from IPC. Use `take_queue_drop_counts()` to observe overflows — it returns `(ipc, page_load, title, drag_drop, eval, rpc)`.
 
 Callback exceptions are printed to stderr and do not stop event delivery.
 
@@ -335,10 +339,10 @@ web.destroy()   # release native webview; host Frame is kept
 | Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `wait_until_ready`, `bind`, `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error` |
 | Diagnostics | `take_queue_drop_counts` |
 
-Constructor options: `url`, `html`, `app`, `spa_fallback`, `app_dev`, `session` /
-`data_directory` / `ephemeral`, `ipc_handler`, `rpc_traceback`, `devtools`,
-`background_color`, `user_agent`, `initialization_script`, `focused`, plus the
-callback hooks above.
+Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
+`app_dev`, `session` / `data_directory` / `ephemeral`, `ipc_handler`,
+`rpc_traceback`, `devtools`, `background_color`, `user_agent`,
+`initialization_script`, `focused`, plus the callback hooks above.
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`, `WebViewPhase`.
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
@@ -362,7 +366,7 @@ Short checklist — **details live in [Platform notes](#-platform-notes)** (espe
 - **macOS IME / focus** — not Safari-parity; mid-composition focus flips can mis-route input
 - **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
 - **`url()` on macOS** — may be `None` for inline HTML until a concrete `load_url` (WKWebView has no document `NSURL`)
-- **Sync hooks / queues** — `on_navigation` / `on_new_window` may block WebKit up to ~60s; async event queues cap at 2048 (see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks))
+- **Sync hooks / queues** — `on_navigation` / `on_new_window` may block WebKit up to ~60s; do not create a WebView from `on_new_window`; async event queues cap at 2048 (see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks))
 - **Drag & drop** — WebView area only (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
@@ -423,7 +427,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
 - **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` hide unmapped views)
-- **Deferred callbacks** — IPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
+- **Deferred callbacks** — IPC, RPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
 - **URL safety** — normalizes and validates URLs before navigation
 - **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()` (macOS: private APIs)
 - **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)
@@ -446,7 +450,7 @@ pip install -e .
 
 | Script | Description |
 |--------|-------------|
-| [`examples/browser_demo.py`](examples/browser_demo.py) | URL bar, tabs, shared `WebSession` |
+| [`examples/browser_demo.py`](examples/browser_demo.py) | URL bar, tabs, shared `WebSession`, open-in-new-tab |
 | [`examples/ipc_demo.py`](examples/ipc_demo.py) | IPC events, RPC (`call` / kwargs / worker), and `emit` |
 | [`examples/multi_demo.py`](examples/multi_demo.py) | Multiple WebViews, tabs, panes |
 | [`examples/plotly_demo.py`](examples/plotly_demo.py) | Plotly charts — CDN or local `app=` (`pip install plotly`) |
