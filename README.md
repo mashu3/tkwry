@@ -398,7 +398,7 @@ Tk child `Frame`s usually **do not** get their own `NSView` (Tk Aqua). tkwry att
 
 **IME:** composition stays with the current first responder. Switching Tk ↔ WebView mid-composition (or fighting the system candidate window) can cancel or mis-deliver input vs Safari. **Not** a v0.1 goal — finish composition before changing focus, or keep IME editing in one surface.
 
-**Import order / double titlebar:** import `tkwry` **before** anything that starts `AppKit` / `NSApplication`. On import, tkwry disables process-level automatic window tabbing on the main thread. If AppKit starts first, macOS may show a **double titlebar** strip — see [`examples/macos_double_titlebar_repro.py`](examples/macos_double_titlebar_repro.py). If per-window tabbing disable during create fails, tkwry logs and retries asynchronously (non-fatal).
+**Import order / double titlebar:** import `tkwry` **before** anything that starts `AppKit` / `NSApplication`. On import, tkwry disables process-level automatic window tabbing on the main thread. If AppKit starts first, macOS may show a **double titlebar** strip. If per-window tabbing disable during create fails, tkwry logs and retries asynchronously (non-fatal).
 
 **`url()`:** may be `None` for inline HTML (`html=` / `load_html`) or when WKWebView has no document `NSURL`. After `load_url`, it becomes the concrete URI.
 
@@ -454,7 +454,6 @@ pip install -e .
 | [`examples/folium_demo.py`](examples/folium_demo.py) | Folium maps (`pip install folium`) |
 | [`examples/markdown_demo.py`](examples/markdown_demo.py) | Monaco markdown editor + live preview (CDN) |
 | [`examples/dnd_demo.py`](examples/dnd_demo.py) | Native file drag & drop into WebView |
-| [`examples/macos_double_titlebar_repro.py`](examples/macos_double_titlebar_repro.py) | macOS import-order / double titlebar comparison |
 
 ```bash
 python examples/url_demo.py

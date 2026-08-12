@@ -51,6 +51,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Split ``webview.py``: host/wakeup helpers → ``_host.py``, IPC/RPC/emit/
   ``watch_app`` → ``_rpc_api.WebViewRpcMixin`` (public API unchanged)
 
+### Removed
+
+- ``examples/macos_double_titlebar_repro.py`` — maintainer repro, not a demo;
+  import-order guidance stays in README
+
 ### Fixed
 
 - Windows: rewrite ``tkwry://`` → ``https://tkwry.localhost/...`` on
