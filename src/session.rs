@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use pyo3::prelude::*;
 
 /// Stable 16-byte id for macOS ``WKWebsiteDataStore`` (path-derived).
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn data_store_id_for_path(path: &Path) -> [u8; 16] {
     let mut out = [0u8; 16];
     let mut h1 = std::collections::hash_map::DefaultHasher::new();
@@ -76,6 +77,8 @@ impl WebSessionState {
 /// platform supports it). Keep the session alive while any WebView uses it.
 #[pyclass(name = "WebSession", unsendable)]
 pub struct WebSession {
+    /// Shared across WebViews on the Tk thread; wry ``WebContext`` is not Sync.
+    #[allow(clippy::arc_with_non_send_sync)]
     pub(crate) state: Arc<Mutex<WebSessionState>>,
 }
 
@@ -87,6 +90,7 @@ impl WebSession {
         let data_directory = data_directory.map(PathBuf::from);
         let state = WebSessionState::new(data_directory, ephemeral)?;
         Ok(Self {
+            #[allow(clippy::arc_with_non_send_sync)]
             state: Arc::new(Mutex::new(state)),
         })
     }

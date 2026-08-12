@@ -159,9 +159,8 @@ pub(crate) fn serve_app_request(
         Err(_) => {
             if options.spa_fallback && !looks_like_static_asset(path) {
                 let index = root.join("index.html");
-                match std::fs::read(&index) {
-                    Ok(bytes) => return file_response(&index, bytes, options),
-                    Err(_) => {}
+                if let Ok(bytes) = std::fs::read(&index) {
+                    return file_response(&index, bytes, options);
                 }
             }
             error_response(
