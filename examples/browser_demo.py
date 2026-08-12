@@ -29,7 +29,11 @@ LINK_HELPER_JS = """
   function openable(href) {
     try {
       var u = new URL(href, location.href);
-      return u.protocol === "http:" || u.protocol === "https:" || u.protocol === "tkwry:";
+      return (
+        u.protocol === "http:" ||
+        u.protocol === "https:" ||
+        u.protocol === "tkwry:"
+      );
     } catch (e) { return false; }
   }
   function post(payload) {
@@ -213,11 +217,7 @@ def main() -> None:
             button.configure(text=_tab_label(title))
 
         def on_page_load(event: PageLoadEvent, page_url: str) -> None:
-            if (
-                event is PageLoadEvent.Finished
-                and page_url
-                and selected_id == tab_id
-            ):
+            if event is PageLoadEvent.Finished and page_url and selected_id == tab_id:
                 url_var.set(page_url)
 
         web = WebView(
@@ -261,10 +261,14 @@ def main() -> None:
     url_entry.pack(side="left", fill="x", expand=True, padx=8)
     ttk.Button(toolbar, text="Go", command=go).pack(side="left")
 
+    def close_selected(_event: object = None) -> None:
+        if selected_id:
+            close_tab(selected_id)
+
     url_entry.bind("<Return>", lambda _e: go())
     url_entry.bind("<Button-1>", lambda _e: url_entry.icursor(tk.END), add="+")
-    root.bind_all("<Command-w>", lambda _e: close_tab(selected_id) if selected_id else None)
-    root.bind_all("<Control-w>", lambda _e: close_tab(selected_id) if selected_id else None)
+    root.bind_all("<Command-w>", close_selected)
+    root.bind_all("<Control-w>", close_selected)
 
     add_tab(HOME)
     root.focus_set()
