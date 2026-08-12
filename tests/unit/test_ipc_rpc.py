@@ -24,6 +24,23 @@ def test_parse_rpc_request_ok() -> None:
     assert req.id == "r1"
     assert req.method == "add"
     assert req.params == (1, 2)
+    assert req.kwargs == {}
+
+
+def test_parse_rpc_request_kwargs() -> None:
+    raw = json.dumps(
+        {
+            "__tkwry": "rpc",
+            "id": "r1",
+            "method": "greet",
+            "params": ["hi"],
+            "kwargs": {"times": 3},
+        }
+    )
+    req = parse_rpc_request(raw)
+    assert req is not None
+    assert req.params == ("hi",)
+    assert req.kwargs == {"times": 3}
 
 
 def test_parse_rpc_request_rejects_plain_ipc() -> None:
@@ -34,6 +51,12 @@ def test_parse_rpc_request_rejects_plain_ipc() -> None:
     assert (
         parse_rpc_request(
             json.dumps({"__tkwry": "rpc", "id": "1", "method": "x", "params": "bad"})
+        )
+        is None
+    )
+    assert (
+        parse_rpc_request(
+            json.dumps({"__tkwry": "rpc", "id": "1", "method": "x", "kwargs": ["bad"]})
         )
         is None
     )
@@ -137,6 +160,27 @@ def test_dispatch_rpc_worker_submit() -> None:
     assert submitted
 
 
+def test_dispatch_rpc_kwargs() -> None:
+    def greet(message: str, times: int = 1) -> str:
+        return message * int(times)
+
+    req = parse_rpc_request(
+        json.dumps(
+            {
+                "__tkwry": "rpc",
+                "id": "1",
+                "method": "greet",
+                "params": ["hi"],
+                "kwargs": {"times": 3},
+            }
+        )
+    )
+    assert req is not None
+    ok, value = dispatch_rpc({"greet": greet}, req)
+    assert ok is True
+    assert value == "hihihi"
+
+
 def test_format_rpc_error() -> None:
     try:
         raise ValueError("x")
@@ -167,6 +211,7 @@ def test_settle_and_emit_script() -> None:
 def test_bootstrap_includes_on_and_timeout() -> None:
     assert "window.tkwry.on" in RPC_BOOTSTRAP_JS
     assert "timeout" in RPC_BOOTSTRAP_JS
+    assert "kwargs" in RPC_BOOTSTRAP_JS
     assert "_emit" in RPC_BOOTSTRAP_JS
 
 

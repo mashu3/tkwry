@@ -182,8 +182,11 @@ def heavy_task(data: dict) -> dict:
 
 ```js
 const text = await window.tkwry.call("read_file", path);
-// optional JS-side timeout (ms):
-await window.tkwry.call("heavy_task", payload, { timeout: 5000 });
+// optional JS-side timeout (ms) and Python kwargs:
+await window.tkwry.call("heavy_task", payload, {
+  timeout: 5000,
+  kwargs: { verbose: true },
+});
 ```
 
 **Execution model:** default handlers run on the **Tk main thread** (safe for
@@ -192,7 +195,10 @@ to use a background pool. Handlers may also return a
 ``concurrent.futures.Future``. Errors reject the Promise with a structured
 payload (``error.name`` / ``error.message``; set ``rpc_traceback=True`` or
 ``TKWRY_RPC_TRACEBACK=1`` for tracebacks). Duplicate method names raise unless
-``replace=True``. Destroy rejects in-flight RPCs.
+``replace=True``. Destroy rejects in-flight RPCs. Keyword args go in
+``{ kwargs: { … } }`` (a trailing ``{ timeout: ms }`` is still call options,
+not a positional dict). Worker ``cancel`` is cooperative. RPC has its own
+2048-deep queue so IPC overflow cannot drop ``tkwry.call``.
 
 ### Python → JS events (``emit``)
 
@@ -204,7 +210,7 @@ web.emit("data_updated", {"n": 1})
 window.tkwry.on("data_updated", (payload) => { ... });
 ```
 
-See [`examples/rpc_demo.py`](examples/rpc_demo.py).
+See [`examples/ipc_demo.py`](examples/ipc_demo.py).
 
 ### Shared session (``WebSession``)
 
@@ -259,6 +265,8 @@ web.sync_bounds()
 
 **Size contract:** once the host is laid out, the mapped `Frame.winfo_width()` / `winfo_height()` are the sole source of truth for native bounds. Constructor `width`/`height` and explicit `place(..., width=, height=)` are only used **before** Tk reports a real size (`winfo_* <= 1`). Prefer passing `width`/`height` to `place()` so the host gets a definite allocation (especially on Linux / Xvfb).
 
+Unmapped hosts (inactive `Notebook` tabs) call `set_visible(False)`. `ready` stays layout-based (`True` while hidden); use `phase is WebViewPhase.HIDDEN` when you need visibility.
+
 ### Navigation / lifecycle callbacks
 
 ```python
@@ -283,7 +291,7 @@ the **Tk main thread**. RPC handlers default to the same thread; use
 a value — keep them fast (heavy work → return deny/default and defer with
 `root.after`). Timed-out sync hooks are canceled after about **60s** total wait.
 
-Async queues (IPC, page-load, title, drag-drop, eval) cap at **2048** pending items each; further events are compacted or dropped. Use `take_queue_drop_counts()` to observe overflows.
+Async queues (IPC, RPC, page-load, title, drag-drop, eval) cap at **2048** pending items each; further events are compacted or dropped. RPC is a separate queue from IPC. Use `take_queue_drop_counts()` to observe overflows.
 
 Callback exceptions are printed to stderr and do not stop event delivery.
 
@@ -326,10 +334,14 @@ web.destroy()   # release native webview; host Frame is kept
 | Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `wait_until_ready`, `bind`, `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error` |
 | Diagnostics | `take_queue_drop_counts` |
 
-Constructor options: `url`, `html`, `app`, `ipc_handler`, `devtools`, `background_color`,
-`user_agent`, `initialization_script`, `focused`, plus the callback hooks above.
+Constructor options: `url`, `html`, `app`, `spa_fallback`, `app_dev`, `session` /
+`data_directory` / `ephemeral`, `ipc_handler`, `rpc_traceback`, `devtools`,
+`background_color`, `user_agent`, `initialization_script`, `focused`, plus the
+callback hooks above.
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`, `WebViewPhase`.
+Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
+`RpcTimeoutError`.
 
 Type aliases: `IpcHandler`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`.
 
@@ -341,13 +353,14 @@ Short checklist — **details live in [Platform notes](#-platform-notes)** (espe
 
 - **Alpha** — APIs may change; not for production yet (see banner above)
 - **Windows** — WebView2 Runtime required; missing runtime → `WebViewCreationError`
+- **Windows DevTools** — wry/WebView2 reports `is_devtools_open()` as `False` and `close_devtools()` is a no-op; `open_devtools()` still opens the inspector
 - **Linux** — no PyPI wheel (by design); best-effort source install
 - **Linux concurrent `eval_js_with_callback`** — evaluating on multiple WebViews at once can stall WebKitGTK; prefer sequential evals (see [Linux](#linux))
+- **Linux shared `WebSession` + `app=`** — WebViews that share a session must use the same `app=` root (custom protocol is registered once per context)
 - **macOS DevTools** — create with `devtools=True`, then `open_devtools()` (flag alone does not open; `open_devtools()` without the flag is a no-op on macOS); uses private APIs — avoid in Mac App Store builds
 - **macOS IME / focus** — not Safari-parity; mid-composition focus flips can mis-route input
 - **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
-- **`url()` on macOS** — may be `None` for inline HTML until a concrete `load_url`
-- **Hidden Notebook tabs** — native view is hidden; `ready` can stay `True` while unmapped
+- **`url()` on macOS** — may be `None` for inline HTML until a concrete `load_url` (WKWebView has no document `NSURL`)
 - **Sync hooks / queues** — `on_navigation` / `on_new_window` may block WebKit up to ~60s; async event queues cap at 2048 (see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks))
 - **Drag & drop** — WebView area only (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
 
@@ -391,7 +404,7 @@ Tk child `Frame`s usually **do not** get their own `NSView` (Tk Aqua). tkwry att
 
 **Notebook / tabs:** unmapped tabs hide the native view (`set_visible(False)`) and show again on `<Map>` — required because frames share the toplevel `NSView`. `ready` is layout-based (can stay `True` while hidden); prefer visible-tab work after the tab is selected. No extra app code for tabs/panes — [`examples/multi_demo.py`](examples/multi_demo.py).
 
-All user handlers run on the **Tk main thread**. `on_navigation` / `on_new_window` still make WebKit wait for a return value — see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks).
+Lifecycle / IPC / page-load handlers run on the **Tk main thread**. RPC may use a worker (`thread=True`). `on_navigation` / `on_new_window` still make WebKit wait for a return value — see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks).
 
 ---
 
@@ -408,7 +421,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **WebSession** — shared wry `WebContext` (cookies / cache / localStorage) across WebViews
 - **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
-- **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` work out of the box on macOS)
+- **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` hide unmapped views)
 - **Deferred callbacks** — IPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
 - **URL safety** — normalizes and validates URLs before navigation
 - **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()` (macOS: private APIs)
@@ -434,8 +447,7 @@ pip install -e .
 |--------|-------------|
 | [`examples/url_demo.py`](examples/url_demo.py) | URL bar + embedded page |
 | [`examples/local_assets_demo.py`](examples/local_assets_demo.py) | Offline local app via `app=` / `tkwry://` |
-| [`examples/ipc_demo.py`](examples/ipc_demo.py) | JavaScript ↔ Tkinter IPC |
-| [`examples/rpc_demo.py`](examples/rpc_demo.py) | RPC + worker + `emit` |
+| [`examples/ipc_demo.py`](examples/ipc_demo.py) | IPC events, RPC (`call` / kwargs / worker), and `emit` |
 | [`examples/session_demo.py`](examples/session_demo.py) | Shared `WebSession` / localStorage |
 | [`examples/multi_demo.py`](examples/multi_demo.py) | Multiple WebViews, tabs, panes |
 | [`examples/plotly_demo.py`](examples/plotly_demo.py) | Plotly charts (`pip install plotly`) |
@@ -448,7 +460,6 @@ pip install -e .
 python examples/url_demo.py
 python examples/local_assets_demo.py
 python examples/ipc_demo.py
-python examples/rpc_demo.py
 python examples/multi_demo.py
 python examples/plotly_demo.py
 python examples/folium_demo.py

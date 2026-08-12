@@ -20,15 +20,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (JSON envelope over existing IPC; ``ipc_handler`` unchanged)
 - Worker RPC: ``@web.expose(thread=True)`` / ``run_in="worker"``
   (ThreadPoolExecutor); optional ``timeout`` (seconds); JS
-  ``call(..., { timeout: ms })``
+  ``call(..., { timeout: ms, kwargs: { … } })``
 - Structured RPC errors (``type`` / ``message`` / optional ``traceback`` via
   ``rpc_traceback=True`` or ``TKWRY_RPC_TRACEBACK=1``); ``RpcTimeoutError``
 - RPC name collision guard (``replace=True``); ``unexpose``; destroy rejects
   in-flight Promises
+- Dedicated RPC queue (cap 2048) so IPC overflow cannot drop ``tkwry.call``
 - ``expose`` handlers may return a ``concurrent.futures.Future``; the Promise
   settles when the Future completes (Tk-thread ``after_idle``)
 - Python → JS events: ``web.emit(event, data)`` / ``window.tkwry.on`` / ``off``
-- ``examples/rpc_demo.py`` and ``tkwry.ipc`` helpers
+- ``examples/ipc_demo.py`` (IPC events, RPC, ``emit``) and ``tkwry.ipc`` helpers
 - ``tkwry.testing`` helpers (``wait_until``, ``wait_ready``, ``wait_eval``,
   ``wait_title``)
 - ``WebSession`` — shared wry ``WebContext`` for cookies / cache /
@@ -37,6 +38,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Folded ``examples/rpc_demo.py`` into ``examples/ipc_demo.py`` (IPC + RPC +
+  ``emit`` in one two-pane demo)
+- ``take_queue_drop_counts()`` is now
+  ``(ipc, page_load, title, drag_drop, eval, rpc)``
 - URL layer accepts ``tkwry://localhost/...`` (requires ``app=`` at create)
 - Windows custom-protocol origins use HTTPS scheme (wry
   ``with_https_scheme``) so they align more closely with macOS/Linux

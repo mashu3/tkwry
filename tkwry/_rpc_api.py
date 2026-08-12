@@ -93,8 +93,9 @@ class WebViewRpcMixin:
         """Expose a Python callable to ``window.tkwry.call(name, ...)``.
 
         Use as ``@web.expose`` / ``@web.expose(name="foo")`` or
-        ``web.expose(fn)``. Position arguments only; return values must be
-        JSON-serializable.
+        ``web.expose(fn)``. Arguments may be positional and/or keyword
+        (``window.tkwry.call(name, …, { kwargs: { … } })``). Return values
+        must be JSON-serializable.
 
         Execution model:
 
@@ -287,7 +288,9 @@ class WebViewRpcMixin:
         native = self._webview
         if native is None or not self._ipc_listening_wanted():
             return
-        for message in native.drain_ipc_messages():
+        rpc_messages = native.drain_rpc_messages()
+        ipc_messages = native.drain_ipc_messages()
+        for message in (*rpc_messages, *ipc_messages):
             request = parse_rpc_request(message)
             if request is not None:
                 self._handle_rpc_request(request)

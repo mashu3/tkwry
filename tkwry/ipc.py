@@ -9,8 +9,9 @@ Roles:
 - **Emit** — fire-and-forget Python → JS via :meth:`~tkwry.WebView.emit` /
   ``window.tkwry.on``.
 
-RPC envelopes use ``{"__tkwry": "rpc", ...}`` and settle Promises with
-``eval_js``. Low-level IPC traffic is unchanged.
+RPC envelopes use ``{"__tkwry": "rpc", ...}`` (optional ``kwargs`` object)
+and settle Promises with ``eval_js``. Low-level IPC traffic is unchanged.
+RPC is queued separately from IPC so event floods cannot drop calls.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import json
 import traceback
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, TypeAlias
 
 RpcHandler: TypeAlias = Callable[..., Any]
@@ -39,10 +40,26 @@ RPC_BOOTSTRAP_JS = """\
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
     var keys = Object.keys(value);
     if (!keys.length) return false;
+    var hasTimeout = false;
+    var hasKwargs = false;
     for (var i = 0; i < keys.length; i++) {
-      if (keys[i] !== "timeout") return false;
+      var key = keys[i];
+      if (key === "timeout") {
+        if (typeof value.timeout !== "number") return false;
+        hasTimeout = true;
+        continue;
+      }
+      if (key === "kwargs") {
+        if (!value.kwargs || typeof value.kwargs !== "object"
+            || Array.isArray(value.kwargs)) {
+          return false;
+        }
+        hasKwargs = true;
+        continue;
+      }
+      return false;
     }
-    return typeof value.timeout === "number";
+    return hasTimeout || hasKwargs;
   }
   function makeError(value) {
     if (value && typeof value === "object" && value.message != null) {
@@ -89,12 +106,16 @@ RPC_BOOTSTRAP_JS = """\
           });
           return;
         }
-        window.ipc.postMessage(JSON.stringify({
+        var payload = {
           __tkwry: "rpc",
           id: id,
           method: String(method),
           params: params
-        }));
+        };
+        if (options && options.kwargs && Object.keys(options.kwargs).length) {
+          payload.kwargs = options.kwargs;
+        }
+        window.ipc.postMessage(JSON.stringify(payload));
       });
     },
     on: function (event, handler) {
@@ -136,6 +157,7 @@ class RpcRequest:
     id: str
     method: str
     params: tuple[Any, ...]
+    kwargs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,7 +192,18 @@ def parse_rpc_request(message: str) -> RpcRequest | None:
         params = []
     if not isinstance(params, Sequence) or isinstance(params, (str, bytes, bytearray)):
         return None
-    return RpcRequest(id=req_id, method=method, params=tuple(params))
+    kwargs_raw = data.get("kwargs")
+    if kwargs_raw is None:
+        kwargs: dict[str, Any] = {}
+    elif isinstance(kwargs_raw, Mapping) and not isinstance(
+        kwargs_raw, (str, bytes, bytearray)
+    ):
+        if not all(isinstance(key, str) for key in kwargs_raw):
+            return None
+        kwargs = dict(kwargs_raw)
+    else:
+        return None
+    return RpcRequest(id=req_id, method=method, params=tuple(params), kwargs=kwargs)
 
 
 def format_rpc_error(
@@ -245,7 +278,7 @@ def dispatch_rpc(
     reg = _normalize_registration(entry)
 
     def invoke() -> Any:
-        return reg.handler(*request.params)
+        return reg.handler(*request.params, **request.kwargs)
 
     if reg.run_in == "worker":
         if submit_worker is None:

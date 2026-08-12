@@ -353,6 +353,53 @@ def test_rpc_expose_call_roundtrip(tk_root) -> None:
     frame.destroy()
 
 
+def test_rpc_kwargs_call_roundtrip(tk_root) -> None:
+    """``call(..., { kwargs: { ... } })`` is passed as Python keyword args."""
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<title>rpc</title><p>rpc</p>")
+
+    @web.expose
+    def greet(message: str, times: int = 1) -> str:
+        return str(message) * int(times)
+
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=30)
+
+    web.eval_js(
+        """
+        (function () {
+          if (!window.tkwry || !window.tkwry.call) {
+            document.title = "no-tkwry";
+            return;
+          }
+          window.tkwry.call("greet", "hi", { kwargs: { times: 3 } }).then(
+            function (text) {
+              document.title = "out=" + text;
+            }
+          ).catch(function (e) {
+            document.title = "err=" + e;
+          });
+        })();
+        """
+    )
+
+    titles: list[str] = []
+
+    def read_title() -> None:
+        web.eval_js_with_callback("document.title", titles.append)
+
+    def title_ready() -> bool:
+        read_title()
+        return any("out=hihihi" in str(t) for t in titles)
+
+    assert wait_until(tk_root, title_ready, steps=400), (
+        f"expected document.title out=hihihi, got {titles!r}"
+    )
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_rpc_unknown_method_rejects(tk_root) -> None:
     frame = host_frame(tk_root)
     web = WebView(frame, html="<title>rpc</title><p>rpc</p>")

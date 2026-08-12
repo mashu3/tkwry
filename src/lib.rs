@@ -46,6 +46,7 @@ fn make_rect(x: f64, y: f64, width: f64, height: f64) -> wry::Rect {
 /// behind, queues are compacted where possible before the oldest event is dropped.
 const MAX_PAGE_LOAD_PENDING: usize = 2048;
 const MAX_IPC_PENDING: usize = 2048;
+const MAX_RPC_PENDING: usize = 2048;
 const MAX_TITLE_PENDING: usize = 2048;
 const MAX_DRAG_DROP_PENDING: usize = 2048;
 const MAX_EVAL_PENDING: usize = 2048;
@@ -481,27 +482,6 @@ fn drain_queue<T>(pending: &Arc<Mutex<VecDeque<T>>>) -> PyResult<Vec<T>> {
         .map_err(|_| queue_lock_poisoned())
 }
 
-fn push_listening_py<T>(
-    listening: &AtomicBool,
-    pending: &Arc<Mutex<VecDeque<T>>>,
-    dropped: &AtomicU64,
-    item: T,
-    max: usize,
-    label: &str,
-) -> PyResult<()> {
-    push_if_listening(
-        listening,
-        pending,
-        dropped,
-        item,
-        max,
-        label,
-        None,
-        |_: &mut VecDeque<T>| false,
-    )
-    .map_err(|()| queue_lock_poisoned())
-}
-
 fn alloc_eval_token(counter: &AtomicU64, callbacks: &mut HashMap<u64, EvalCallbackEntry>) -> u64 {
     loop {
         let token = counter.fetch_add(1, Ordering::SeqCst);
@@ -618,6 +598,61 @@ fn try_compact_ipc_queue(queue: &mut VecDeque<String>) -> bool {
         }
     }
     false
+}
+
+/// True when *body* looks like a tkwry RPC envelope (``{"__tkwry":"rpc",...}``).
+///
+/// Used only to pick the dedicated RPC queue so IPC overflow cannot drop
+/// in-flight ``window.tkwry.call`` requests. Python still parses the envelope.
+fn is_rpc_envelope(body: &str) -> bool {
+    let s = body.trim_start();
+    if !s.starts_with('{') {
+        return false;
+    }
+    let Some(key_at) = s.find("\"__tkwry\"") else {
+        return false;
+    };
+    let after_key = &s[key_at + "\"__tkwry\"".len()..];
+    let after_colon = after_key.trim_start();
+    let Some(rest) = after_colon.strip_prefix(':') else {
+        return false;
+    };
+    rest.trim_start().starts_with("\"rpc\"")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_window_ipc_body(
+    listening: &AtomicBool,
+    ipc_pending: &IpcPending,
+    ipc_dropped: &AtomicU64,
+    rpc_pending: &IpcPending,
+    rpc_dropped: &AtomicU64,
+    body: String,
+    wakeup: Option<&Arc<AtomicI32>>,
+) -> Result<(), ()> {
+    if is_rpc_envelope(&body) {
+        push_if_listening(
+            listening,
+            rpc_pending,
+            rpc_dropped,
+            body,
+            MAX_RPC_PENDING,
+            "RPC",
+            wakeup,
+            |_: &mut VecDeque<String>| false,
+        )
+    } else {
+        push_if_listening(
+            listening,
+            ipc_pending,
+            ipc_dropped,
+            body,
+            MAX_IPC_PENDING,
+            "IPC",
+            wakeup,
+            try_compact_ipc_queue,
+        )
+    }
 }
 
 fn try_compact_page_load_queue(queue: &mut VecDeque<(PageLoadEvent, String)>) -> bool {
@@ -757,6 +792,7 @@ struct WebView {
     inner: Arc<Mutex<Option<wry::WebView>>>,
     page_load_pending: PageLoadPending,
     ipc_pending: IpcPending,
+    rpc_pending: IpcPending,
     title_pending: TitlePending,
     drag_drop_pending: DragDropPending,
     eval_callbacks: EvalCallbackMap,
@@ -768,6 +804,7 @@ struct WebView {
     title_listening: Arc<AtomicBool>,
     drag_drop_listening: Arc<AtomicBool>,
     ipc_overflow_dropped: Arc<AtomicU64>,
+    rpc_overflow_dropped: Arc<AtomicU64>,
     page_load_overflow_dropped: Arc<AtomicU64>,
     title_overflow_dropped: Arc<AtomicU64>,
     drag_drop_overflow_dropped: Arc<AtomicU64>,
@@ -838,6 +875,7 @@ impl WebView {
                 false,
             ),
             set_listening_and_clear_queue(&self.ipc_listening, &self.ipc_pending, false),
+            set_listening_and_clear_queue(&self.ipc_listening, &self.rpc_pending, false),
             set_listening_and_clear_queue(&self.title_listening, &self.title_pending, false),
             set_listening_and_clear_queue(
                 &self.drag_drop_listening,
@@ -977,6 +1015,7 @@ impl WebView {
         let newwin_cb: PyCallback = Arc::new(Mutex::new(on_new_window));
         let page_load_pending: PageLoadPending = Arc::new(Mutex::new(VecDeque::new()));
         let ipc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
+        let rpc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
         let title_pending: TitlePending = Arc::new(Mutex::new(VecDeque::new()));
         let drag_drop_pending: DragDropPending = Arc::new(Mutex::new(VecDeque::new()));
         let eval_callbacks: EvalCallbackMap = Arc::new(Mutex::new(HashMap::new()));
@@ -987,6 +1026,7 @@ impl WebView {
         let title_listening = Arc::new(AtomicBool::new(title_listening));
         let drag_drop_listening = Arc::new(AtomicBool::new(drag_drop_listening));
         let ipc_overflow_dropped = Arc::new(AtomicU64::new(0));
+        let rpc_overflow_dropped = Arc::new(AtomicU64::new(0));
         let page_load_overflow_dropped = Arc::new(AtomicU64::new(0));
         let title_overflow_dropped = Arc::new(AtomicU64::new(0));
         let drag_drop_overflow_dropped = Arc::new(AtomicU64::new(0));
@@ -996,29 +1036,37 @@ impl WebView {
         let wakeup_write_fd = Arc::new(AtomicI32::new(-1));
 
         let ipc_pending_clone = ipc_pending.clone();
+        let rpc_pending_clone = rpc_pending.clone();
         let ipc_listening_clone = ipc_listening.clone();
         let ipc_overflow_clone = ipc_overflow_dropped.clone();
+        let rpc_overflow_clone = rpc_overflow_dropped.clone();
         let wakeup_for_ipc = wakeup_write_fd.clone();
         let ipc_handler_wry = move |req: wry::http::Request<String>| {
             let body = req.body().clone();
             if body.len() > MAX_IPC_MESSAGE_BYTES {
-                ipc_overflow_clone.fetch_add(1, Ordering::SeqCst);
+                let rpc = is_rpc_envelope(&body);
+                let dropped = if rpc {
+                    &rpc_overflow_clone
+                } else {
+                    &ipc_overflow_clone
+                };
+                let label = if rpc { "RPC" } else { "IPC" };
+                dropped.fetch_add(1, Ordering::SeqCst);
                 eprintln!(
-                    "tkwry: IPC message dropped ({} bytes exceeds {} byte limit)",
+                    "tkwry: {label} message dropped ({} bytes exceeds {} byte limit)",
                     body.len(),
                     MAX_IPC_MESSAGE_BYTES
                 );
                 return;
             }
-            let _ = push_if_listening(
+            let _ = push_window_ipc_body(
                 &ipc_listening_clone,
                 &ipc_pending_clone,
                 &ipc_overflow_clone,
+                &rpc_pending_clone,
+                &rpc_overflow_clone,
                 body,
-                MAX_IPC_PENDING,
-                "IPC",
                 Some(&wakeup_for_ipc),
-                try_compact_ipc_queue,
             );
         };
 
@@ -1296,6 +1344,7 @@ impl WebView {
             inner,
             page_load_pending,
             ipc_pending,
+            rpc_pending,
             title_pending,
             drag_drop_pending,
             eval_callbacks,
@@ -1306,6 +1355,7 @@ impl WebView {
             title_listening,
             drag_drop_listening,
             ipc_overflow_dropped,
+            rpc_overflow_dropped,
             page_load_overflow_dropped,
             title_overflow_dropped,
             drag_drop_overflow_dropped,
@@ -1410,7 +1460,7 @@ impl WebView {
         Ok(())
     }
 
-    fn take_queue_drop_counts(&self) -> PyResult<(u64, u64, u64, u64, u64)> {
+    fn take_queue_drop_counts(&self) -> PyResult<(u64, u64, u64, u64, u64, u64)> {
         self.require_owner_thread()?;
         Ok((
             self.ipc_overflow_dropped.swap(0, Ordering::SeqCst),
@@ -1418,12 +1468,14 @@ impl WebView {
             self.title_overflow_dropped.swap(0, Ordering::SeqCst),
             self.drag_drop_overflow_dropped.swap(0, Ordering::SeqCst),
             self.eval_overflow_dropped.swap(0, Ordering::SeqCst),
+            self.rpc_overflow_dropped.swap(0, Ordering::SeqCst),
         ))
     }
 
     fn set_ipc_listening(&self, enabled: bool) -> PyResult<()> {
         self.require_owner_thread()?;
-        set_listening_and_clear_queue(&self.ipc_listening, &self.ipc_pending, enabled)
+        set_listening_and_clear_queue(&self.ipc_listening, &self.ipc_pending, enabled)?;
+        set_listening_and_clear_queue(&self.ipc_listening, &self.rpc_pending, enabled)
     }
 
     fn set_on_navigation(&self, handler: Py<PyAny>) -> PyResult<()> {
@@ -1462,6 +1514,11 @@ impl WebView {
         drain_queue(&self.ipc_pending)
     }
 
+    fn drain_rpc_messages(&self) -> PyResult<Vec<String>> {
+        self.require_owner_thread()?;
+        drain_queue(&self.rpc_pending)
+    }
+
     fn drain_title_events(&self) -> PyResult<Vec<String>> {
         self.require_owner_thread()?;
         drain_queue(&self.title_pending)
@@ -1480,14 +1537,16 @@ impl WebView {
                 MAX_IPC_MESSAGE_BYTES
             )));
         }
-        push_listening_py(
+        push_window_ipc_body(
             &self.ipc_listening,
             &self.ipc_pending,
             &self.ipc_overflow_dropped,
+            &self.rpc_pending,
+            &self.rpc_overflow_dropped,
             message,
-            MAX_IPC_PENDING,
-            "IPC",
+            None,
         )
+        .map_err(|()| queue_lock_poisoned())
     }
 
     fn _enqueue_title_event(&self, title: String) -> PyResult<()> {
@@ -1951,6 +2010,67 @@ mod tests {
         let mut queue = VecDeque::from(["a".into(), "a".into(), "b".into()]);
         assert!(try_compact_title_queue(&mut queue));
         assert_eq!(queue, VecDeque::from(["a".to_string(), "b".to_string()]));
+    }
+
+    #[test]
+    fn is_rpc_envelope_accepts_compact_and_spaced_json() {
+        assert!(is_rpc_envelope(
+            r#"{"__tkwry":"rpc","id":"r1","method":"ping","params":[]}"#
+        ));
+        assert!(is_rpc_envelope(
+            r#"{ "__tkwry": "rpc", "id": "r1", "method": "ping" }"#
+        ));
+        assert!(!is_rpc_envelope(r#"{"action":"increment"}"#));
+        assert!(!is_rpc_envelope("not-json"));
+        assert!(!is_rpc_envelope(r#"{"__tkwry":"event"}"#));
+    }
+
+    #[test]
+    fn rpc_queue_survives_ipc_overflow() {
+        let listening = AtomicBool::new(true);
+        let ipc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
+        let rpc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
+        let ipc_dropped = AtomicU64::new(0);
+        let rpc_dropped = AtomicU64::new(0);
+        for i in 0..MAX_IPC_PENDING {
+            assert!(push_window_ipc_body(
+                &listening,
+                &ipc_pending,
+                &ipc_dropped,
+                &rpc_pending,
+                &rpc_dropped,
+                format!("ipc-{i}"),
+                None,
+            )
+            .is_ok());
+        }
+        assert!(push_window_ipc_body(
+            &listening,
+            &ipc_pending,
+            &ipc_dropped,
+            &rpc_pending,
+            &rpc_dropped,
+            "ipc-overflow".into(),
+            None,
+        )
+        .is_ok());
+        assert!(ipc_dropped.load(Ordering::SeqCst) >= 1);
+        assert_eq!(ipc_pending.lock().unwrap().len(), MAX_IPC_PENDING);
+
+        let rpc_msg = r#"{"__tkwry":"rpc","id":"r1","method":"ping","params":[]}"#;
+        assert!(push_window_ipc_body(
+            &listening,
+            &ipc_pending,
+            &ipc_dropped,
+            &rpc_pending,
+            &rpc_dropped,
+            rpc_msg.into(),
+            None,
+        )
+        .is_ok());
+        assert_eq!(rpc_dropped.load(Ordering::SeqCst), 0);
+        assert_eq!(rpc_pending.lock().unwrap().len(), 1);
+        assert_eq!(rpc_pending.lock().unwrap()[0], rpc_msg);
     }
 
     #[test]

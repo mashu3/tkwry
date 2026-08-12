@@ -101,6 +101,7 @@ _QUEUE_DROP_PAGE_LOAD = 1
 _QUEUE_DROP_TITLE = 2
 _QUEUE_DROP_DRAG_DROP = 3
 _QUEUE_DROP_EVAL = 4
+_QUEUE_DROP_RPC = 5
 _T = TypeVar("_T")
 
 
@@ -435,7 +436,7 @@ class WebView(WebViewRpcMixin):
         self._in_poll_events = False
         self._pending_eval_js: tuple[str, EvalErrorHandler | None] | None = None
         self._eval_js_scheduled = False
-        self._local_queue_drop_counts = [0, 0, 0, 0, 0]
+        self._local_queue_drop_counts = [0] * (_QUEUE_DROP_RPC + 1)
         self._bounds_sync_scheduled = False
         self._stacking_sync_scheduled = False
         self._initial_load: _PendingLoad | None = None
@@ -1294,12 +1295,13 @@ class WebView(WebViewRpcMixin):
             ) from self._creation_error
         self._sync_bounds_and_stacking()
 
-    def take_queue_drop_counts(self) -> tuple[int, int, int, int, int]:
+    def take_queue_drop_counts(self) -> tuple[int, int, int, int, int, int]:
         """Return overflow drop counts since the last call.
 
-        Returns ``(ipc, page_load, title, drag_drop, eval)``. Each internal
+        Returns ``(ipc, page_load, title, drag_drop, eval, rpc)``. Each internal
         queue caps at 2048 pending items; additional events are compacted or
         discarded and counted here so applications can detect handler backlogs.
+        RPC uses a dedicated queue so IPC overflow cannot drop ``tkwry.call``.
         """
         self._require_tk_thread()
         local = self._take_local_queue_drop_counts()
@@ -1312,6 +1314,7 @@ class WebView(WebViewRpcMixin):
             local[2] + native[2],
             local[3] + native[3],
             local[4] + native[4],
+            local[5] + native[5],
         )
 
     def set_on_title_changed(self, handler: TitleChangedHandler | None) -> None:
@@ -1442,10 +1445,17 @@ class WebView(WebViewRpcMixin):
             return
         self._local_queue_drop_counts[kind] += count
 
-    def _take_local_queue_drop_counts(self) -> tuple[int, int, int, int, int]:
-        ipc, page_load, title, drag_drop, eval_ = self._local_queue_drop_counts
-        self._local_queue_drop_counts = [0, 0, 0, 0, 0]
-        return (ipc, page_load, title, drag_drop, eval_)
+    def _take_local_queue_drop_counts(self) -> tuple[int, int, int, int, int, int]:
+        counts = self._local_queue_drop_counts
+        self._local_queue_drop_counts = [0] * (_QUEUE_DROP_RPC + 1)
+        return (
+            counts[_QUEUE_DROP_IPC],
+            counts[_QUEUE_DROP_PAGE_LOAD],
+            counts[_QUEUE_DROP_TITLE],
+            counts[_QUEUE_DROP_DRAG_DROP],
+            counts[_QUEUE_DROP_EVAL],
+            counts[_QUEUE_DROP_RPC],
+        )
 
     def _pump_wait_until_ready(self, root: tk.Misc) -> None:
         """Advance this WebView; ``update_idletasks`` runs before ``update``."""
