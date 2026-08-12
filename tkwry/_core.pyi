@@ -3,6 +3,7 @@ from typing import Any, Final, final
 
 __all__: Final = [
     "WebView",
+    "WebSession",
     "PageLoadEvent",
     "NewWindowResponse",
     "DragDropEvent",
@@ -31,6 +32,19 @@ class DragDropEvent:
     Unknown: DragDropEvent
 
 @final
+class WebSession:
+    def __new__(
+        cls,
+        *,
+        data_directory: str | None = None,
+        ephemeral: bool = False,
+    ) -> WebSession: ...
+    @property
+    def data_directory(self) -> str | None: ...
+    @property
+    def ephemeral(self) -> bool: ...
+
+@final
 class WebView:
     def __new__(
         cls,
@@ -54,6 +68,7 @@ class WebView:
         ipc_listening: bool = False,
         title_listening: bool = False,
         drag_drop_listening: bool = False,
+        session: WebSession | None = None,
     ) -> WebView: ...
     def load_url(self, url: str) -> None: ...
     def load_html(self, html: str) -> None: ...

@@ -18,6 +18,7 @@ from tkwry import (
     PageLoadEvent,
     PageLoadHandler,
     TitleChangedHandler,
+    WebSession,
     WebView,
     WebViewPhase,
 )
@@ -95,6 +96,7 @@ def test_version_matches_cargo_toml() -> None:
 def test_public_exports() -> None:
     assert WebView is not None
     assert NativeWebView is not None
+    assert WebSession is not None
     assert PageLoadEvent is not None
     assert DragDropEvent is not None
     assert NewWindowResponse is not None

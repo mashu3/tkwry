@@ -551,3 +551,42 @@ def test_app_custom_protocol_resolves_relative_resources(
 
     web.destroy()
     frame.destroy()
+
+
+def test_shared_session_local_storage_roundtrip(tk_root, tmp_path: Path) -> None:
+    """Two WebViews with the same WebSession share localStorage."""
+    from tkwry import WebSession
+
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "index.html").write_text(
+        "<!doctype html><html><body><p id='t'>s</p></body></html>",
+        encoding="utf-8",
+    )
+    session = WebSession(data_directory=tmp_path / "profile")
+    frame_a = host_frame(tk_root)
+    frame_b = host_frame(tk_root)
+    web_a = WebView(frame_a, app=app_dir, session=session, width=320, height=240)
+    web_b = WebView(frame_b, app=app_dir, session=session, width=320, height=240)
+
+    assert wait_until(tk_root, lambda: web_a.ready and web_b.ready, steps=300)
+    pump(tk_root, steps=60)
+
+    web_a.eval_js("localStorage.setItem('tkwry_session_key', 'shared-ok');")
+    pump(tk_root, steps=40)
+
+    values: list[str] = []
+
+    def on_value(value: str) -> None:
+        values.append(value)
+
+    web_b.eval_js_with_callback("localStorage.getItem('tkwry_session_key')", on_value)
+    assert wait_until(tk_root, lambda: values, steps=200), (
+        f"expected localStorage value, got {values!r}"
+    )
+    assert "shared-ok" in values[0]
+
+    web_a.destroy()
+    web_b.destroy()
+    frame_a.destroy()
+    frame_b.destroy()

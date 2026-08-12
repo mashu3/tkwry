@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ``expose`` handlers may return a ``concurrent.futures.Future``; the Promise
   settles when the Future completes (Tk-thread ``after_idle``)
 - ``examples/rpc_demo.py`` and ``tkwry.ipc`` helpers
+- ``WebSession`` — shared wry ``WebContext`` for cookies / cache /
+  localStorage across WebViews (``session=`` / ``data_directory=`` /
+  ``ephemeral=``); ``examples/session_demo.py``
 
 ### Changed
 

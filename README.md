@@ -174,6 +174,25 @@ return values must be JSON-serializable. Handlers may return a
 `concurrent.futures.Future` for async work (Promise settles when it completes).
 See [`examples/rpc_demo.py`](examples/rpc_demo.py).
 
+### Shared session (``WebSession``)
+
+Share cookies / cache / ``localStorage`` across WebViews via wry's
+``WebContext``:
+
+```python
+from tkwry import WebSession, WebView
+
+session = WebSession(data_directory="~/.myapp/webview")
+left = WebView(frame_a, html=HTML, session=session)
+right = WebView(frame_b, html=HTML, session=session)
+```
+
+Convenience: ``WebView(..., data_directory=...)`` or ``ephemeral=True``
+creates an owned session. Keep the ``WebSession`` alive while any WebView
+uses it (especially with ``app=`` on macOS). On Linux, WebViews that share a
+session must use the same ``app=`` root. See
+[`examples/session_demo.py`](examples/session_demo.py).
+
 ### Load HTML / evaluate JavaScript
 
 ```python
@@ -349,6 +368,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 
 - **Local app assets** — `app=` + `tkwry://` custom protocol (offline relative CSS/JS; no localhost server)
 - **Thin RPC** — `@web.expose` / `window.tkwry.call` over IPC (Promise in, JSON result/error out)
+- **WebSession** — shared wry `WebContext` (cookies / cache / localStorage) across WebViews
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
 - **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` work out of the box on macOS)
 - **Deferred callbacks** — IPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
@@ -378,6 +398,7 @@ pip install -e .
 | [`examples/local_assets_demo.py`](examples/local_assets_demo.py) | Offline local app via `app=` / `tkwry://` |
 | [`examples/ipc_demo.py`](examples/ipc_demo.py) | JavaScript ↔ Tkinter IPC |
 | [`examples/rpc_demo.py`](examples/rpc_demo.py) | Thin RPC (`expose` / `window.tkwry.call`) |
+| [`examples/session_demo.py`](examples/session_demo.py) | Shared `WebSession` / localStorage |
 | [`examples/multi_demo.py`](examples/multi_demo.py) | Multiple WebViews, tabs, panes |
 | [`examples/plotly_demo.py`](examples/plotly_demo.py) | Plotly charts (`pip install plotly`) |
 | [`examples/folium_demo.py`](examples/folium_demo.py) | Folium maps (`pip install folium`) |

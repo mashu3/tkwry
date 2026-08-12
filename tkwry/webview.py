@@ -50,6 +50,7 @@ from tkwry.ipc import (
     parse_rpc_request,
     settle_script,
 )
+from tkwry.session import WebSession
 
 if sys.platform == "darwin":
     from tkwry._macos import (
@@ -477,6 +478,12 @@ class WebView:
     CSS/JS/assets resolve without a localhost HTTP server. Relative navigation
     uses ``tkwry://localhost/...``. The app root is fixed at create time.
 
+    **Sessions** (``session=`` / ``data_directory=`` / ``ephemeral=``): share a
+    wry ``WebContext`` (cookies / cache / localStorage where the platform
+    supports it) across WebViews. Prefer one :class:`~tkwry.WebSession` per
+    profile. On Linux, WebViews that share a session must use the same
+    ``app=`` root (custom protocols are registered once per context).
+
     **Navigation hooks** (``on_navigation``, ``on_new_window``) run on the
     **Tk main thread**, but WebKit **blocks** until they return a value.
     Keep them fast (heavy work → deny/default and defer with ``after``).
@@ -550,6 +557,9 @@ class WebView:
         url: str | None = None,
         html: str | None = None,
         app: str | Path | None = None,
+        session: WebSession | None = None,
+        data_directory: str | Path | None = None,
+        ephemeral: bool = False,
         ipc_handler: IpcHandler | None = None,
         devtools: bool = False,
         background_color: tuple[int, int, int, int] | None = None,
@@ -565,6 +575,22 @@ class WebView:
         require_tk_thread(frame)
         if background_color is not None:
             _validate_background_color(background_color)
+        if session is not None and (data_directory is not None or ephemeral):
+            raise ValueError(
+                "WebView: pass session= or data_directory=/ephemeral=, not both"
+            )
+        if ephemeral and data_directory is not None:
+            raise ValueError(
+                "WebView: pass data_directory= or ephemeral=True, not both"
+            )
+        owned_session: WebSession | None = None
+        if session is None and (data_directory is not None or ephemeral):
+            owned_session = WebSession(
+                data_directory=data_directory, ephemeral=ephemeral
+            )
+            session = owned_session
+        self._owned_session = owned_session
+        self._session = session
         self._frame = frame
         self._toplevel: tk.Misc
         try:
@@ -2509,6 +2535,8 @@ class WebView:
                 self._rpc_bootstrap_injected = True
         if self._app_root is not None:
             kwargs["app_root"] = self._app_root
+        if self._session is not None:
+            kwargs["session"] = self._session.native
         if self._on_navigation is not None:
             kwargs["on_navigation"] = self._native_navigation
         if self._on_new_window is not None:

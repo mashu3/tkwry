@@ -3,6 +3,7 @@
 mod app_protocol;
 #[cfg(target_os = "macos")]
 mod macos;
+mod session;
 
 use pyo3::prelude::*;
 use std::cell::Cell;
@@ -783,6 +784,9 @@ struct WebView {
     wry_call_depth: Cell<u32>,
     /// ``destroy()`` requested while a nested wry call is active.
     destroy_pending: Cell<bool>,
+    /// Keeps the shared ``WebContext`` alive (custom protocol / profile).
+    #[allow(dead_code)]
+    session: Option<Arc<Mutex<session::WebSessionState>>>,
 }
 
 impl WebView {
@@ -894,6 +898,7 @@ impl WebView {
         ipc_listening = false,
         title_listening = false,
         drag_drop_listening = false,
+        session = None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -916,6 +921,7 @@ impl WebView {
         ipc_listening: bool,
         title_listening: bool,
         drag_drop_listening: bool,
+        session: Option<Bound<'_, session::WebSession>>,
     ) -> PyResult<Self> {
         let owner_thread = match owner_thread {
             Some(id) => id,
@@ -1128,7 +1134,61 @@ impl WebView {
             true
         };
 
-        let mut builder = wry::WebViewBuilder::new()
+        let session_state = session.as_ref().map(|s| s.borrow().state_arc());
+        let mut session_guard = match session_state.as_ref() {
+            Some(arc) => Some(arc.lock().map_err(|_| {
+                pyo3::exceptions::PyRuntimeError::new_err("WebSession lock poisoned")
+            })?),
+            None => None,
+        };
+
+        let app_root_path = match app_root {
+            Some(root) => {
+                let root_path = PathBuf::from(root);
+                if !root_path.is_dir() {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "app_root is not a directory: {}",
+                        root_path.display()
+                    )));
+                }
+                Some(root_path)
+            }
+            None => None,
+        };
+
+        let register_app = match (&app_root_path, session_guard.as_mut()) {
+            (Some(root), Some(guard)) if !guard.ephemeral => match &guard.registered_app_root {
+                Some(existing) if existing != root => {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "WebSession already has app root {}; cannot use {}",
+                        existing.display(),
+                        root.display()
+                    )));
+                }
+                Some(_) => {
+                    // Linux registers once on the shared context; Windows/macOS
+                    // attach the scheme per WebView.
+                    cfg!(any(target_os = "windows", target_os = "macos"))
+                }
+                None => {
+                    guard.registered_app_root = Some(root.clone());
+                    true
+                }
+            },
+            (Some(_), _) => true,
+            (None, _) => false,
+        };
+
+        let ephemeral = session_guard.as_ref().map(|g| g.ephemeral).unwrap_or(false);
+        #[cfg(target_os = "macos")]
+        let data_store_id = session_guard.as_ref().and_then(|g| g.data_store_id);
+
+        let mut builder = match session_guard.as_mut() {
+            Some(guard) => wry::WebViewBuilder::new_with_web_context(&mut guard.context),
+            None => wry::WebViewBuilder::new(),
+        };
+
+        builder = builder
             .with_bounds(make_rect(0.0, 0.0, width as f64, height as f64))
             .with_visible(visible)
             .with_devtools(devtools)
@@ -1140,15 +1200,20 @@ impl WebView {
             .with_new_window_req_handler(newwin_handler)
             .with_drag_drop_handler(drag_drop_handler);
 
-        if let Some(root) = app_root {
-            let root_path = PathBuf::from(root);
-            if !root_path.is_dir() {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "app_root is not a directory: {}",
-                    root_path.display()
-                )));
-            }
-            let root_for_protocol = root_path;
+        if ephemeral {
+            // Private browsing. On Linux this uses a per-view ephemeral
+            // context (shared WebContext is ignored for storage).
+            builder = builder.with_incognito(true);
+        }
+
+        #[cfg(target_os = "macos")]
+        if let Some(id) = data_store_id {
+            use wry::WebViewBuilderExtDarwin;
+            builder = builder.with_data_store_identifier(id);
+        }
+
+        if register_app {
+            let root_for_protocol = app_root_path.expect("register_app implies app_root");
             builder = builder.with_custom_protocol("tkwry".into(), move |_id, request| {
                 app_protocol::serve_app_request(&root_for_protocol, request)
             });
@@ -1196,6 +1261,8 @@ impl WebView {
             .build_as_child(&window_handle)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
+        // Drop the session lock before storing Arc on Self.
+        drop(session_guard);
         #[cfg(all(unix, not(target_os = "macos")))]
         {
             for _ in 0..64 {
@@ -1244,6 +1311,7 @@ impl WebView {
             newwin_cb,
             wry_call_depth: Cell::new(0),
             destroy_pending: Cell::new(false),
+            session: session_state,
         })
     }
 
@@ -1753,6 +1821,7 @@ fn disable_macos_window_tabbing(parent: usize) -> PyResult<()> {
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<WebView>()?;
+    m.add_class::<session::WebSession>()?;
     m.add_class::<PageLoadEvent>()?;
     m.add_class::<NewWindowResponse>()?;
     m.add_class::<DragDropEvent>()?;

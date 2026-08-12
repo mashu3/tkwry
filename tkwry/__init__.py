@@ -36,6 +36,7 @@ def _reraise_linux_core_build_hint(exc: BaseException) -> None:
 
 try:
     from tkwry._core import DragDropEvent, NewWindowResponse, PageLoadEvent
+    from tkwry.session import WebSession
     from tkwry.webview import (
         DragDropHandler,
         EvalCallback,
@@ -68,6 +69,7 @@ __all__ = [
     "PageLoadEvent",
     "PageLoadHandler",
     "TitleChangedHandler",
+    "WebSession",
     "WebView",
     "WebViewCreationError",
     "WebViewDestroyedError",
