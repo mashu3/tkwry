@@ -207,10 +207,7 @@ def settle_script(req_id: str, *, ok: bool, value: Any) -> str:
 def emit_script(event: str, data: Any = None) -> str:
     """Build ``eval_js`` source that delivers a Python→JS event."""
     payload = json.dumps(data, ensure_ascii=False, default=str)
-    return (
-        "window.tkwry && window.tkwry._emit("
-        f"{json.dumps(event)}, {payload});"
-    )
+    return f"window.tkwry && window.tkwry._emit({json.dumps(event)}, {payload});"
 
 
 def _normalize_registration(
