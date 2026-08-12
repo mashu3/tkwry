@@ -1780,9 +1780,10 @@ where
     drain_newwin_sync_hooks(&this.newwin_cb, &this.newwin_sync_pending);
 
     let taken = {
-        let mut guard = this.inner.lock().map_err(|_| {
-            pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned")
-        })?;
+        let mut guard = this
+            .inner
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned"))?;
         guard.take()
     };
 
@@ -1794,9 +1795,10 @@ where
     };
 
     {
-        let mut guard = this.inner.lock().map_err(|_| {
-            pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned")
-        })?;
+        let mut guard = this
+            .inner
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned"))?;
         // Put the view back unless destroy already cleared/replaced it.
         if guard.is_none() {
             *guard = taken;
