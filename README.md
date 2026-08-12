@@ -157,9 +157,10 @@ web = WebView(frame, app="./web")          # loads tkwry://localhost/index.html
 Constructor ``app=`` fixes the filesystem root at create time. Later
 ``load_url("tkwry://localhost/other.html")`` can navigate within that root.
 Monaco / CDN scripts may still be loaded from the network inside that HTML when
-you choose not to vendor them yet.
+you choose not to vendor them yet. The Plotly demo toggles **CDN** vs **Local**
+(``app=``); Local caches ``plotly.js`` under ``examples/.vendor/``.
 
-See [`examples/local_assets_demo.py`](examples/local_assets_demo.py).
+See [`examples/plotly_demo.py`](examples/plotly_demo.py).
 
 ### RPC (``expose`` / ``window.tkwry.call``)
 
@@ -229,7 +230,7 @@ Convenience: ``WebView(..., data_directory=...)`` or ``ephemeral=True``
 creates an owned session. Keep the ``WebSession`` alive while any WebView
 uses it (especially with ``app=`` on macOS). On Linux, WebViews that share a
 session must use the same ``app=`` root. See
-[`examples/session_demo.py`](examples/session_demo.py).
+[`examples/browser_demo.py`](examples/browser_demo.py).
 
 ### Load HTML / evaluate JavaScript
 
@@ -394,7 +395,7 @@ For `place` layouts, pass explicit `width`/`height` so host `winfo_*` settles; n
 
 Tk child `Frame`s usually **do not** get their own `NSView` (Tk Aqua). tkwry attaches to the **toplevel content view**, positions with `set_bounds` on `<Configure>`, and hides with `set_visible(False)` on `<Unmap>` (e.g. another Notebook tab). Per-frame native views would need upstream Tk changes.
 
-**Keyboard focus:** clicks are hit-tested at the `NSEvent` layer; Python drains focus signals on the Tk main thread. Use `web.focus()` / `web.focus_parent()` for explicit control ([`examples/url_demo.py`](examples/url_demo.py)). On macOS/Windows, `focused=True` waits for `<<WebViewReady>>`, then calls `focus()` (create-time focus breaks child WKWebView / WebView2). Call `focus()` yourself after later layout changes.
+**Keyboard focus:** clicks are hit-tested at the `NSEvent` layer; Python drains focus signals on the Tk main thread. Use `web.focus()` / `web.focus_parent()` for explicit control ([`examples/browser_demo.py`](examples/browser_demo.py)). On macOS/Windows, `focused=True` waits for `<<WebViewReady>>`, then calls `focus()` (create-time focus breaks child WKWebView / WebView2). Call `focus()` yourself after later layout changes.
 
 **IME:** composition stays with the current first responder. Switching Tk ↔ WebView mid-composition (or fighting the system candidate window) can cancel or mis-deliver input vs Safari. **Not** a v0.1 goal — finish composition before changing focus, or keep IME editing in one surface.
 
@@ -428,7 +429,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)
 - **Navigation hooks** — all handlers on the Tk thread; `on_navigation` / `on_new_window` block WebKit until they return
 - **Multiple layouts** — works with `pack`, `grid`, `place`, `Notebook`, and `PanedWindow` (see examples)
-- **Plotly-ready** — load HTML + `eval_js` for interactive charts
+- **Plotly-ready** — load HTML + `eval_js`; demo toggles CDN vs local `app=`
 - **Folium-ready** — embed Leaflet maps from Folium HTML (right-click to pin)
 - **Markdown-ready** — Monaco editor + live preview in a `PanedWindow` (see [`examples/markdown_demo.py`](examples/markdown_demo.py); CDN required — or vendor under `app=`)
 - **CI-tested** — `pytest` on Windows (x86_64 + arm64), macOS, and Linux (Xvfb + WebKitGTK)
@@ -445,19 +446,16 @@ pip install -e .
 
 | Script | Description |
 |--------|-------------|
-| [`examples/url_demo.py`](examples/url_demo.py) | URL bar + embedded page |
-| [`examples/local_assets_demo.py`](examples/local_assets_demo.py) | Offline local app via `app=` / `tkwry://` |
+| [`examples/browser_demo.py`](examples/browser_demo.py) | URL bar, tabs, shared `WebSession` |
 | [`examples/ipc_demo.py`](examples/ipc_demo.py) | IPC events, RPC (`call` / kwargs / worker), and `emit` |
-| [`examples/session_demo.py`](examples/session_demo.py) | Shared `WebSession` / localStorage |
 | [`examples/multi_demo.py`](examples/multi_demo.py) | Multiple WebViews, tabs, panes |
-| [`examples/plotly_demo.py`](examples/plotly_demo.py) | Plotly charts (`pip install plotly`) |
-| [`examples/folium_demo.py`](examples/folium_demo.py) | Folium maps (`pip install folium`) |
+| [`examples/plotly_demo.py`](examples/plotly_demo.py) | Plotly charts — CDN or local `app=` (`pip install plotly`) |
+| [`examples/folium_demo.py`](examples/folium_demo.py) | Folium maps (`pip install folium`; tiles need the network) |
 | [`examples/markdown_demo.py`](examples/markdown_demo.py) | Monaco markdown editor + live preview (CDN) |
 | [`examples/dnd_demo.py`](examples/dnd_demo.py) | Native file drag & drop into WebView |
 
 ```bash
-python examples/url_demo.py
-python examples/local_assets_demo.py
+python examples/browser_demo.py
 python examples/ipc_demo.py
 python examples/multi_demo.py
 python examples/plotly_demo.py

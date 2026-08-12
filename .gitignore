@@ -27,6 +27,9 @@ docs/MAINTAINERS.md
 *競合*
 *conflicted copy*
 
+# Demo CDN cache (plotly Local mode)
+examples/.vendor/
+
 # Built extension modules
 *.so
 *.pyd

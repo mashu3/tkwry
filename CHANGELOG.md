@@ -13,7 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``index.html`` or a path to an HTML entry file.
 - ``spa_fallback=True``, ``app_dev=True`` (``Cache-Control: no-store``),
   ``watch_app()`` mtime hot reload; expanded MIME types
-- ``examples/local_assets_demo.py`` + ``examples/local_assets/`` offline sample
+- Plotly demo toggles CDN vs local ``app=`` (``plotly.js`` cached in
+  ``examples/.vendor/``)
 - Unit / integration coverage for ``tkwry://`` URL rules and relative CSS via
   ``app=``
 - RPC: ``WebView.expose`` / ``@web.expose`` and ``window.tkwry.call``
@@ -34,12 +35,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``wait_title``)
 - ``WebSession`` — shared wry ``WebContext`` for cookies / cache /
   localStorage across WebViews (``session=`` / ``data_directory=`` /
-  ``ephemeral=``); ``examples/session_demo.py``
+  ``ephemeral=``); ``examples/browser_demo.py``
 
 ### Changed
 
 - Folded ``examples/rpc_demo.py`` into ``examples/ipc_demo.py`` (IPC + RPC +
   ``emit`` in one two-pane demo)
+- Folded ``url_demo`` / ``session_demo`` into ``examples/browser_demo.py``
+  (URL bar, tabs, shared ``WebSession``, link menu → new tab)
 - ``take_queue_drop_counts()`` is now
   ``(ipc, page_load, title, drag_drop, eval, rpc)``
 - URL layer accepts ``tkwry://localhost/...`` (requires ``app=`` at create)
@@ -55,6 +58,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - ``examples/macos_double_titlebar_repro.py`` — maintainer repro, not a demo;
   import-order guidance stays in README
+- ``examples/local_assets_demo.py`` — ``app=`` is covered by the Plotly demo's
+  Local mode
+- ``examples/url_demo.py`` / ``session_demo.py`` — folded into
+  ``examples/browser_demo.py`` (URL bar, tabs, shared ``WebSession``)
 
 ### Fixed
 
