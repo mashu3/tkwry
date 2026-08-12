@@ -3,7 +3,17 @@
 use std::borrow::Cow;
 use std::path::{Component, Path, PathBuf};
 
-use wry::http::{header::CONTENT_TYPE, Request, Response, StatusCode};
+use wry::http::{
+    header::{CACHE_CONTROL, CONTENT_TYPE},
+    HeaderValue, Request, Response, StatusCode,
+};
+
+/// Options for ``tkwry://`` static serving.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct AppServeOptions {
+    pub spa_fallback: bool,
+    pub cache_control: Option<String>,
+}
 
 /// Map a ``tkwry://`` URL to the WebView2 navigation form used with
 /// ``with_https_scheme(true)``.
@@ -55,14 +65,15 @@ fn mime_for_path(path: &Path) -> &'static str {
         .as_str()
     {
         "html" | "htm" => "text/html; charset=utf-8",
-        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "js" | "mjs" | "cjs" => "text/javascript; charset=utf-8",
         "css" => "text/css; charset=utf-8",
-        "json" => "application/json; charset=utf-8",
+        "json" | "webmanifest" => "application/json; charset=utf-8",
         "svg" => "image/svg+xml",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
         "webp" => "image/webp",
+        "avif" => "image/avif",
         "ico" => "image/x-icon",
         "woff" => "font/woff",
         "woff2" => "font/woff2",
@@ -72,8 +83,30 @@ fn mime_for_path(path: &Path) -> &'static str {
         "map" => "application/json",
         "txt" | "md" => "text/plain; charset=utf-8",
         "xml" => "application/xml",
+        "csv" => "text/csv; charset=utf-8",
+        "pdf" => "application/pdf",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "toml" => "application/toml",
+        "yaml" | "yml" => "application/yaml",
         _ => "application/octet-stream",
     }
+}
+
+fn looks_like_static_asset(url_path: &str) -> bool {
+    let trimmed = url_path.trim_start_matches('/');
+    if trimmed.is_empty() {
+        return false;
+    }
+    Path::new(trimmed)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| {
+            let ext = ext.to_ascii_lowercase();
+            !matches!(ext.as_str(), "html" | "htm")
+        })
 }
 
 fn error_response(status: StatusCode, message: impl Into<String>) -> Response<Cow<'static, [u8]>> {
@@ -90,30 +123,52 @@ fn error_response(status: StatusCode, message: impl Into<String>) -> Response<Co
         })
 }
 
+fn file_response(
+    file_path: &Path,
+    bytes: Vec<u8>,
+    options: &AppServeOptions,
+) -> Response<Cow<'static, [u8]>> {
+    let mut builder = Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, mime_for_path(file_path));
+    if let Some(cache) = options.cache_control.as_deref() {
+        if let Ok(value) = HeaderValue::from_str(cache) {
+            builder = builder.header(CACHE_CONTROL, value);
+        }
+    }
+    builder.body(Cow::Owned(bytes)).unwrap_or_else(|e| {
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("response build failed: {e}"),
+        )
+    })
+}
+
 /// Serve a file from ``root`` for a ``tkwry://`` request.
 pub(crate) fn serve_app_request(
     root: &Path,
     request: Request<Vec<u8>>,
+    options: &AppServeOptions,
 ) -> Response<Cow<'static, [u8]>> {
     let path = request.uri().path();
     let Some(file_path) = safe_join(root, path) else {
         return error_response(StatusCode::FORBIDDEN, "forbidden path");
     };
     match std::fs::read(&file_path) {
-        Ok(bytes) => Response::builder()
-            .status(StatusCode::OK)
-            .header(CONTENT_TYPE, mime_for_path(&file_path))
-            .body(Cow::Owned(bytes))
-            .unwrap_or_else(|e| {
-                error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("response build failed: {e}"),
-                )
-            }),
-        Err(_) => error_response(
-            StatusCode::NOT_FOUND,
-            format!("not found: {}", path.trim_start_matches('/')),
-        ),
+        Ok(bytes) => file_response(&file_path, bytes, options),
+        Err(_) => {
+            if options.spa_fallback && !looks_like_static_asset(path) {
+                let index = root.join("index.html");
+                match std::fs::read(&index) {
+                    Ok(bytes) => return file_response(&index, bytes, options),
+                    Err(_) => {}
+                }
+            }
+            error_response(
+                StatusCode::NOT_FOUND,
+                format!("not found: {}", path.trim_start_matches('/')),
+            )
+        }
     }
 }
 
@@ -163,5 +218,14 @@ mod tests {
             navigate_url("https://example.com/").as_ref(),
             "https://example.com/"
         );
+    }
+
+    #[test]
+    fn looks_like_static_asset_rules() {
+        assert!(!looks_like_static_asset("/"));
+        assert!(!looks_like_static_asset("/app/route"));
+        assert!(!looks_like_static_asset("/index.html"));
+        assert!(looks_like_static_asset("/assets/app.js"));
+        assert!(looks_like_static_asset("/style.css"));
     }
 }

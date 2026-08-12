@@ -1,0 +1,276 @@
+"""Frame-host ownership, Tk wakeup pipes, and sync-hook drainage.
+
+Kept separate from :mod:`tkwry.webview` so the widget class file stays focused
+on the WebView lifecycle. Symbols are re-exported from ``webview`` for
+existing internal imports / tests.
+"""
+
+from __future__ import annotations
+
+import atexit
+import os
+import sys
+import threading
+import tkinter as tk
+import traceback
+import weakref
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tkwry.webview import WebView
+
+_frame_webview_refs: dict[int, weakref.ReferenceType[WebView]] = {}
+_atexit_destroy_drain_registered = False
+_atexit_destroy_toplevels: list[weakref.ReferenceType[tk.Misc]] = []
+
+
+def _frame_webview_weakref_dead(ref: weakref.ReferenceType[WebView]) -> None:
+    dead = [key for key, entry in _frame_webview_refs.items() if entry is ref]
+    for key in dead:
+        _frame_webview_refs.pop(key, None)
+
+
+def _claim_frame_host(frame: tk.Misc, web: WebView) -> None:
+    """Raise if *frame* already hosts a live WebView."""
+    key = id(frame)
+    existing = _frame_webview_refs.get(key)
+    if existing is not None:
+        prior = existing()
+        if prior is not None and not prior.destroyed:
+            raise ValueError(
+                "tkwry: only one WebView per host frame is supported; "
+                "create a child frame for each embedded view"
+            )
+        if prior is None:
+            del _frame_webview_refs[key]
+    _frame_webview_refs[key] = weakref.ref(web, _frame_webview_weakref_dead)
+
+
+def _release_frame_host(frame: tk.Misc, web: WebView) -> None:
+    key = id(frame)
+    existing = _frame_webview_refs.get(key)
+    if existing is not None and existing() is web:
+        del _frame_webview_refs[key]
+
+
+def _toplevel_wakeup_read_fd(toplevel: tk.Misc) -> int | None:
+    if sys.platform == "darwin":
+        return getattr(toplevel, "_tkwry_mac_wake_read_fd", None)
+    return getattr(toplevel, "_tkwry_wake_read_fd", None)
+
+
+def _toplevel_wakeup_write_fd(toplevel: tk.Misc) -> int | None:
+    if sys.platform == "darwin":
+        return getattr(toplevel, "_tkwry_mac_wake_write_fd", None)
+    return getattr(toplevel, "_tkwry_wake_write_fd", None)
+
+
+def _pump_toplevel_wakeup_pipe(toplevel: tk.Misc) -> None:
+    read_fd = _toplevel_wakeup_read_fd(toplevel)
+    if read_fd is None:
+        return
+    try:
+        import select
+
+        while select.select([read_fd], [], [], 0)[0]:
+            if not os.read(read_fd, 64):
+                break
+    except (OSError, ValueError):
+        pass
+
+
+def _run_pending_webview_destroy(web: WebView) -> None:
+    """Run a queued ``__del__`` destroy on the Tk thread or via emergency teardown.
+
+    Tk thread: cancel deferred callbacks then :meth:`WebView.destroy`.
+    Any other thread: :meth:`WebView._teardown_native_if_alive` so eval/ready
+    generation stays aligned. Never call bare ``_force_native_teardown`` here —
+    that path is native-only (teardown poll timeout).
+    """
+    if web._destroyed:
+        return
+    if threading.get_ident() == web._tk_thread_id:
+        try:
+            web._cancel_deferred_callbacks()
+            web.destroy()
+        except Exception:
+            traceback.print_exc()
+            if not web._destroyed:
+                try:
+                    web._teardown_native_if_alive()
+                except Exception:
+                    traceback.print_exc()
+        return
+    try:
+        web._teardown_native_if_alive()
+    except Exception:
+        traceback.print_exc()
+
+
+def _drain_toplevel_sync_hooks(toplevel: tk.Misc) -> None:
+    """Drain pending navigation/new-window hooks for all WebViews on *toplevel*."""
+    _drain_pending_destroy_webviews(toplevel)
+    refs = getattr(toplevel, "_tkwry_sync_hook_webviews", None)
+    if not refs:
+        return
+    live: list[weakref.ReferenceType[WebView]] = []
+    for ref in refs:
+        web = ref()
+        if web is None:
+            continue
+        live.append(ref)
+        if not web._destroyed:
+            web._drain_sync_hooks()
+    if live:
+        setattr(toplevel, "_tkwry_sync_hook_webviews", live)
+    elif hasattr(toplevel, "_tkwry_sync_hook_webviews"):
+        delattr(toplevel, "_tkwry_sync_hook_webviews")
+
+
+def _drain_pending_destroy_webviews(toplevel: tk.Misc) -> None:
+    """Run ``destroy()`` queued from off-thread ``__del__`` on the Tk thread."""
+    refs = getattr(toplevel, "_tkwry_pending_destroy_webviews", None)
+    if not refs:
+        return
+    live: list[weakref.ReferenceType[WebView]] = []
+    for ref in refs:
+        web = ref()
+        if web is None or web._destroyed:
+            continue
+        if threading.get_ident() != web._tk_thread_id:
+            live.append(ref)
+            continue
+        _run_pending_webview_destroy(web)
+        if not web._destroyed:
+            live.append(ref)
+    if live:
+        setattr(toplevel, "_tkwry_pending_destroy_webviews", live)
+    elif hasattr(toplevel, "_tkwry_pending_destroy_webviews"):
+        delattr(toplevel, "_tkwry_pending_destroy_webviews")
+
+
+def _ensure_atexit_destroy_drain() -> None:
+    global _atexit_destroy_drain_registered
+    if _atexit_destroy_drain_registered:
+        return
+    _atexit_destroy_drain_registered = True
+    atexit.register(_atexit_drain_pending_destroys)
+
+
+def _track_atexit_destroy_toplevel(toplevel: tk.Misc) -> None:
+    _ensure_atexit_destroy_drain()
+    for ref in _atexit_destroy_toplevels:
+        if ref() is toplevel:
+            return
+    _atexit_destroy_toplevels.append(weakref.ref(toplevel))
+
+
+def _atexit_drain_pending_destroys() -> None:
+    live: list[weakref.ReferenceType[tk.Misc]] = []
+    for ref in _atexit_destroy_toplevels:
+        toplevel = ref()
+        if toplevel is None:
+            continue
+        live.append(ref)
+        for _ in range(32):
+            try:
+                toplevel.update_idletasks()
+                toplevel.update()
+            except tk.TclError:
+                break
+            _drain_pending_destroy_webviews(toplevel)
+            if not getattr(toplevel, "_tkwry_pending_destroy_webviews", None):
+                break
+        refs = getattr(toplevel, "_tkwry_pending_destroy_webviews", None)
+        if not refs:
+            continue
+        for pending_ref in list(refs):
+            web = pending_ref()
+            if web is None or web._destroyed:
+                continue
+            _run_pending_webview_destroy(web)
+    _atexit_destroy_toplevels[:] = live
+
+
+def _ensure_tk_wakeup_fileevent(toplevel: tk.Misc) -> None:
+    """Register a Tcl readable handler so sync hooks drain without polling delay."""
+    if sys.platform == "darwin" or getattr(toplevel, "_tkwry_wake_fileevent", False):
+        return
+    read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
+    if read_fd is None:
+        return
+
+    def _on_wake(_fd: int, _mask: int) -> None:
+        _pump_toplevel_wakeup_pipe(toplevel)
+        _drain_toplevel_sync_hooks(toplevel)
+
+    try:
+        create_handler = getattr(toplevel, "createfilehandler", None)
+        if create_handler is None:
+            return
+        create_handler(read_fd, tk.READABLE, _on_wake)
+        setattr(toplevel, "_tkwry_wake_fileevent", True)
+    except (tk.TclError, OSError, ValueError):
+        pass
+
+
+def _register_sync_hook_webview(toplevel: tk.Misc, web: WebView) -> None:
+    refs: list[weakref.ReferenceType[WebView]] | None = getattr(
+        toplevel, "_tkwry_sync_hook_webviews", None
+    )
+    if refs is None:
+        refs = []
+        setattr(toplevel, "_tkwry_sync_hook_webviews", refs)
+    refs.append(weakref.ref(web))
+
+
+def _unregister_sync_hook_webview(web: WebView) -> None:
+    if sys.platform == "darwin":
+        return
+    try:
+        toplevel = web._frame.winfo_toplevel()
+    except tk.TclError:
+        return
+    refs = getattr(toplevel, "_tkwry_sync_hook_webviews", None)
+    if not refs:
+        return
+    refs[:] = [entry for entry in refs if entry() is not web]
+    if not refs and hasattr(toplevel, "_tkwry_sync_hook_webviews"):
+        delattr(toplevel, "_tkwry_sync_hook_webviews")
+
+
+def _release_tk_wakeup_pipe(toplevel: tk.Misc) -> None:
+    """Close the Win/Linux sync-hook wakeup pipe when the last user is gone."""
+    users = getattr(toplevel, "_tkwry_wake_pipe_users", None)
+    if users is None:
+        return
+    users -= 1
+    if users > 0:
+        setattr(toplevel, "_tkwry_wake_pipe_users", users)
+        return
+    read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
+    if read_fd is not None and getattr(toplevel, "_tkwry_wake_fileevent", False):
+        try:
+            delete_handler = getattr(toplevel, "deletefilehandler", None)
+            if delete_handler is not None:
+                delete_handler(read_fd)
+        except tk.TclError:
+            pass
+    for fd in (
+        read_fd,
+        getattr(toplevel, "_tkwry_wake_write_fd", None),
+    ):
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+    for attr in (
+        "_tkwry_wake_read_fd",
+        "_tkwry_wake_write_fd",
+        "_tkwry_wake_pipe_users",
+        "_tkwry_wake_fileevent",
+        "_tkwry_sync_hook_webviews",
+    ):
+        if hasattr(toplevel, attr):
+            delattr(toplevel, attr)

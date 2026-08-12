@@ -4,21 +4,33 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.1.2] - 2026-08-11
+## [0.1.2] - Unreleased
 
 ### Added
 
 - ``WebView(app=...)`` — serve a local HTML/CSS/JS tree via the ``tkwry://``
   custom protocol (no localhost HTTP server). Pass a directory with
   ``index.html`` or a path to an HTML entry file.
+- ``spa_fallback=True``, ``app_dev=True`` (``Cache-Control: no-store``),
+  ``watch_app()`` mtime hot reload; expanded MIME types
 - ``examples/local_assets_demo.py`` + ``examples/local_assets/`` offline sample
 - Unit / integration coverage for ``tkwry://`` URL rules and relative CSS via
   ``app=``
-- Thin RPC: ``WebView.expose`` / ``@web.expose`` and ``window.tkwry.call``
+- RPC: ``WebView.expose`` / ``@web.expose`` and ``window.tkwry.call``
   (JSON envelope over existing IPC; ``ipc_handler`` unchanged)
+- Worker RPC: ``@web.expose(thread=True)`` / ``run_in="worker"``
+  (ThreadPoolExecutor); optional ``timeout`` (seconds); JS
+  ``call(..., { timeout: ms })``
+- Structured RPC errors (``type`` / ``message`` / optional ``traceback`` via
+  ``rpc_traceback=True`` or ``TKWRY_RPC_TRACEBACK=1``); ``RpcTimeoutError``
+- RPC name collision guard (``replace=True``); ``unexpose``; destroy rejects
+  in-flight Promises
 - ``expose`` handlers may return a ``concurrent.futures.Future``; the Promise
   settles when the Future completes (Tk-thread ``after_idle``)
+- Python → JS events: ``web.emit(event, data)`` / ``window.tkwry.on`` / ``off``
 - ``examples/rpc_demo.py`` and ``tkwry.ipc`` helpers
+- ``tkwry.testing`` helpers (``wait_until``, ``wait_ready``, ``wait_eval``,
+  ``wait_title``)
 - ``WebSession`` — shared wry ``WebContext`` for cookies / cache /
   localStorage across WebViews (``session=`` / ``data_directory=`` /
   ``ephemeral=``); ``examples/session_demo.py``
@@ -28,12 +40,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - URL layer accepts ``tkwry://localhost/...`` (requires ``app=`` at create)
 - Windows custom-protocol origins use HTTPS scheme (wry
   ``with_https_scheme``) so they align more closely with macOS/Linux
+- Document IPC = events, RPC = request/response, emit = Python→JS; default
+  ``@web.expose`` stays on the Tk main thread (use ``thread=True`` for heavy
+  work)
+- Split ``webview.py``: host/wakeup helpers → ``_host.py``, IPC/RPC/emit/
+  ``watch_app`` → ``_rpc_api.WebViewRpcMixin`` (public API unchanged)
 
 ### Fixed
 
 - Windows: rewrite ``tkwry://`` → ``https://tkwry.localhost/...`` on
   ``load_url`` so deferred ``app=`` navigation reaches the custom protocol
   (wry only rewrote ``with_url`` at create)
+- macOS: ``open_devtools`` / ``close_devtools`` no longer hold the native
+  ``inner`` lock across the nested WebKit turn (deadlock after prior WebView
+  teardown in the same process; hung ``test_create_options`` suite)
+- Linux: honor ``winfo_ismapped()`` for map/visibility so inactive Notebook
+  tabs ``set_visible(False)`` / ``phase=HIDDEN`` (Xvfb still treats mapped but
+  non-viewable hosts as showable)
 
 ## [0.1.1] - 2026-08-04
 

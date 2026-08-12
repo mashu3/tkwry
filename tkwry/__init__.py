@@ -4,6 +4,7 @@ import sys
 
 from tkwry._version import __version__
 from tkwry.exceptions import (
+    RpcTimeoutError,
     WebViewCreationError,
     WebViewDestroyedError,
     WebViewNotReadyError,
@@ -69,6 +70,7 @@ __all__ = [
     "PageLoadEvent",
     "PageLoadHandler",
     "TitleChangedHandler",
+    "RpcTimeoutError",
     "WebSession",
     "WebView",
     "WebViewCreationError",

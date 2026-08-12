@@ -393,6 +393,102 @@ def test_rpc_unknown_method_rejects(tk_root) -> None:
     frame.destroy()
 
 
+def test_rpc_worker_thread_does_not_block_handler_thread_flag(tk_root) -> None:
+    """``thread=True`` runs the handler off the Tk thread."""
+    import threading
+
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<title>rpc</title><p>rpc</p>")
+    caller_ids: list[int] = []
+
+    @web.expose(thread=True)
+    def whoami() -> int:
+        caller_ids.append(threading.get_ident())
+        return threading.get_ident()
+
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=30)
+    tk_ident = threading.get_ident()
+
+    web.eval_js(
+        """
+        (function () {
+          window.tkwry.call("whoami").then(function (id) {
+            document.title = "id=" + id;
+          }).catch(function (e) {
+            document.title = "err=" + e;
+          });
+        })();
+        """
+    )
+
+    titles: list[str] = []
+
+    def title_ready() -> bool:
+        web.eval_js_with_callback("document.title", titles.append)
+        return any("id=" in str(t) for t in titles)
+
+    assert wait_until(tk_root, title_ready, steps=400), f"got {titles!r}"
+    assert caller_ids
+    assert caller_ids[0] != tk_ident
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_emit_delivers_to_js_listener(tk_root) -> None:
+    frame = host_frame(tk_root)
+    web = WebView(
+        frame,
+        html="""
+        <title>emit</title>
+        <script>
+          window.__emit_ready = false;
+          function boot() {
+            if (!window.tkwry || !window.tkwry.on) return;
+            window.tkwry.on("ping", function (payload) {
+              document.title = "ping=" + (payload && payload.n);
+            });
+            window.__emit_ready = true;
+          }
+          boot();
+          setInterval(boot, 50);
+        </script>
+        """,
+    )
+
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=30)
+
+    # Ensure bridge exists even if constructor had no expose yet.
+    web.emit("warmup", None)
+    pump(tk_root, steps=20)
+
+    web.eval_js(
+        """
+        if (window.tkwry && window.tkwry.on) {
+          window.tkwry.on("ping", function (payload) {
+            document.title = "ping=" + (payload && payload.n);
+          });
+          window.__emit_ready = true;
+        }
+        """
+    )
+    pump(tk_root, steps=20)
+    web.emit("ping", {"n": 7})
+
+    titles: list[str] = []
+
+    def title_ready() -> bool:
+        web.eval_js_with_callback("document.title", titles.append)
+        return any("ping=7" in str(t) for t in titles)
+
+    assert wait_until(tk_root, title_ready, steps=400), f"got {titles!r}"
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_title_changed_delivers_on_document_title_set(tk_root) -> None:
     titles: list[str] = []
 
@@ -548,6 +644,40 @@ def test_app_custom_protocol_resolves_relative_resources(
     web.eval_js_with_callback(script, on_color)
     assert wait_until(tk_root, lambda: colors, steps=100), "expected computed color"
     assert "128" in colors[0] or "rgb(0" in colors[0].replace(" ", "")
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_app_spa_fallback_serves_index_for_client_routes(
+    tk_root, tmp_path: Path
+) -> None:
+    """``spa_fallback=True`` maps extension-less paths to ``index.html``."""
+    (tmp_path / "index.html").write_text(
+        (
+            "<!doctype html><html><head><title>spa</title></head>"
+            "<body><p id='t'>spa-ok</p>"
+            "<script>document.title='spa-ok';</script>"
+            "</body></html>"
+        ),
+        encoding="utf-8",
+    )
+
+    frame = host_frame(tk_root)
+    web = WebView(frame, app=tmp_path, spa_fallback=True, app_dev=True)
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=40)
+
+    web.load_url("tkwry://localhost/app/settings")
+    pump(tk_root, steps=60)
+
+    titles: list[str] = []
+
+    def title_ready() -> bool:
+        web.eval_js_with_callback("document.title", titles.append)
+        return any("spa-ok" in str(t) for t in titles)
+
+    assert wait_until(tk_root, title_ready, steps=400), f"got {titles!r}"
 
     web.destroy()
     frame.destroy()

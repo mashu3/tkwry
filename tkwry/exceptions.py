@@ -1,4 +1,4 @@
-"""WebView lifecycle exceptions."""
+"""WebView lifecycle and RPC exceptions."""
 
 
 class WebViewNotReadyError(RuntimeError):
@@ -15,3 +15,7 @@ class WebViewCreationError(RuntimeError):
 
 class WebViewDestroyedError(RuntimeError):
     """Raised when a WebView API is called after :meth:`~tkwry.WebView.destroy`."""
+
+
+class RpcTimeoutError(TimeoutError):
+    """Structured RPC error when an exposed handler exceeds its timeout."""

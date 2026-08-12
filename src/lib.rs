@@ -886,6 +886,8 @@ impl WebView {
         url = None,
         html = None,
         app_root = None,
+        spa_fallback = false,
+        app_cache_control = None,
         visible = true,
         devtools = false,
         focused = true,
@@ -909,6 +911,8 @@ impl WebView {
         url: Option<String>,
         html: Option<String>,
         app_root: Option<String>,
+        spa_fallback: bool,
+        app_cache_control: Option<String>,
         visible: bool,
         devtools: bool,
         focused: bool,
@@ -1214,8 +1218,12 @@ impl WebView {
 
         if register_app {
             let root_for_protocol = app_root_path.expect("register_app implies app_root");
+            let serve_options = app_protocol::AppServeOptions {
+                spa_fallback,
+                cache_control: app_cache_control,
+            };
             builder = builder.with_custom_protocol("tkwry".into(), move |_id, request| {
-                app_protocol::serve_app_request(&root_for_protocol, request)
+                app_protocol::serve_app_request(&root_for_protocol, request, &serve_options)
             });
             #[cfg(target_os = "windows")]
             {
@@ -1660,14 +1668,17 @@ impl WebView {
     }
 
     fn open_devtools(&self) -> PyResult<()> {
-        with_webview(self, |wv| {
+        // DevTools open/close can run a nested AppKit/WebKit turn that re-enters
+        // tkwry queues. Holding `inner` across that nests into deadlock (seen on
+        // macOS after prior WebView create/destroy in the same process).
+        with_webview_reentrant(self, |wv| {
             wv.open_devtools();
             Ok(())
         })
     }
 
     fn close_devtools(&self) -> PyResult<()> {
-        with_webview(self, |wv| {
+        with_webview_reentrant(self, |wv| {
             wv.close_devtools();
             Ok(())
         })
@@ -1750,6 +1761,47 @@ where
             )),
         }
     })();
+    this.leave_wry_call()?;
+    result
+}
+
+/// Like [`with_webview`], but temporarily takes the native view out of `inner`.
+///
+/// Use for wry APIs that may run a nested platform event turn (DevTools open /
+/// close). Holding `inner` across that turn deadlocks when nested work tries to
+/// touch the same WebView.
+fn with_webview_reentrant<F, T>(this: &WebView, f: F) -> PyResult<T>
+where
+    F: FnOnce(&wry::WebView) -> PyResult<T>,
+{
+    this.require_owner_thread()?;
+    this.enter_wry_call();
+    drain_nav_sync_hooks(&this.nav_cb, &this.nav_sync_pending);
+    drain_newwin_sync_hooks(&this.newwin_cb, &this.newwin_sync_pending);
+
+    let taken = {
+        let mut guard = this.inner.lock().map_err(|_| {
+            pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned")
+        })?;
+        guard.take()
+    };
+
+    let result = match taken.as_ref() {
+        Some(wv) => f(wv),
+        None => Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "webview already destroyed",
+        )),
+    };
+
+    {
+        let mut guard = this.inner.lock().map_err(|_| {
+            pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned")
+        })?;
+        // Put the view back unless destroy already cleared/replaced it.
+        if guard.is_none() {
+            *guard = taken;
+        }
+    }
     this.leave_wry_call()?;
     result
 }

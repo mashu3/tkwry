@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import Future
 
 from tkwry.ipc import (
     RPC_BOOTSTRAP_JS,
+    RpcRegistration,
     dispatch_rpc,
+    emit_script,
+    format_rpc_error,
     merge_initialization_script,
     parse_rpc_request,
     settle_script,
@@ -53,12 +57,12 @@ def test_dispatch_rpc_success_and_unknown() -> None:
     assert bad is not None
     ok, value = dispatch_rpc({"add": add}, bad)
     assert ok is False
-    assert "unknown method" in str(value)
+    assert isinstance(value, dict)
+    assert value["type"] == "RpcMethodNotFound"
+    assert "unknown method" in value["message"]
 
 
 def test_dispatch_rpc_future_passthrough() -> None:
-    from concurrent.futures import Future
-
     fut: Future[int] = Future()
     fut.set_result(7)
 
@@ -86,7 +90,17 @@ def test_dispatch_rpc_exception_and_non_json() -> None:
     assert boom_req is not None
     ok, value = dispatch_rpc({"boom": boom}, boom_req)
     assert ok is False
-    assert value == "nope"
+    assert value == {"type": "RuntimeError", "message": "nope"}
+
+    ok, value = dispatch_rpc(
+        {"boom": boom},
+        boom_req,
+        include_traceback=True,
+    )
+    assert ok is False
+    assert isinstance(value, dict)
+    assert "traceback" in value
+    assert "RuntimeError" in value["traceback"]
 
     bad_req = parse_rpc_request(
         json.dumps({"__tkwry": "rpc", "id": "2", "method": "bad", "params": []})
@@ -94,17 +108,66 @@ def test_dispatch_rpc_exception_and_non_json() -> None:
     assert bad_req is not None
     ok, value = dispatch_rpc({"bad": bad_result}, bad_req)
     assert ok is False
-    assert "JSON-serializable" in str(value)
+    assert value["type"] == "RpcSerializationError"
 
 
-def test_settle_script_roundtrip() -> None:
+def test_dispatch_rpc_worker_submit() -> None:
+    submitted: list[object] = []
+
+    def submit(fn):  # noqa: ANN001
+        fut: Future[object] = Future()
+        submitted.append(fn)
+        fut.set_result(fn())
+        return fut
+
+    def heavy() -> str:
+        return "ok"
+
+    req = parse_rpc_request(
+        json.dumps({"__tkwry": "rpc", "id": "1", "method": "heavy", "params": []})
+    )
+    assert req is not None
+    outcome = dispatch_rpc(
+        {"heavy": RpcRegistration(handler=heavy, run_in="worker")},
+        req,
+        submit_worker=submit,
+    )
+    assert isinstance(outcome, Future)
+    assert outcome.result() == "ok"
+    assert submitted
+
+
+def test_format_rpc_error() -> None:
+    try:
+        raise ValueError("x")
+    except ValueError as exc:
+        payload = format_rpc_error(exc, include_traceback=True)
+    assert payload["type"] == "ValueError"
+    assert payload["message"] == "x"
+    assert "ValueError" in payload["traceback"]
+
+
+def test_settle_and_emit_script() -> None:
     script = settle_script("r9", ok=True, value={"n": 1})
     assert '"r9"' in script
     assert "true" in script
     assert '{"n": 1}' in script or '{"n":1}' in script
-    err = settle_script("r9", ok=False, value="fail")
+    err = settle_script(
+        "r9",
+        ok=False,
+        value={"type": "RuntimeError", "message": "fail"},
+    )
     assert "false" in err
-    assert "fail" in err
+    assert "RuntimeError" in err
+    emitted = emit_script("data_updated", {"n": 2})
+    assert "_emit" in emitted
+    assert "data_updated" in emitted
+
+
+def test_bootstrap_includes_on_and_timeout() -> None:
+    assert "window.tkwry.on" in RPC_BOOTSTRAP_JS
+    assert "timeout" in RPC_BOOTSTRAP_JS
+    assert "_emit" in RPC_BOOTSTRAP_JS
 
 
 def test_merge_initialization_script() -> None:

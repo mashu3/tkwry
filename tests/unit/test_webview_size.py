@@ -236,6 +236,7 @@ def test_sync_bounds_uses_explicit_size_before_layout(tk_root, monkeypatch) -> N
 
     web._webview = _Native()
     monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_ismapped", lambda: True)
     monkeypatch.setattr(frame, "winfo_width", lambda: 1)
     monkeypatch.setattr(frame, "winfo_height", lambda: 1)
     monkeypatch.setattr(frame, "winfo_viewable", lambda: True)
@@ -518,6 +519,7 @@ def test_layout_ready_ignores_viewable_on_linux_headless(tk_root, monkeypatch) -
     web._webview = object()
     monkeypatch.setattr(frame, "winfo_exists", lambda: True)
     monkeypatch.setattr(frame, "winfo_manager", lambda: "pack")
+    monkeypatch.setattr(frame, "winfo_ismapped", lambda: True)
     monkeypatch.setattr(frame, "winfo_width", lambda: 400)
     monkeypatch.setattr(frame, "winfo_height", lambda: 300)
     monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
@@ -528,10 +530,33 @@ def test_layout_ready_ignores_viewable_on_linux_headless(tk_root, monkeypatch) -
     assert web._frame_should_show() is True
 
 
+def test_linux_unmapped_host_hides_despite_headless_viewable_bypass(
+    tk_root, monkeypatch
+) -> None:
+    """Inactive Notebook tabs are unmapped; Linux must still hide them."""
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    web._webview = object()
+    monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_manager", lambda: "pack")
+    monkeypatch.setattr(frame, "winfo_ismapped", lambda: False)
+    monkeypatch.setattr(frame, "winfo_width", lambda: 400)
+    monkeypatch.setattr(frame, "winfo_height", lambda: 300)
+    monkeypatch.setattr(frame, "winfo_viewable", lambda: False)
+    monkeypatch.setattr("tkwry.webview.sys.platform", "linux")
+
+    assert web._layout_ready() is True
+    assert web.ready is True
+    assert web._host_is_viewable_for_map() is False
+    assert web._frame_should_show() is False
+    assert web.phase is WebViewPhase.HIDDEN
+
+
 def test_frame_should_show_true_when_viewable(tk_root, monkeypatch) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=300, height=200)
     monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_ismapped", lambda: True)
     monkeypatch.setattr(frame, "winfo_width", lambda: 400)
     monkeypatch.setattr(frame, "winfo_height", lambda: 300)
     monkeypatch.setattr(frame, "winfo_viewable", lambda: True)
@@ -653,11 +678,12 @@ def test_frame_ready_for_initial_load_checks_geometry_on_linux(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     frame = tk.Frame(tk_root)
-    # No constructor size — partial / full geometry only (Linux viewable=always).
+    # No constructor size — partial / full geometry only (mapped Linux host).
     web = WebView(frame)
     web._webview = object()
     monkeypatch.setattr("tkwry.webview.sys.platform", "linux")
     monkeypatch.setattr(frame, "winfo_exists", lambda: True)
+    monkeypatch.setattr(frame, "winfo_ismapped", lambda: True)
     monkeypatch.setattr(frame, "winfo_width", lambda: 1)
     monkeypatch.setattr(frame, "winfo_height", lambda: 300)
     monkeypatch.setattr(frame, "winfo_viewable", lambda: True)

@@ -24,7 +24,7 @@ Tkinter is still a solid GUI shell — it just had no first-class way to host mo
 
 - **True child embedding** — `build_as_child` via HWND, NSView, or X11 window ID
 - **One event loop** — Tk `mainloop` only; no separate app runtime
-- **IPC bridge** — JavaScript → Python callbacks without freezing the UI
+- **IPC / RPC / emit** — JS↔Python events and request/response without freezing the UI
 - **Layout-aware** — tracks `pack` / `grid` / `place`, tabs, and `PanedWindow`
 
 Pre-built **abi3** wheels ship for **Windows** and **macOS**. **Linux** is source-only (**best-effort** by design) — see [Platform notes](#-platform-notes).
@@ -113,7 +113,15 @@ web = WebView(frame, url="https://github.com")
 root.mainloop()
 ```
 
-### IPC (JavaScript → Python)
+### IPC and RPC (JavaScript ↔ Python)
+
+Use **IPC** for fire-and-forget events and **RPC** for request/response:
+
+| Direction | Role | Python | JavaScript |
+|-----------|------|--------|------------|
+| JS → Python | IPC (event) | `set_ipc_handler` / `ipc_handler=` | `window.ipc.postMessage(str)` |
+| JS → Python | RPC (call) | `@web.expose` | `await window.tkwry.call(name, ...)` |
+| Python → JS | Emit (event) | `web.emit(event, data)` | `window.tkwry.on(event, handler)` |
 
 ```python
 def on_message(msg: str) -> None:
@@ -142,6 +150,8 @@ web/
 ```python
 web = WebView(frame, app="./web")          # loads tkwry://localhost/index.html
 # or: WebView(frame, app="./web/index.html")
+# SPA client routes: spa_fallback=True
+# Dev: app_dev=True (Cache-Control: no-store) + web.watch_app() for reload
 ```
 
 Constructor ``app=`` fixes the filesystem root at create time. Later
@@ -151,9 +161,9 @@ you choose not to vendor them yet.
 
 See [`examples/local_assets_demo.py`](examples/local_assets_demo.py).
 
-### Thin RPC (``expose`` / ``window.tkwry.call``)
+### RPC (``expose`` / ``window.tkwry.call``)
 
-Keep raw ``ipc_handler`` + ``window.ipc.postMessage`` for free-form messages.
+Keep raw ``ipc_handler`` + ``window.ipc.postMessage`` for free-form events.
 On top, expose callables and await them from JS:
 
 ```python
@@ -162,16 +172,38 @@ web = WebView(frame, html=HTML)
 @web.expose
 def read_file(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
+
+# Heavy I/O / CPU — run off the Tk thread so the UI stays responsive
+@web.expose(thread=True, timeout=30.0)
+def heavy_task(data: dict) -> dict:
+    ...
+    return result
 ```
 
 ```js
 const text = await window.tkwry.call("read_file", path);
+// optional JS-side timeout (ms):
+await window.tkwry.call("heavy_task", payload, { timeout: 5000 });
 ```
 
-Wire format is a small JSON envelope (`{"__tkwry":"rpc","id","method","params"}`);
-Python settles the Promise with `result` or `error`. Position args only;
-return values must be JSON-serializable. Handlers may return a
-`concurrent.futures.Future` for async work (Promise settles when it completes).
+**Execution model:** default handlers run on the **Tk main thread** (safe for
+Tk APIs; long work blocks the UI). Pass ``thread=True`` / ``run_in="worker"``
+to use a background pool. Handlers may also return a
+``concurrent.futures.Future``. Errors reject the Promise with a structured
+payload (``error.name`` / ``error.message``; set ``rpc_traceback=True`` or
+``TKWRY_RPC_TRACEBACK=1`` for tracebacks). Duplicate method names raise unless
+``replace=True``. Destroy rejects in-flight RPCs.
+
+### Python → JS events (``emit``)
+
+```python
+web.emit("data_updated", {"n": 1})
+```
+
+```js
+window.tkwry.on("data_updated", (payload) => { ... });
+```
+
 See [`examples/rpc_demo.py`](examples/rpc_demo.py).
 
 ### Shared session (``WebSession``)
@@ -244,7 +276,12 @@ web = WebView(
 
 `on_page_load` fires `PageLoadEvent.Started` and `PageLoadEvent.Finished` **for every navigation** while a handler is registered (native listening follows the handler). Events are **not** replayed for navigations that happened before `set_on_page_load` / constructor `on_page_load`.
 
-**Callback threads:** all user handlers run on the **Tk main thread**. `on_page_load`, `on_title_changed`, IPC, and drag-and-drop are queued asynchronously. `on_navigation` and `on_new_window` are also invoked on Tk, but WebKit **blocks** until they return a value — keep them fast (heavy work → return deny/default and defer with `root.after`). Timed-out sync hooks are canceled after about **60s** total wait.
+**Callback threads:** lifecycle / IPC / page-load / title / DnD handlers run on
+the **Tk main thread**. RPC handlers default to the same thread; use
+``@web.expose(thread=True)`` for background work. `on_navigation` and
+`on_new_window` are also invoked on Tk, but WebKit **blocks** until they return
+a value — keep them fast (heavy work → return deny/default and defer with
+`root.after`). Timed-out sync hooks are canceled after about **60s** total wait.
 
 Async queues (IPC, page-load, title, drag-drop, eval) cap at **2048** pending items each; further events are compacted or dropped. Use `take_queue_drop_counts()` to observe overflows.
 
@@ -281,7 +318,7 @@ web.destroy()   # release native webview; host Frame is kept
 |----------|---------|
 | Content | `load_url`, `load_html`, `reload`, `url` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback` |
-| IPC | `set_ipc_handler`, `expose` (thin ``window.tkwry.call`` RPC) |
+| IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose`, `emit`, `watch_app` |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler` |
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
@@ -366,9 +403,10 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 
 ## 🧩 Features
 
-- **Local app assets** — `app=` + `tkwry://` custom protocol (offline relative CSS/JS; no localhost server)
-- **Thin RPC** — `@web.expose` / `window.tkwry.call` over IPC (Promise in, JSON result/error out)
+- **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, `watch_app()` hot reload)
+- **IPC / RPC / emit** — events vs request/response; worker RPC; structured errors; Python→JS `emit`
 - **WebSession** — shared wry `WebContext` (cookies / cache / localStorage) across WebViews
+- **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
 - **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` work out of the box on macOS)
 - **Deferred callbacks** — IPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
@@ -397,7 +435,7 @@ pip install -e .
 | [`examples/url_demo.py`](examples/url_demo.py) | URL bar + embedded page |
 | [`examples/local_assets_demo.py`](examples/local_assets_demo.py) | Offline local app via `app=` / `tkwry://` |
 | [`examples/ipc_demo.py`](examples/ipc_demo.py) | JavaScript ↔ Tkinter IPC |
-| [`examples/rpc_demo.py`](examples/rpc_demo.py) | Thin RPC (`expose` / `window.tkwry.call`) |
+| [`examples/rpc_demo.py`](examples/rpc_demo.py) | RPC + worker + `emit` |
 | [`examples/session_demo.py`](examples/session_demo.py) | Shared `WebSession` / localStorage |
 | [`examples/multi_demo.py`](examples/multi_demo.py) | Multiple WebViews, tabs, panes |
 | [`examples/plotly_demo.py`](examples/plotly_demo.py) | Plotly charts (`pip install plotly`) |

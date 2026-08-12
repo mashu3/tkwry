@@ -191,7 +191,7 @@ def test_atexit_drain_runs_destroy_on_tk_thread(
 ) -> None:
     import weakref
 
-    from tkwry import webview as webview_mod
+    from tkwry import _host as host_mod
 
     frame = tk.Frame(tk_root)
     frame.pack()
@@ -207,12 +207,12 @@ def test_atexit_drain_runs_destroy_on_tk_thread(
     web._unbind_frame_events()
     toplevel = frame.winfo_toplevel()
     setattr(toplevel, "_tkwry_pending_destroy_webviews", [weakref.ref(web)])
-    previous = list(webview_mod._atexit_destroy_toplevels)
-    webview_mod._atexit_destroy_toplevels[:] = [weakref.ref(toplevel)]
+    previous = list(host_mod._atexit_destroy_toplevels)
+    host_mod._atexit_destroy_toplevels[:] = [weakref.ref(toplevel)]
     try:
-        webview_mod._atexit_drain_pending_destroys()
+        host_mod._atexit_drain_pending_destroys()
     finally:
-        webview_mod._atexit_destroy_toplevels[:] = previous
+        host_mod._atexit_destroy_toplevels[:] = previous
 
     assert destroyed == [True]
     assert web.destroyed is True
@@ -224,7 +224,7 @@ def test_atexit_leftover_uses_teardown_not_bare_force(
     """Non-Tk atexit leftovers must use terminal teardown, not bare force."""
     import weakref
 
-    from tkwry import webview as webview_mod
+    from tkwry import _host as host_mod
 
     frame = tk.Frame(tk_root)
     frame.pack()
@@ -240,7 +240,7 @@ def test_atexit_leftover_uses_teardown_not_bare_force(
         WebView._teardown_native_if_alive(web)
 
     monkeypatch.setattr(
-        webview_mod.threading,
+        host_mod.threading,
         "get_ident",
         lambda: web._tk_thread_id + 1,
     )
@@ -261,12 +261,12 @@ def test_atexit_leftover_uses_teardown_not_bare_force(
 
     toplevel = frame.winfo_toplevel()
     setattr(toplevel, "_tkwry_pending_destroy_webviews", [weakref.ref(web)])
-    previous = list(webview_mod._atexit_destroy_toplevels)
-    webview_mod._atexit_destroy_toplevels[:] = [weakref.ref(toplevel)]
+    previous = list(host_mod._atexit_destroy_toplevels)
+    host_mod._atexit_destroy_toplevels[:] = [weakref.ref(toplevel)]
     try:
-        webview_mod._atexit_drain_pending_destroys()
+        host_mod._atexit_drain_pending_destroys()
     finally:
-        webview_mod._atexit_destroy_toplevels[:] = previous
+        host_mod._atexit_destroy_toplevels[:] = previous
 
     assert teardown_calls == [True]
     assert force_calls == []

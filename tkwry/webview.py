@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import atexit
 import math
 import os
 import queue
@@ -26,6 +25,20 @@ from tkwry._core import (
 from tkwry._core import (
     WebView as NativeWebView,
 )
+from tkwry._host import (
+    _claim_frame_host,
+    _drain_pending_destroy_webviews,
+    _ensure_tk_wakeup_fileevent,
+    _frame_webview_refs,
+    _pump_toplevel_wakeup_pipe,
+    _register_sync_hook_webview,
+    _release_frame_host,
+    _release_tk_wakeup_pipe,
+    _run_pending_webview_destroy,
+    _toplevel_wakeup_write_fd,
+    _track_atexit_destroy_toplevel,
+    _unregister_sync_hook_webview,
+)
 from tkwry._linux import GtkPump
 from tkwry._parent import (
     check_tk_thread_id,
@@ -33,22 +46,12 @@ from tkwry._parent import (
     tk_embed_origin,
     tk_embed_parent,
 )
+from tkwry._rpc_api import WebViewRpcMixin
 from tkwry._url import _normalize_url, _validate_url
 from tkwry.exceptions import (
     WebViewCreationError,
     WebViewDestroyedError,
     WebViewNotReadyError,
-)
-from tkwry.ipc import (
-    RPC_BOOTSTRAP_JS as _RPC_BOOTSTRAP_JS,
-)
-from tkwry.ipc import (
-    RpcHandler,
-    RpcRequest,
-    dispatch_rpc,
-    merge_initialization_script,
-    parse_rpc_request,
-    settle_script,
 )
 from tkwry.session import WebSession
 
@@ -99,38 +102,6 @@ _QUEUE_DROP_TITLE = 2
 _QUEUE_DROP_DRAG_DROP = 3
 _QUEUE_DROP_EVAL = 4
 _T = TypeVar("_T")
-_frame_webview_refs: dict[int, weakref.ReferenceType[WebView]] = {}
-_atexit_destroy_drain_registered = False
-_atexit_destroy_toplevels: list[weakref.ReferenceType[tk.Misc]] = []
-
-
-def _frame_webview_weakref_dead(ref: weakref.ReferenceType[WebView]) -> None:
-    dead = [key for key, entry in _frame_webview_refs.items() if entry is ref]
-    for key in dead:
-        _frame_webview_refs.pop(key, None)
-
-
-def _claim_frame_host(frame: tk.Misc, web: WebView) -> None:
-    """Raise if *frame* already hosts a live WebView."""
-    key = id(frame)
-    existing = _frame_webview_refs.get(key)
-    if existing is not None:
-        prior = existing()
-        if prior is not None and not prior.destroyed:
-            raise ValueError(
-                "tkwry: only one WebView per host frame is supported; "
-                "create a child frame for each embedded view"
-            )
-        if prior is None:
-            del _frame_webview_refs[key]
-    _frame_webview_refs[key] = weakref.ref(web, _frame_webview_weakref_dead)
-
-
-def _release_frame_host(frame: tk.Misc, web: WebView) -> None:
-    key = id(frame)
-    existing = _frame_webview_refs.get(key)
-    if existing is not None and existing() is web:
-        del _frame_webview_refs[key]
 
 
 def _validate_color_component(value: int, name: str) -> None:
@@ -155,229 +126,6 @@ def _validate_background_color(color: tuple[int, int, int, int]) -> None:
         _validate_color_component(val, name)
 
 
-def _toplevel_wakeup_read_fd(toplevel: tk.Misc) -> int | None:
-    if sys.platform == "darwin":
-        return getattr(toplevel, "_tkwry_mac_wake_read_fd", None)
-    return getattr(toplevel, "_tkwry_wake_read_fd", None)
-
-
-def _toplevel_wakeup_write_fd(toplevel: tk.Misc) -> int | None:
-    if sys.platform == "darwin":
-        return getattr(toplevel, "_tkwry_mac_wake_write_fd", None)
-    return getattr(toplevel, "_tkwry_wake_write_fd", None)
-
-
-def _pump_toplevel_wakeup_pipe(toplevel: tk.Misc) -> None:
-    read_fd = _toplevel_wakeup_read_fd(toplevel)
-    if read_fd is None:
-        return
-    try:
-        import select
-
-        while select.select([read_fd], [], [], 0)[0]:
-            if not os.read(read_fd, 64):
-                break
-    except (OSError, ValueError):
-        pass
-
-
-def _run_pending_webview_destroy(web: WebView) -> None:
-    """Run a queued ``__del__`` destroy on the Tk thread or via emergency teardown.
-
-    Tk thread: cancel deferred callbacks then :meth:`WebView.destroy`.
-    Any other thread: :meth:`WebView._teardown_native_if_alive` so eval/ready
-    generation stays aligned. Never call bare ``_force_native_teardown`` here —
-    that path is native-only (teardown poll timeout).
-    """
-    if web._destroyed:
-        return
-    if threading.get_ident() == web._tk_thread_id:
-        try:
-            web._cancel_deferred_callbacks()
-            web.destroy()
-        except Exception:
-            traceback.print_exc()
-            if not web._destroyed:
-                try:
-                    web._teardown_native_if_alive()
-                except Exception:
-                    traceback.print_exc()
-        return
-    try:
-        web._teardown_native_if_alive()
-    except Exception:
-        traceback.print_exc()
-
-
-def _drain_toplevel_sync_hooks(toplevel: tk.Misc) -> None:
-    """Drain pending navigation/new-window hooks for all WebViews on *toplevel*."""
-    _drain_pending_destroy_webviews(toplevel)
-    refs = getattr(toplevel, "_tkwry_sync_hook_webviews", None)
-    if not refs:
-        return
-    live: list[weakref.ReferenceType[WebView]] = []
-    for ref in refs:
-        web = ref()
-        if web is None:
-            continue
-        live.append(ref)
-        if not web._destroyed:
-            web._drain_sync_hooks()
-    if live:
-        setattr(toplevel, "_tkwry_sync_hook_webviews", live)
-    elif hasattr(toplevel, "_tkwry_sync_hook_webviews"):
-        delattr(toplevel, "_tkwry_sync_hook_webviews")
-
-
-def _drain_pending_destroy_webviews(toplevel: tk.Misc) -> None:
-    """Run ``destroy()`` queued from off-thread ``__del__`` on the Tk thread."""
-    refs = getattr(toplevel, "_tkwry_pending_destroy_webviews", None)
-    if not refs:
-        return
-    live: list[weakref.ReferenceType[WebView]] = []
-    for ref in refs:
-        web = ref()
-        if web is None or web._destroyed:
-            continue
-        if threading.get_ident() != web._tk_thread_id:
-            live.append(ref)
-            continue
-        _run_pending_webview_destroy(web)
-        if not web._destroyed:
-            live.append(ref)
-    if live:
-        setattr(toplevel, "_tkwry_pending_destroy_webviews", live)
-    elif hasattr(toplevel, "_tkwry_pending_destroy_webviews"):
-        delattr(toplevel, "_tkwry_pending_destroy_webviews")
-
-
-def _ensure_atexit_destroy_drain() -> None:
-    global _atexit_destroy_drain_registered
-    if _atexit_destroy_drain_registered:
-        return
-    _atexit_destroy_drain_registered = True
-    atexit.register(_atexit_drain_pending_destroys)
-
-
-def _track_atexit_destroy_toplevel(toplevel: tk.Misc) -> None:
-    _ensure_atexit_destroy_drain()
-    for ref in _atexit_destroy_toplevels:
-        if ref() is toplevel:
-            return
-    _atexit_destroy_toplevels.append(weakref.ref(toplevel))
-
-
-def _atexit_drain_pending_destroys() -> None:
-    live: list[weakref.ReferenceType[tk.Misc]] = []
-    for ref in _atexit_destroy_toplevels:
-        toplevel = ref()
-        if toplevel is None:
-            continue
-        live.append(ref)
-        for _ in range(32):
-            try:
-                toplevel.update_idletasks()
-                toplevel.update()
-            except tk.TclError:
-                break
-            _drain_pending_destroy_webviews(toplevel)
-            if not getattr(toplevel, "_tkwry_pending_destroy_webviews", None):
-                break
-        refs = getattr(toplevel, "_tkwry_pending_destroy_webviews", None)
-        if not refs:
-            continue
-        for pending_ref in list(refs):
-            web = pending_ref()
-            if web is None or web._destroyed:
-                continue
-            _run_pending_webview_destroy(web)
-    _atexit_destroy_toplevels[:] = live
-
-
-def _ensure_tk_wakeup_fileevent(toplevel: tk.Misc) -> None:
-    """Register a Tcl readable handler so sync hooks drain without polling delay."""
-    if sys.platform == "darwin" or getattr(toplevel, "_tkwry_wake_fileevent", False):
-        return
-    read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
-    if read_fd is None:
-        return
-
-    def _on_wake(_fd: int, _mask: int) -> None:
-        _pump_toplevel_wakeup_pipe(toplevel)
-        _drain_toplevel_sync_hooks(toplevel)
-
-    try:
-        create_handler = getattr(toplevel, "createfilehandler", None)
-        if create_handler is None:
-            return
-        create_handler(read_fd, tk.READABLE, _on_wake)
-        setattr(toplevel, "_tkwry_wake_fileevent", True)
-    except (tk.TclError, OSError, ValueError):
-        pass
-
-
-def _register_sync_hook_webview(toplevel: tk.Misc, web: WebView) -> None:
-    refs: list[weakref.ReferenceType[WebView]] | None = getattr(
-        toplevel, "_tkwry_sync_hook_webviews", None
-    )
-    if refs is None:
-        refs = []
-        setattr(toplevel, "_tkwry_sync_hook_webviews", refs)
-    refs.append(weakref.ref(web))
-
-
-def _unregister_sync_hook_webview(web: WebView) -> None:
-    if sys.platform == "darwin":
-        return
-    try:
-        toplevel = web._frame.winfo_toplevel()
-    except tk.TclError:
-        return
-    refs = getattr(toplevel, "_tkwry_sync_hook_webviews", None)
-    if not refs:
-        return
-    refs[:] = [entry for entry in refs if entry() is not web]
-    if not refs and hasattr(toplevel, "_tkwry_sync_hook_webviews"):
-        delattr(toplevel, "_tkwry_sync_hook_webviews")
-
-
-def _release_tk_wakeup_pipe(toplevel: tk.Misc) -> None:
-    """Close the Win/Linux sync-hook wakeup pipe when the last user is gone."""
-    users = getattr(toplevel, "_tkwry_wake_pipe_users", None)
-    if users is None:
-        return
-    users -= 1
-    if users > 0:
-        setattr(toplevel, "_tkwry_wake_pipe_users", users)
-        return
-    read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
-    if read_fd is not None and getattr(toplevel, "_tkwry_wake_fileevent", False):
-        try:
-            delete_handler = getattr(toplevel, "deletefilehandler", None)
-            if delete_handler is not None:
-                delete_handler(read_fd)
-        except tk.TclError:
-            pass
-    for fd in (
-        read_fd,
-        getattr(toplevel, "_tkwry_wake_write_fd", None),
-    ):
-        if fd is not None:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-    for attr in (
-        "_tkwry_wake_read_fd",
-        "_tkwry_wake_write_fd",
-        "_tkwry_wake_pipe_users",
-        "_tkwry_wake_fileevent",
-        "_tkwry_sync_hook_webviews",
-    ):
-        if hasattr(toplevel, attr):
-            delattr(toplevel, attr)
-
-
 def _noop_native_eval_callback(_result: str) -> None:
     """Stub passed to Rust; Python delivers via ``_native_eval_wait``."""
 
@@ -399,7 +147,7 @@ class WebViewPhase(Enum):
     DESTROYED = "destroyed"
 
 
-class WebView:
+class WebView(WebViewRpcMixin):
     """Embed a system WebView (wry) inside an existing Tk ``Frame``.
 
     The host *frame* must be laid out with a real size (``pack`` / ``grid`` /
@@ -561,6 +309,9 @@ class WebView:
         data_directory: str | Path | None = None,
         ephemeral: bool = False,
         ipc_handler: IpcHandler | None = None,
+        spa_fallback: bool = False,
+        app_dev: bool = False,
+        rpc_traceback: bool = False,
         devtools: bool = False,
         background_color: tuple[int, int, int, int] | None = None,
         user_agent: str | None = None,
@@ -615,9 +366,12 @@ class WebView:
         self._flush_load_attempt = 0
         self._embed = tk_embed_parent(frame)
         self._webview: NativeWebView | None = None
-        self._ipc_handler = ipc_handler
-        self._rpc_methods: dict[str, RpcHandler] = {}
-        self._rpc_bootstrap_injected = False
+        self._init_rpc_state(
+            ipc_handler=ipc_handler,
+            rpc_traceback=rpc_traceback,
+        )
+        self._spa_fallback = spa_fallback
+        self._app_dev = app_dev
         self._on_navigation = on_navigation
         self._on_page_load = on_page_load
         self._on_title_changed = on_title_changed
@@ -1042,10 +796,14 @@ class WebView:
         """Release the native WebView when Tk teardown is impossible."""
         if self._destroyed:
             return
+        self._abort_inflight_rpc()
+        self._stop_app_watch()
         self._destroyed = True
         # Emergency path: skip Tcl ``after`` cancel / frame unbind; still clear
         # eval generation and ready callbacks so GC cannot revive work.
         self._begin_terminal_state(count_eval_drops=False, clear_ready=True)
+        self._rpc_methods.clear()
+        self._shutdown_rpc_executor()
         self._detach_from_host(unbind_events=False)
         self._release_native_view(hide=False)
         self._unregister_platform_webview()
@@ -1061,9 +819,13 @@ class WebView:
         self._require_tk_thread()
         if self._destroyed:
             return
+        self._abort_inflight_rpc()
+        self._stop_app_watch()
         self._destroyed = True
         self._cancel_deferred_callbacks()
         self._begin_terminal_state(count_eval_drops=True, clear_ready=True)
+        self._rpc_methods.clear()
+        self._shutdown_rpc_executor()
         self._detach_from_host(unbind_events=True)
         had_native = self._webview is not None
         self._release_native_view(hide=True)
@@ -1471,76 +1233,6 @@ class WebView:
     def is_devtools_open(self) -> bool:
         """Return whether DevTools is currently open."""
         return self._require_ready("is_devtools_open").is_devtools_open()
-
-    def set_ipc_handler(self, handler: IpcHandler | None) -> None:
-        """Register or clear the JS → Python IPC handler (Tk main thread)."""
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
-        if handler is not None and self._creation_error is not None:
-            raise WebViewCreationError(
-                "WebView native creation failed; cannot call set_ipc_handler()"
-            ) from self._creation_error
-        self._ipc_handler = handler
-        if self._webview is not None:
-            self._webview.set_ipc_listening(self._ipc_listening_wanted())
-        if self._ipc_listening_wanted():
-            self._ensure_event_poll()
-
-    def expose(
-        self,
-        fn: RpcHandler | None = None,
-        /,
-        *,
-        name: str | None = None,
-    ) -> RpcHandler | Callable[[RpcHandler], RpcHandler]:
-        """Expose a Python callable to ``window.tkwry.call(name, ...)``.
-
-        Use as ``@web.expose`` / ``@web.expose(name="foo")`` or
-        ``web.expose(fn)``. Position arguments only; return values must be
-        JSON-serializable. The low-level ``ipc_handler`` remains available for
-        raw ``window.ipc.postMessage`` traffic.
-        """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
-        if self._creation_error is not None:
-            raise WebViewCreationError(
-                "WebView native creation failed; cannot call expose()"
-            ) from self._creation_error
-
-        def register(handler: RpcHandler) -> RpcHandler:
-            method = name if name is not None else handler.__name__
-            if not method:
-                raise ValueError("exposed RPC method name must be non-empty")
-            self._rpc_methods[method] = handler
-            self._enable_rpc()
-            return handler
-
-        if fn is not None:
-            return register(fn)
-        return register
-
-    def _ipc_listening_wanted(self) -> bool:
-        return self._ipc_handler is not None or bool(self._rpc_methods)
-
-    def _enable_rpc(self) -> None:
-        """Turn on IPC listening and ensure the JS bootstrap is present."""
-        if self._webview is not None:
-            self._webview.set_ipc_listening(True)
-            if not self._rpc_bootstrap_injected:
-                try:
-                    self._webview.eval_js(_RPC_BOOTSTRAP_JS)
-                    self._rpc_bootstrap_injected = True
-                except Exception:
-                    traceback.print_exc()
-        self._ensure_event_poll()
-
-    def _effective_initialization_script(self) -> str | None:
-        return merge_initialization_script(
-            self._initialization_script,
-            rpc_enabled=bool(self._rpc_methods),
-        )
 
     def set_on_navigation(self, handler: NavigationHandler | None) -> None:
         """Register a navigation allow/deny hook (Tk main thread; WebKit waits)."""
@@ -2173,68 +1865,6 @@ class WebView:
             result[0] = default
             done.set()
 
-    def _deliver_ipc_messages(self) -> None:
-        native = self._webview
-        if native is None or not self._ipc_listening_wanted():
-            return
-        for message in native.drain_ipc_messages():
-            request = parse_rpc_request(message)
-            if request is not None:
-                self._handle_rpc_request(request)
-                continue
-            handler = self._ipc_handler
-            if handler is not None:
-                self._invoke_callback(handler, message)
-
-    def _handle_rpc_request(self, request: RpcRequest) -> None:
-        from concurrent.futures import Future
-
-        outcome = dispatch_rpc(self._rpc_methods, request)
-        if isinstance(outcome, Future):
-            req_id = request.id
-
-            def _done(fut: Future[object]) -> None:
-                def _settle() -> None:
-                    try:
-                        value = fut.result()
-                    except Exception as exc:
-                        self._settle_rpc(
-                            req_id, ok=False, value=str(exc) or type(exc).__name__
-                        )
-                        return
-                    try:
-                        import json as _json
-
-                        _json.dumps(value)
-                    except (TypeError, ValueError):
-                        self._settle_rpc(
-                            req_id,
-                            ok=False,
-                            value="rpc result is not JSON-serializable",
-                        )
-                        return
-                    self._settle_rpc(req_id, ok=True, value=value)
-
-                try:
-                    self._frame.after_idle(_settle)
-                except tk.TclError:
-                    pass
-
-            outcome.add_done_callback(_done)
-            return
-        ok, value = outcome
-        self._settle_rpc(request.id, ok=ok, value=value)
-
-    def _settle_rpc(self, req_id: str, *, ok: bool, value: object) -> None:
-        script = settle_script(req_id, ok=ok, value=value)
-        native = self._webview
-        if native is None:
-            return
-        try:
-            native.eval_js(script)
-        except Exception:
-            traceback.print_exc()
-
     def _deliver_title_events(self) -> None:
         handler = self._on_title_changed
         native = self._webview
@@ -2531,10 +2161,13 @@ class WebView:
         init_script = self._effective_initialization_script()
         if init_script is not None:
             kwargs["initialization_script"] = init_script
-            if self._rpc_methods:
+            if self._rpc_methods or self._rpc_bridge_wanted:
                 self._rpc_bootstrap_injected = True
         if self._app_root is not None:
             kwargs["app_root"] = self._app_root
+            kwargs["spa_fallback"] = self._spa_fallback
+            if self._app_dev:
+                kwargs["app_cache_control"] = "no-store"
         if self._session is not None:
             kwargs["session"] = self._session.native
         if self._on_navigation is not None:
@@ -2856,9 +2489,16 @@ class WebView:
     def _host_is_viewable_for_map(self) -> bool:
         """Map/visibility axis only (HIDDEN vs READY) — never used by ``ready``.
 
-        Xvfb headless: ``winfo_viewable()`` stays False while geometry is valid,
-        so Linux treats the map axis as always viewable.
+        Unmapped hosts (e.g. inactive Notebook tabs) must hide via
+        ``set_visible(False)``. On Linux/Xvfb a *mapped* host can still report
+        ``winfo_viewable()==0`` while geometry is valid, so mapped Linux hosts
+        count as showable; ``winfo_ismapped()`` still detects real unmaps.
         """
+        try:
+            if not self._frame.winfo_ismapped():
+                return False
+        except tk.TclError:
+            return False
         if sys.platform == "linux":
             return True
         return bool(self._frame.winfo_viewable())

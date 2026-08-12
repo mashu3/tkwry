@@ -43,6 +43,7 @@ WEBVIEW_METHODS = (
     "reload",
     "eval_js",
     "eval_js_with_callback",
+    "emit",
     "focus",
     "focus_parent",
     "set_background_color",
@@ -53,6 +54,8 @@ WEBVIEW_METHODS = (
     "is_devtools_open",
     "set_ipc_handler",
     "expose",
+    "unexpose",
+    "watch_app",
     "set_on_navigation",
     "set_on_page_load",
     "set_on_title_changed",
@@ -104,6 +107,7 @@ def test_public_exports() -> None:
     assert tkwry.WebViewNotReadyError is not None
     assert tkwry.WebViewCreationError is not None
     assert tkwry.WebViewDestroyedError is not None
+    assert tkwry.RpcTimeoutError is not None
     for alias in PUBLIC_TYPE_ALIASES:
         assert alias is not None
 

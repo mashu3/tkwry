@@ -361,7 +361,7 @@ def _mac_pump_wakeup_pipe(toplevel: tk.Misc) -> None:
 
 def _mac_service_wakeup(toplevel: tk.Misc) -> bool:
     """Drain Rust->Python unfocus signals on the Tk thread."""
-    from tkwry.webview import _drain_pending_destroy_webviews
+    from tkwry._host import _drain_pending_destroy_webviews
 
     had_pipe_data = _mac_pipe_readable(toplevel)
     _mac_pump_wakeup_pipe(toplevel)

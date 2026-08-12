@@ -56,6 +56,8 @@ class WebView:
         url: str | None = None,
         html: str | None = None,
         app_root: str | None = None,
+        spa_fallback: bool = False,
+        app_cache_control: str | None = None,
         visible: bool = True,
         devtools: bool = False,
         focused: bool = True,
