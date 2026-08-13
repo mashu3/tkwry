@@ -90,6 +90,8 @@ class WebViewRpcMixin:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call set_ipc_handler()"
             ) from self._creation_error
+        if handler is not None and self._untrusted:
+            raise ValueError("WebView: untrusted=True cannot use ipc_handler")
         self._ipc_handler = handler
         if self._webview is not None:
             self._webview.set_ipc_listening(self._ipc_listening_wanted())
@@ -134,10 +136,13 @@ class WebViewRpcMixin:
 
         The low-level ``ipc_handler`` remains available for raw
         ``window.ipc.postMessage`` traffic (IPC = events; RPC = request/response).
+        Calls are accepted only from :attr:`~tkwry.WebView.bridge_origins`.
         """
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
+        if self._untrusted:
+            raise ValueError("WebView: untrusted=True cannot expose() RPC methods")
         if self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call expose()"
@@ -191,6 +196,16 @@ class WebViewRpcMixin:
         self._require_tk_thread()
         if not event:
             raise ValueError("emit: event name must be non-empty")
+        if self._untrusted:
+            raise ValueError("WebView: untrusted=True cannot emit()")
+        current = None
+        if self._webview is not None:
+            try:
+                current = self._webview.url()
+            except Exception:
+                current = None
+        if not self._bridge_origin_allowed(current or "about:blank"):
+            raise ValueError(f"emit: current page origin is not allowed ({current!r})")
         script = emit_script(event, data)
         self._require_ready("emit")
         self._rpc_bridge_wanted = True
@@ -371,10 +386,23 @@ class WebViewRpcMixin:
             return
         rpc_messages = native.drain_rpc_messages()
         ipc_messages = native.drain_ipc_messages()
-        for message in (*rpc_messages, *ipc_messages):
+        for source_url, message in (*rpc_messages, *ipc_messages):
             request = parse_rpc_request(message)
             if request is not None:
+                if not self._bridge_origin_allowed(source_url):
+                    if request.id and not request.cancel:
+                        self._settle_rpc(
+                            request.id,
+                            ok=False,
+                            value=rpc_error(
+                                "RpcOriginError",
+                                f"RPC from disallowed origin {source_url!r}",
+                            ),
+                        )
+                    continue
                 self._handle_rpc_request(request)
+                continue
+            if not self._bridge_origin_allowed(source_url):
                 continue
             try:
                 oversized = len(message.encode("utf-8")) > MAX_IPC_MESSAGE_BYTES

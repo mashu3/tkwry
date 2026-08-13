@@ -7,6 +7,7 @@ from pathlib import Path
 
 import tkwry
 from tkwry import (
+    BridgeOrigins,
     DragDropEvent,
     DragDropHandler,
     EvalCallback,
@@ -25,6 +26,7 @@ from tkwry import (
 from tkwry._core import WebView as NativeWebView
 
 PUBLIC_TYPE_ALIASES = (
+    BridgeOrigins,
     DragDropHandler,
     EvalCallback,
     EvalErrorHandler,
@@ -53,6 +55,7 @@ WEBVIEW_METHODS = (
     "close_devtools",
     "is_devtools_open",
     "set_ipc_handler",
+    "set_bridge_origins",
     "expose",
     "unexpose",
     "watch_app",
@@ -74,6 +77,8 @@ WEBVIEW_PROPERTIES = (
     "url",
     "native",
     "destroyed",
+    "untrusted",
+    "bridge_origins",
     "ready",
     "phase",
     "creation_failed",

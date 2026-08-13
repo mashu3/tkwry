@@ -42,6 +42,7 @@ try:
     from tkwry._core import DragDropEvent, NewWindowResponse, PageLoadEvent
     from tkwry.session import WebSession
     from tkwry.webview import (
+        BridgeOrigins,
         DragDropHandler,
         EvalCallback,
         EvalErrorHandler,
@@ -62,6 +63,7 @@ if sys.platform == "darwin":
     install_automatic_window_tabbing_disable()
 
 __all__ = [
+    "BridgeOrigins",
     "DragDropEvent",
     "DragDropHandler",
     "EvalCallback",

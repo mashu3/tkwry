@@ -2,6 +2,8 @@
 
 Toggle **CDN** vs **Local** (``app=``). Local downloads ``plotly.js`` once into
 ``examples/.vendor/`` (gitignored) and serves it over ``tkwry://``.
+Prefer Local for anything beyond a demo: a CDN XSS would share the page
+origin with ``window.ipc``.
 """
 
 from __future__ import annotations

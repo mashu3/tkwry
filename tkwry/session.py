@@ -19,6 +19,9 @@ class WebSession:
     protocol only once per ``WebContext``; tkwry raises ``ValueError`` if a
     second root is used (all platforms). Use a separate ``WebSession`` for
     unrelated local apps. Ephemeral sessions are not bound to one root.
+    Do not share a persistent session between a trusted ``app=`` WebView and
+    an untrusted external site — use ``untrusted=True`` (ephemeral) or a
+    separate :class:`WebSession`.
 
     Parameters
     ----------

@@ -11,7 +11,7 @@ import time
 import tkinter as tk
 import traceback
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from enum import Enum
 from pathlib import Path
 from typing import Literal, TypeAlias, TypeVar, cast
@@ -40,6 +40,13 @@ from tkwry._host import (
     _unregister_sync_hook_webview,
 )
 from tkwry._linux import GtkPump
+from tkwry._origin import (
+    BridgeAllowlist,
+    app_navigation_allowed,
+    origin_allowed,
+    resolve_bridge_origins,
+    untrusted_navigation_allowed,
+)
 from tkwry._parent import (
     check_tk_thread_id,
     require_tk_thread,
@@ -67,6 +74,7 @@ if sys.platform == "darwin":
     )
 
 IpcHandler: TypeAlias = Callable[[str], None]
+BridgeOrigins: TypeAlias = Literal["*"] | Collection[str]
 NavigationHandler: TypeAlias = Callable[[str], bool]
 PageLoadHandler: TypeAlias = Callable[[PageLoadEvent, str], None]
 TitleChangedHandler: TypeAlias = Callable[[str], None]
@@ -235,6 +243,16 @@ class WebView(WebViewRpcMixin):
     profile. WebViews that share a **non-ephemeral** session must use the
     **same** ``app=`` root (``ValueError`` otherwise). Linux can register
     ``tkwry://`` only once per context; tkwry enforces the same rule everywhere.
+    Do **not** share a persistent session between a local ``app=`` WebView and
+    an untrusted external site.
+
+    **Trust boundaries:** ``window.ipc`` / ``window.tkwry`` are desktop
+    privileges. By default IPC/RPC are accepted only from the initial content
+    origin (``html=`` → ``about:blank``; ``app=`` → ``tkwry://``;
+    ``url=`` → that origin). Pass ``bridge_origins="*"`` only when every page
+    in the view is trusted. ``untrusted=True`` is a viewer mode: no IPC/RPC,
+    ephemeral storage, http(s) only, new windows denied. ``app=`` also locks
+    in-page navigation to ``tkwry://`` unless you set ``on_navigation``.
 
     **Navigation hooks** (``on_navigation``, ``on_new_window``) run on the
     **Tk main thread**, but WebKit **blocks** until they return a value.
@@ -312,6 +330,8 @@ class WebView(WebViewRpcMixin):
         session: WebSession | None = None,
         data_directory: str | Path | None = None,
         ephemeral: bool = False,
+        untrusted: bool = False,
+        bridge_origins: BridgeOrigins | None = None,
         ipc_handler: IpcHandler | None = None,
         spa_fallback: bool = False,
         app_dev: bool = False,
@@ -344,8 +364,24 @@ class WebView(WebViewRpcMixin):
             raise ValueError(
                 "WebView: pass data_directory= or ephemeral=True, not both"
             )
+        if untrusted:
+            if app is not None:
+                raise ValueError("WebView: untrusted=True cannot be combined with app=")
+            if ipc_handler is not None:
+                raise ValueError(
+                    "WebView: untrusted=True cannot be combined with ipc_handler="
+                )
+            if data_directory is not None:
+                raise ValueError("WebView: untrusted=True cannot use data_directory=")
+            if session is not None and not session.ephemeral:
+                raise ValueError(
+                    "WebView: untrusted=True requires an ephemeral WebSession"
+                )
         owned_session: WebSession | None = None
-        if session is None and (data_directory is not None or ephemeral):
+        if untrusted and session is None:
+            owned_session = WebSession(ephemeral=True)
+            session = owned_session
+        elif session is None and (data_directory is not None or ephemeral):
             owned_session = WebSession(
                 data_directory=data_directory, ephemeral=ephemeral
             )
@@ -380,6 +416,9 @@ class WebView(WebViewRpcMixin):
             ipc_handler=ipc_handler,
             rpc_traceback=rpc_traceback,
         )
+        self._untrusted = untrusted
+        self._lock_app_navigation = False
+        self._bridge_origins: BridgeAllowlist = "*"
         self._spa_fallback = spa_fallback
         self._app_dev = app_dev
         self._on_navigation = on_navigation
@@ -441,6 +480,13 @@ class WebView(WebViewRpcMixin):
                 )
         self._pending_url = None if html is not None else url
         self._pending_html = html
+        self._lock_app_navigation = self._app_root is not None and not untrusted
+        self._bridge_origins = resolve_bridge_origins(
+            bridge_origins,
+            url=None if html is not None else url,
+            html=html,
+            app=self._app_root is not None and html is None,
+        )
         self._pending_load: _PendingLoad | None = None
         self._flush_load_scheduled = False
         self._post_nav_drain_scheduled = False
@@ -590,6 +636,32 @@ class WebView(WebViewRpcMixin):
         """``True`` after :meth:`destroy` or host-frame destruction."""
         self._require_tk_thread()
         return self._destroyed
+
+    @property
+    def untrusted(self) -> bool:
+        """``True`` when this WebView was created with ``untrusted=True``."""
+        self._require_tk_thread()
+        return self._untrusted
+
+    @property
+    def bridge_origins(self) -> BridgeAllowlist:
+        """Origins allowed to use IPC/RPC (``"*"`` means every page)."""
+        self._require_tk_thread()
+        return self._bridge_origins
+
+    def set_bridge_origins(self, origins: BridgeOrigins) -> None:
+        """Replace the IPC/RPC origin allowlist (``"*"`` or concrete origins)."""
+        self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
+        if self._untrusted:
+            raise ValueError("WebView: untrusted=True cannot change bridge_origins")
+        self._bridge_origins = resolve_bridge_origins(
+            origins,
+            url=None,
+            html=None,
+            app=False,
+        )
 
     def bind(
         self,
@@ -1257,11 +1329,11 @@ class WebView(WebViewRpcMixin):
             ) from self._creation_error
         self._on_navigation = handler
         if self._webview is not None:
-            if handler is not None:
+            if handler is not None or self._navigation_policy_active():
                 self._webview.set_on_navigation(self._native_navigation)
             else:
                 self._webview.clear_on_navigation()
-        if handler is not None:
+        if handler is not None or self._navigation_policy_active():
             self._ensure_tk_wakeup_pipe()
             self._ensure_event_poll()
 
@@ -1354,11 +1426,11 @@ class WebView(WebViewRpcMixin):
             ) from self._creation_error
         self._on_new_window = handler
         if self._webview is not None:
-            if handler is not None:
+            if handler is not None or self._new_window_policy_active():
                 self._webview.set_on_new_window(self._native_new_window)
             else:
                 self._webview.clear_on_new_window()
-        if handler is not None:
+        if handler is not None or self._new_window_policy_active():
             self._ensure_tk_wakeup_pipe()
             self._ensure_event_poll()
 
@@ -1627,11 +1699,22 @@ class WebView(WebViewRpcMixin):
                 self._ipc_listening_wanted(),
                 self._on_navigation is not None,
                 self._on_new_window is not None,
+                self._navigation_policy_active(),
+                self._new_window_policy_active(),
                 self._on_page_load is not None,
                 self._on_title_changed is not None,
                 self._drag_drop_handler is not None,
             )
         )
+
+    def _navigation_policy_active(self) -> bool:
+        return self._untrusted or self._lock_app_navigation
+
+    def _new_window_policy_active(self) -> bool:
+        return self._untrusted or self._lock_app_navigation
+
+    def _bridge_origin_allowed(self, source_url: str | None) -> bool:
+        return origin_allowed(source_url, self._bridge_origins)
 
     def _native_drag_drop(
         self, event: DragDropEvent, paths: list[str], position: tuple[int, int]
@@ -1646,8 +1729,12 @@ class WebView(WebViewRpcMixin):
         self._ensure_event_poll()
 
     def _invoke_navigation_handler(self, url: str) -> bool:
+        if self._untrusted and not untrusted_navigation_allowed(url):
+            return False
         handler = self._on_navigation
         if handler is None:
+            if self._lock_app_navigation:
+                return app_navigation_allowed(url)
             return True
         try:
             result = handler(url)
@@ -1663,7 +1750,7 @@ class WebView(WebViewRpcMixin):
         return result
 
     def _native_navigation(self, url: str) -> bool:
-        if self._on_navigation is None:
+        if self._on_navigation is None and not self._navigation_policy_active():
             return True
         return self._dispatch_sync_hook(
             lambda: self._invoke_navigation_handler(url),
@@ -1681,8 +1768,12 @@ class WebView(WebViewRpcMixin):
         self._ensure_event_poll()
 
     def _invoke_new_window_handler(self, url: str) -> NewWindowResponse:
+        if self._untrusted:
+            return NewWindowResponse.Deny
         handler = self._on_new_window
         if handler is None:
+            if self._lock_app_navigation:
+                return NewWindowResponse.Deny
             return NewWindowResponse.Allow
         try:
             result = handler(url)
@@ -1699,7 +1790,7 @@ class WebView(WebViewRpcMixin):
         return result
 
     def _native_new_window(self, url: str) -> NewWindowResponse:
-        if self._on_new_window is None:
+        if self._on_new_window is None and not self._new_window_policy_active():
             return NewWindowResponse.Allow
         return self._dispatch_sync_hook(
             lambda: self._invoke_new_window_handler(url),
@@ -1708,12 +1799,12 @@ class WebView(WebViewRpcMixin):
             detail=url,
         )
 
-    def _enqueue_ipc(self, message: str) -> None:
+    def _enqueue_ipc(self, message: str, source_url: str | None = None) -> None:
         native = self._webview
         if native is None or not self._ipc_listening_wanted():
             return
         native.set_ipc_listening(True)
-        native._enqueue_ipc_message(message)
+        native._enqueue_ipc_message(message, source_url)
         self._ensure_event_poll()
 
     def _sync_async_listening(self) -> None:
@@ -2191,14 +2282,16 @@ class WebView(WebViewRpcMixin):
                 kwargs["app_cache_control"] = "no-store"
         if self._session is not None:
             kwargs["session"] = self._session.native
-        if self._on_navigation is not None:
+        if self._on_navigation is not None or self._navigation_policy_active():
             kwargs["on_navigation"] = self._native_navigation
-        if self._on_new_window is not None:
+        if self._on_new_window is not None or self._new_window_policy_active():
             kwargs["on_new_window"] = self._native_new_window
         kwargs["page_load_listening"] = self._on_page_load is not None
         kwargs["ipc_listening"] = self._ipc_listening_wanted()
         kwargs["title_listening"] = self._on_title_changed is not None
         kwargs["drag_drop_listening"] = self._drag_drop_handler is not None
+        if self._untrusted:
+            kwargs["with_ipc"] = False
 
         if sys.platform == "linux":
             from tkwry._linux import pump_gtk_unless_active

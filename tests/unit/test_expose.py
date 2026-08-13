@@ -67,9 +67,14 @@ def test_rpc_delivered_from_dedicated_queue(tk_root) -> None:
     web.set_ipc_handler(ipc_seen.append)
     native = MagicMock()
     native.drain_rpc_messages.return_value = [
-        json.dumps({"__tkwry": "rpc", "id": "r1", "method": "add", "params": [2, 3]})
+        (
+            "about:blank",
+            json.dumps(
+                {"__tkwry": "rpc", "id": "r1", "method": "add", "params": [2, 3]}
+            ),
+        )
     ]
-    native.drain_ipc_messages.return_value = ["flood"]
+    native.drain_ipc_messages.return_value = [("about:blank", "flood")]
     web._webview = native
     web._deliver_ipc_messages()
 
@@ -101,7 +106,10 @@ def test_rpc_timeout_sets_cancel_flag(tk_root) -> None:
     web._cancel_deferred_callbacks()
     native = MagicMock()
     native.drain_rpc_messages.return_value = [
-        json.dumps({"__tkwry": "rpc", "id": "r1", "method": "slow", "params": []})
+        (
+            "about:blank",
+            json.dumps({"__tkwry": "rpc", "id": "r1", "method": "slow", "params": []}),
+        )
     ]
     native.drain_ipc_messages.return_value = []
     web._webview = native
@@ -137,7 +145,10 @@ def test_rpc_cancel_envelope_sets_flag_and_rejects(tk_root) -> None:
     web._cancel_deferred_callbacks()
     native = MagicMock()
     native.drain_rpc_messages.return_value = [
-        json.dumps({"__tkwry": "rpc", "id": "r9", "method": "slow", "params": []})
+        (
+            "about:blank",
+            json.dumps({"__tkwry": "rpc", "id": "r9", "method": "slow", "params": []}),
+        )
     ]
     native.drain_ipc_messages.return_value = []
     web._webview = native
@@ -145,7 +156,7 @@ def test_rpc_cancel_envelope_sets_flag_and_rejects(tk_root) -> None:
     assert started.wait(timeout=2.0)
 
     native.drain_rpc_messages.return_value = [
-        json.dumps({"__tkwry": "rpc", "id": "r9", "cancel": True})
+        ("about:blank", json.dumps({"__tkwry": "rpc", "id": "r9", "cancel": True}))
     ]
     web._deliver_ipc_messages()
     deadline = time.monotonic() + 2.5

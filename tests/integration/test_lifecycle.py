@@ -365,7 +365,7 @@ def test_drain_async_events_does_not_invoke_native_callbacks(tk_root) -> None:
     # Enqueue via native API (no Python handlers) so drain_* cannot double-dispatch.
     native._enqueue_ipc_message("ipc")
     native._enqueue_title_event("t")
-    assert native.drain_ipc_messages() == ["ipc"]
+    assert native.drain_ipc_messages() == [("", "ipc")]
     assert native.drain_title_events() == ["t"]
     # drain_* is queue-only; a second drain must be empty (no hidden re-delivery).
     assert native.drain_ipc_messages() == []

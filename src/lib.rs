@@ -574,7 +574,8 @@ enum DragDropEvent {
 
 type PyCallback = Arc<Mutex<Option<Py<PyAny>>>>;
 type PageLoadPending = Arc<Mutex<VecDeque<(PageLoadEvent, String)>>>;
-type IpcPending = Arc<Mutex<VecDeque<String>>>;
+type IpcEnvelope = (String, String); // (source_url, body)
+type IpcPending = Arc<Mutex<VecDeque<IpcEnvelope>>>;
 type TitlePending = Arc<Mutex<VecDeque<String>>>;
 type DragDropPendingItem = (DragDropEvent, Vec<String>, (i32, i32));
 type DragDropPending = Arc<Mutex<VecDeque<DragDropPendingItem>>>;
@@ -594,7 +595,7 @@ fn try_compact_title_queue(queue: &mut VecDeque<String>) -> bool {
     false
 }
 
-fn try_compact_ipc_queue(queue: &mut VecDeque<String>) -> bool {
+fn try_compact_ipc_queue(queue: &mut VecDeque<IpcEnvelope>) -> bool {
     for index in 0..queue.len().saturating_sub(1) {
         if queue[index] == queue[index + 1] {
             queue.remove(index);
@@ -602,6 +603,18 @@ fn try_compact_ipc_queue(queue: &mut VecDeque<String>) -> bool {
         }
     }
     false
+}
+
+/// Schemes that must never navigate, even without a Python ``on_navigation``.
+fn is_dangerous_nav_url(url: &str) -> bool {
+    let trimmed = url.trim();
+    let Some((scheme, _)) = trimmed.split_once(':') else {
+        return false;
+    };
+    matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "javascript" | "data" | "vbscript" | "blob" | "mailto"
+    )
 }
 
 /// True when *body* looks like a tkwry RPC envelope (``{"__tkwry":"rpc",...}``).
@@ -695,6 +708,7 @@ fn enqueue_window_ipc_body(
     rpc_pending: &IpcPending,
     rpc_dropped: &AtomicU64,
     body: String,
+    source_url: String,
     wakeup: Option<&Arc<AtomicI32>>,
 ) -> Result<(), ()> {
     let rpc = is_rpc_envelope(&body);
@@ -721,6 +735,7 @@ fn enqueue_window_ipc_body(
                     rpc_pending,
                     rpc_dropped,
                     envelope,
+                    source_url,
                     wakeup,
                 );
             }
@@ -741,6 +756,7 @@ fn enqueue_window_ipc_body(
         rpc_pending,
         rpc_dropped,
         body,
+        source_url,
         wakeup,
     )
 }
@@ -753,25 +769,27 @@ fn push_window_ipc_body(
     rpc_pending: &IpcPending,
     rpc_dropped: &AtomicU64,
     body: String,
+    source_url: String,
     wakeup: Option<&Arc<AtomicI32>>,
 ) -> Result<(), ()> {
-    if is_rpc_envelope(&body) {
+    let envelope = (source_url, body);
+    if is_rpc_envelope(&envelope.1) {
         push_if_listening(
             listening,
             rpc_pending,
             rpc_dropped,
-            body,
+            envelope,
             MAX_RPC_PENDING,
             "RPC",
             wakeup,
-            |_: &mut VecDeque<String>| false,
+            |_: &mut VecDeque<IpcEnvelope>| false,
         )
     } else {
         push_if_listening(
             listening,
             ipc_pending,
             ipc_dropped,
-            body,
+            envelope,
             MAX_IPC_PENDING,
             "IPC",
             wakeup,
@@ -1063,6 +1081,7 @@ impl WebView {
         ipc_listening = false,
         title_listening = false,
         drag_drop_listening = false,
+        with_ipc = true,
         session = None,
     ))]
     #[allow(clippy::too_many_arguments)]
@@ -1088,6 +1107,7 @@ impl WebView {
         ipc_listening: bool,
         title_listening: bool,
         drag_drop_listening: bool,
+        with_ipc: bool,
         session: Option<Bound<'_, session::WebSession>>,
     ) -> PyResult<Self> {
         let owner_thread = match owner_thread {
@@ -1160,30 +1180,14 @@ impl WebView {
         let newwin_sync_pending: NewWinSyncPending = Arc::new(Mutex::new(Vec::new()));
         let wakeup_write_fd = Arc::new(AtomicI32::new(-1));
 
-        let ipc_pending_clone = ipc_pending.clone();
-        let rpc_pending_clone = rpc_pending.clone();
-        let ipc_listening_clone = ipc_listening.clone();
-        let ipc_overflow_clone = ipc_overflow_dropped.clone();
-        let rpc_overflow_clone = rpc_overflow_dropped.clone();
-        let wakeup_for_ipc = wakeup_write_fd.clone();
-        let ipc_handler_wry = move |req: wry::http::Request<String>| {
-            let body = req.body().clone();
-            let _ = enqueue_window_ipc_body(
-                &ipc_listening_clone,
-                &ipc_pending_clone,
-                &ipc_overflow_clone,
-                &rpc_pending_clone,
-                &rpc_overflow_clone,
-                body,
-                Some(&wakeup_for_ipc),
-            );
-        };
-
         let nav_cb_clone = nav_cb.clone();
         let nav_sync_pending_clone = nav_sync_pending.clone();
         let wakeup_fd_clone = wakeup_write_fd.clone();
         let owner_thread_for_nav = owner_thread;
         let nav_handler = move |url: String| -> bool {
+            if is_dangerous_nav_url(&url) {
+                return false;
+            }
             let slot = Arc::new(SyncHookSlot::new());
             if !enqueue_nav_sync_hook(&nav_sync_pending_clone, url, slot.clone()) {
                 return false;
@@ -1356,12 +1360,33 @@ WebViews that share a session must use the same app= root \
             .with_visible(visible)
             .with_devtools(devtools)
             .with_focused(focused)
-            .with_ipc_handler(ipc_handler_wry)
             .with_navigation_handler(nav_handler)
             .with_on_page_load_handler(pageload_handler)
             .with_document_title_changed_handler(title_handler)
             .with_new_window_req_handler(newwin_handler)
             .with_drag_drop_handler(drag_drop_handler);
+        if with_ipc {
+            let ipc_pending_for_handler = ipc_pending.clone();
+            let rpc_pending_for_handler = rpc_pending.clone();
+            let ipc_listening_for_handler = ipc_listening.clone();
+            let ipc_overflow_for_handler = ipc_overflow_dropped.clone();
+            let rpc_overflow_for_handler = rpc_overflow_dropped.clone();
+            let wakeup_for_handler = wakeup_write_fd.clone();
+            builder = builder.with_ipc_handler(move |req: wry::http::Request<String>| {
+                let source_url = req.uri().to_string();
+                let body = req.body().clone();
+                let _ = enqueue_window_ipc_body(
+                    &ipc_listening_for_handler,
+                    &ipc_pending_for_handler,
+                    &ipc_overflow_for_handler,
+                    &rpc_pending_for_handler,
+                    &rpc_overflow_for_handler,
+                    body,
+                    source_url,
+                    Some(&wakeup_for_handler),
+                );
+            });
+        }
 
         if ephemeral {
             // Private browsing. On Linux this uses a per-view ephemeral
@@ -1623,12 +1648,12 @@ WebViews that share a session must use the same app= root \
         drain_queue(&self.page_load_pending)
     }
 
-    fn drain_ipc_messages(&self) -> PyResult<Vec<String>> {
+    fn drain_ipc_messages(&self) -> PyResult<Vec<(String, String)>> {
         self.require_owner_thread()?;
         drain_queue(&self.ipc_pending)
     }
 
-    fn drain_rpc_messages(&self) -> PyResult<Vec<String>> {
+    fn drain_rpc_messages(&self) -> PyResult<Vec<(String, String)>> {
         self.require_owner_thread()?;
         drain_queue(&self.rpc_pending)
     }
@@ -1643,8 +1668,10 @@ WebViews that share a session must use the same app= root \
         drain_queue(&self.drag_drop_pending)
     }
 
-    fn _enqueue_ipc_message(&self, message: String) -> PyResult<()> {
+    #[pyo3(signature = (message, source_url=None))]
+    fn _enqueue_ipc_message(&self, message: String, source_url: Option<String>) -> PyResult<()> {
         self.require_owner_thread()?;
+        let source_url = source_url.unwrap_or_default();
         if is_rpc_envelope(&message) && message.len() > MAX_RPC_MESSAGE_BYTES {
             if let Some(id) = extract_rpc_request_id(&message) {
                 let envelope = rpc_reject_envelope(
@@ -1663,6 +1690,7 @@ WebViews that share a session must use the same app= root \
                     &self.rpc_pending,
                     &self.rpc_overflow_dropped,
                     envelope,
+                    source_url,
                     None,
                 )
                 .map_err(|()| queue_lock_poisoned());
@@ -1685,6 +1713,7 @@ WebViews that share a session must use the same app= root \
             &self.rpc_pending,
             &self.rpc_overflow_dropped,
             message,
+            source_url,
             None,
         )
         .map_err(|()| queue_lock_poisoned())
@@ -2196,15 +2225,17 @@ mod tests {
             &rpc_pending,
             &rpc_dropped,
             body,
+            "https://example.com/".into(),
             None,
         )
         .is_ok());
         assert_eq!(rpc_dropped.load(Ordering::SeqCst), 0);
         let queued = rpc_pending.lock().unwrap();
         assert_eq!(queued.len(), 1);
-        assert!(queued[0].contains("RpcMessageTooLarge"));
-        assert!(queued[0].contains(r#""id":"r9""#));
-        assert!(queued[0].len() < 4096);
+        assert_eq!(queued[0].0, "https://example.com/");
+        assert!(queued[0].1.contains("RpcMessageTooLarge"));
+        assert!(queued[0].1.contains(r#""id":"r9""#));
+        assert!(queued[0].1.len() < 4096);
     }
 
     #[test]
@@ -2222,6 +2253,7 @@ mod tests {
                 &rpc_pending,
                 &rpc_dropped,
                 format!("ipc-{i}"),
+                String::new(),
                 None,
             )
             .is_ok());
@@ -2233,6 +2265,7 @@ mod tests {
             &rpc_pending,
             &rpc_dropped,
             "ipc-overflow".into(),
+            String::new(),
             None,
         )
         .is_ok());
@@ -2247,12 +2280,29 @@ mod tests {
             &rpc_pending,
             &rpc_dropped,
             rpc_msg.into(),
+            "tkwry://localhost/".into(),
             None,
         )
         .is_ok());
         assert_eq!(rpc_dropped.load(Ordering::SeqCst), 0);
         assert_eq!(rpc_pending.lock().unwrap().len(), 1);
-        assert_eq!(rpc_pending.lock().unwrap()[0], rpc_msg);
+        assert_eq!(
+            rpc_pending.lock().unwrap()[0],
+            ("tkwry://localhost/".into(), rpc_msg.into())
+        );
+    }
+
+    #[test]
+    fn dangerous_nav_schemes_are_rejected() {
+        assert!(is_dangerous_nav_url("javascript:alert(1)"));
+        assert!(is_dangerous_nav_url("DATA:text/html,hi"));
+        assert!(is_dangerous_nav_url("vbscript:msgbox(1)"));
+        assert!(is_dangerous_nav_url("blob:https://example.com/uuid"));
+        assert!(is_dangerous_nav_url("mailto:user@example.com"));
+        assert!(!is_dangerous_nav_url("https://example.com/"));
+        assert!(!is_dangerous_nav_url("tkwry://localhost/index.html"));
+        assert!(!is_dangerous_nav_url("file:///tmp/index.html"));
+        assert!(!is_dangerous_nav_url("about:blank"));
     }
 
     #[test]

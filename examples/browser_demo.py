@@ -4,6 +4,10 @@ Link context menu is a Tk "Open in New Tab" menu (the native WebKit
 "Open in New Window" item is suppressed). ``target=_blank``, Cmd/Ctrl-click,
 middle-click, and ``window.open`` also open a tab. Creating another WebView
 from ``on_new_window`` deadlocks WKWebView, so that hook only denies.
+
+IPC is only used to intercept links (no privileged Python APIs). Arbitrary
+https pages need ``bridge_origins="*"``; do not copy that into apps that
+``expose()`` desktop capabilities.
 """
 
 from __future__ import annotations
@@ -228,6 +232,7 @@ def main() -> None:
             url=url,
             session=session,
             focused=False,
+            bridge_origins="*",
             ipc_handler=on_ipc,
             initialization_script=LINK_HELPER_JS,
             on_title_changed=on_title,

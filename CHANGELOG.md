@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Trust boundaries: ``untrusted=True`` viewer mode (no IPC/RPC, ephemeral
+  session, http(s) only); ``bridge_origins`` allowlist (default infers the
+  initial content origin; ``"*"`` allows every page); ``app=`` locks in-page
+  navigation to ``tkwry://`` and denies new windows unless ``on_navigation`` /
+  ``on_new_window`` is set
+- IPC/RPC carry the page URL; foreign origins drop IPC and reject RPC with
+  ``RpcOriginError``; ``tkwry://`` requests with a non-app ``Origin``/``Referer``
+  return 403; native navigation denies ``javascript:`` / ``data:`` / ``blob:`` /
+  ``vbscript:`` / ``mailto:``
 - RPC protocol ``version: 1`` (unknown versions → ``RpcProtocolError``);
   ``window.tkwry.cancel(id)`` / ``promise.cancel()`` → ``RpcCancelledError``
 - Typed RPC bind: arity / simple annotation mismatch rejects as ``TypeError``
@@ -33,6 +42,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- README warns against enabling RPC/IPC on untrusted pages and against sharing
+  a persistent ``WebSession`` with external sites; ``examples/browser_demo.py``
+  sets ``bridge_origins="*"`` explicitly (link interception only)
 - Documented that ``expose(timeout=…)`` does not preempt worker threads and
   is ignored for synchronous ``run_in="main"`` handlers
 - ``watch_app()`` no longer follows directory or file symlinks when scanning

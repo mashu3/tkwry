@@ -22,6 +22,8 @@ WEBVIEW_INIT_KWONLY = (
     "session",
     "data_directory",
     "ephemeral",
+    "untrusted",
+    "bridge_origins",
     "ipc_handler",
     "spa_fallback",
     "app_dev",
@@ -59,6 +61,7 @@ NATIVE_WEBVIEW_KWONLY = (
     "ipc_listening",
     "title_listening",
     "drag_drop_listening",
+    "with_ipc",
     "session",
 )
 

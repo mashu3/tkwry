@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use wry::http::{
     header::{
         ACCEPT, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, IF_NONE_MATCH,
-        RANGE,
+        ORIGIN, RANGE, REFERER,
     },
     HeaderValue, Method, Request, Response, StatusCode,
 };
@@ -450,6 +450,36 @@ fn spa_fallback_allowed(request: &Request<Vec<u8>>, options: &AppServeOptions) -
     options.spa_fallback && !looks_like_static_asset(request.uri().path()) && accepts_html(request)
 }
 
+fn is_tkwry_origin(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "tkwry://localhost" | "tkwry://app" | "https://tkwry.localhost"
+    )
+}
+
+fn is_tkwry_referer(value: &str) -> bool {
+    let lower = value.trim().to_ascii_lowercase();
+    lower.starts_with("tkwry://localhost")
+        || lower == "tkwry://app"
+        || lower.starts_with("tkwry://app/")
+        || lower.starts_with("tkwry://app?")
+        || lower.starts_with("https://tkwry.localhost")
+}
+
+/// True when a custom-protocol request clearly comes from another origin.
+///
+/// Missing Origin/Referer is allowed (top-level navigation often has neither).
+/// Cross-origin ``fetch`` / ``<script src>`` typically send Origin or Referer.
+fn cross_origin_app_request(request: &Request<Vec<u8>>) -> bool {
+    if let Some(origin) = header_str(request, ORIGIN) {
+        return !is_tkwry_origin(origin);
+    }
+    if let Some(referer) = header_str(request, REFERER) {
+        return !is_tkwry_referer(referer);
+    }
+    false
+}
+
 /// Serve a file from ``root`` for a ``tkwry://`` request.
 pub(crate) fn serve_app_request(
     root: &Path,
@@ -458,6 +488,9 @@ pub(crate) fn serve_app_request(
 ) -> Response<Cow<'static, [u8]>> {
     if !matches!(*request.method(), Method::GET | Method::HEAD) {
         return error_response(StatusCode::METHOD_NOT_ALLOWED, "method not allowed");
+    }
+    if cross_origin_app_request(&request) {
+        return error_response(StatusCode::FORBIDDEN, "cross-origin tkwry:// request");
     }
     let path = request.uri().path();
     let Some(file_path) = safe_join(root, path) else {
@@ -796,6 +829,63 @@ mod tests {
             partial.headers().get(CONTENT_RANGE).unwrap(),
             "bytes 2-5/10"
         );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn serve_rejects_cross_origin_app_request() {
+        let tmp = make_temp_dir("cors-origin");
+        let root = tmp.join("app");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("index.html"), b"<p>ok</p>").unwrap();
+        let options = AppServeOptions::default();
+
+        let foreign = serve_app_request(
+            &root,
+            request_with(
+                Method::GET,
+                "/index.html",
+                &[("origin", "https://evil.example")],
+            ),
+            &options,
+        );
+        assert_eq!(foreign.status(), StatusCode::FORBIDDEN);
+
+        let referer = serve_app_request(
+            &root,
+            request_with(
+                Method::GET,
+                "/index.html",
+                &[("referer", "https://evil.example/page")],
+            ),
+            &options,
+        );
+        assert_eq!(referer.status(), StatusCode::FORBIDDEN);
+
+        let same = serve_app_request(
+            &root,
+            request_with(
+                Method::GET,
+                "/index.html",
+                &[("origin", "tkwry://localhost")],
+            ),
+            &options,
+        );
+        assert_eq!(same.status(), StatusCode::OK);
+
+        let windows_origin = serve_app_request(
+            &root,
+            request_with(
+                Method::GET,
+                "/index.html",
+                &[("origin", "https://tkwry.localhost")],
+            ),
+            &options,
+        );
+        assert_eq!(windows_origin.status(), StatusCode::OK);
+
+        let top_level = serve_app_request(&root, dummy_request("/index.html"), &options);
+        assert_eq!(top_level.status(), StatusCode::OK);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

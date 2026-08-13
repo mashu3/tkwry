@@ -189,8 +189,8 @@ On top, expose callables and await them from JS:
 web = WebView(frame, html=HTML)
 
 @web.expose
-def read_file(path: str) -> str:
-    return Path(path).read_text(encoding="utf-8")
+def greet(name: str) -> str:
+    return f"hello {name}"
 
 # Heavy I/O / CPU — run off the Tk thread so the UI stays responsive
 @web.expose(thread=True, timeout=30.0)
@@ -204,7 +204,7 @@ def heavy_task(data: dict) -> dict:
 ```
 
 ```js
-const text = await window.tkwry.call("read_file", path);
+const text = await window.tkwry.call("greet", "Ada");
 // optional JS-side timeout (ms) and Python kwargs:
 await window.tkwry.call("heavy_task", payload, {
   timeout: 5000,
@@ -245,6 +245,41 @@ Envelopes include ``version: 1``; unknown versions reject with
 positional args and **256** kwargs. Oversized RPC rejects with
 ``RpcMessageTooLarge``; too many args with ``RpcArgumentLimitError``. RPC has
 its own 2048-deep queue so IPC overflow cannot drop ``tkwry.call``.
+
+### Trust boundaries (external pages)
+
+``window.ipc`` / ``window.tkwry.call`` run with **desktop-app privileges**. A
+page that can call them can drive whatever you ``expose`` or handle over IPC —
+including after a redirect or XSS in a third-party script.
+
+Defaults:
+
+- **Bridge origins** — IPC/RPC are accepted only from the initial content
+  origin (``html=`` → ``about:blank``; ``app=`` → ``tkwry://`` /
+  ``https://tkwry.localhost``; ``url=`` → that site). Foreign pages still see
+  ``window.ipc`` (engine injection) but messages are dropped / RPC rejects with
+  ``RpcOriginError``. Use ``bridge_origins=["https://trusted.example"]`` or
+  ``bridge_origins="*"`` (every page; dangerous with ``expose``).
+- **``app=`` navigation** — in-page navigation stays on ``tkwry://``; new
+  windows are denied. Set ``on_navigation`` / ``on_new_window`` to opt into
+  external URLs (open them in another WebView or the system browser).
+- **``untrusted=True``** — viewer mode: no IPC handler, no ``expose`` /
+  ``emit``, ephemeral session, http(s) only, no ``tkwry://`` / ``file:``, new
+  windows denied. Use this for arbitrary websites.
+- **Dangerous schemes** — ``javascript:`` / ``data:`` / ``blob:`` /
+  ``vbscript:`` / ``mailto:`` are denied at the native navigation hook even
+  without Python ``on_navigation``.
+- **``tkwry://``** — custom-protocol requests with a non-app ``Origin`` or
+  ``Referer`` return 403 (top-level loads with no Origin still work).
+
+Do **not** enable RPC/IPC on a WebView that shows untrusted sites. Do **not**
+share a persistent ``WebSession`` / ``data_directory`` between a local app and
+an external site. Prefer vendored JS (``app=``) over CDN scripts in pages that
+have a bridge — XSS in a CDN script is the page origin.
+
+[`examples/browser_demo.py`](examples/browser_demo.py) sets
+``bridge_origins="*"`` on purpose (link interception only). Copy that only if
+every page is trusted.
 
 ### Python → JS events (``emit``)
 
@@ -380,7 +415,7 @@ web.destroy()   # release native webview; host Frame is kept
 |----------|---------|
 | Content | `load_url`, `load_html`, `reload`, `url` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback` |
-| IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose`, `emit`, `watch_app` |
+| IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose`, `emit`, `watch_app`, `set_bridge_origins` |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler` |
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
@@ -389,15 +424,15 @@ web.destroy()   # release native webview; host Frame is kept
 | Diagnostics | `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
-`app_dev`, `session` / `data_directory` / `ephemeral`, `ipc_handler`,
-`rpc_traceback`, `devtools`, `background_color`, `user_agent`,
-`initialization_script`, `focused`, plus the callback hooks above.
+`app_dev`, `session` / `data_directory` / `ephemeral`, `untrusted`,
+`bridge_origins`, `ipc_handler`, `rpc_traceback`, `devtools`, `background_color`,
+`user_agent`, `initialization_script`, `focused`, plus the callback hooks above.
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`, `WebViewPhase`.
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
 `RpcTimeoutError`, `RpcSerializationError`. Helpers: `rpc_cancelled`, `rpc_cancel_event`.
 
-Type aliases: `IpcHandler`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`.
+Type aliases: `IpcHandler`, `BridgeOrigins`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`.
 
 ---
 
@@ -410,7 +445,8 @@ Short checklist — **details live in [Platform notes](#-platform-notes)** (espe
 - **Windows DevTools** — wry/WebView2 reports `is_devtools_open()` as `False` and `close_devtools()` is a no-op; `open_devtools()` still opens the inspector
 - **Linux** — no PyPI wheel (by design); best-effort source install
 - **Linux concurrent `eval_js_with_callback`** — evaluating on multiple WebViews at once can stall WebKitGTK; prefer sequential evals (see [Linux](#linux))
-- **Shared `WebSession` + `app=`** — WebViews that share a non-ephemeral session must use the same `app=` root (`ValueError` otherwise; Linux can register `tkwry://` only once per context)
+- **Shared `WebSession` + `app=`** — WebViews that share a non-ephemeral session must use the same `app=` root (`ValueError` otherwise; Linux can register `tkwry://` only once per context); do not share a persistent profile with untrusted sites
+- **Trust / external content** — RPC/IPC default to the initial origin; `app=` locks navigation to `tkwry://`; use `untrusted=True` for arbitrary websites (see [Trust boundaries](#trust-boundaries-external-pages))
 - **macOS DevTools** — create with `devtools=True`, then `open_devtools()` (flag alone does not open; `open_devtools()` without the flag is a no-op on macOS); uses private APIs — avoid in Mac App Store builds
 - **macOS IME / focus** — not Safari-parity; mid-composition focus flips can mis-route input
 - **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
@@ -472,13 +508,13 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 ## 🧩 Features
 
 - **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, ETag/HEAD/Range, bounded `watch_app()`; symlink/junction confinement)
-- **IPC / RPC / emit** — events vs request/response; worker RPC; typed TypeError; protocol `version`; JS `cancel`; Python→JS `emit`
+- **IPC / RPC / emit** — events vs request/response; worker RPC; typed TypeError; protocol `version`; JS `cancel`; Python→JS `emit`; origin allowlist (`bridge_origins`) + `untrusted=` viewer mode
 - **WebSession** — shared wry `WebContext`; shared `app=` roots must match
 - **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
 - **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` hide unmapped views)
 - **Deferred callbacks** — IPC, RPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
-- **URL safety** — normalizes and validates URLs before navigation
+- **URL safety** — Python `load_url` normalizes/validates schemes; in-page nav denies `javascript:`/`data:`/…; `app=` stays on `tkwry://`; IPC/RPC origin allowlist
 - **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()` (macOS: private APIs)
 - **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)
 - **Navigation hooks** — all handlers on the Tk thread; `on_navigation` / `on_new_window` block WebKit until they return

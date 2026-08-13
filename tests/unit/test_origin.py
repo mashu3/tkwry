@@ -1,0 +1,76 @@
+"""Origin allowlists and navigation policy helpers."""
+
+from __future__ import annotations
+
+import pytest
+
+from tkwry._origin import (
+    APP_ORIGINS,
+    INLINE_ORIGINS,
+    app_navigation_allowed,
+    origin_allowed,
+    origin_of,
+    resolve_bridge_origins,
+    untrusted_navigation_allowed,
+)
+
+
+def test_origin_of_common_forms() -> None:
+    assert origin_of(None) == "null"
+    assert origin_of("") == "null"
+    assert origin_of("about:blank") == "about:blank"
+    assert origin_of("https://Example.com:443/path") == "https://example.com"
+    assert origin_of("http://localhost:8080/x") == "http://localhost:8080"
+    assert origin_of("tkwry://localhost/index.html") == "tkwry://localhost"
+    assert origin_of("https://tkwry.localhost/app.js") == "https://tkwry.localhost"
+    assert origin_of("file:///tmp/index.html") == "file://"
+    assert origin_of("data:text/html,hi") == "null"
+
+
+def test_resolve_bridge_origins_infers_from_content() -> None:
+    assert resolve_bridge_origins(None, url=None, html="<p>x</p>", app=False) == (
+        INLINE_ORIGINS
+    )
+    assert resolve_bridge_origins(None, url=None, html=None, app=True) == APP_ORIGINS
+    assert resolve_bridge_origins(
+        None, url="https://example.com/app", html=None, app=False
+    ) == frozenset({"https://example.com"})
+    assert (
+        resolve_bridge_origins("*", url="https://example.com/", html=None, app=False)
+        == "*"
+    )
+    assert resolve_bridge_origins(
+        ["https://trusted.example/path"],
+        url=None,
+        html=None,
+        app=False,
+    ) == frozenset({"https://trusted.example"})
+
+
+def test_resolve_bridge_origins_rejects_bare_string() -> None:
+    with pytest.raises(TypeError, match="sequence"):
+        resolve_bridge_origins("https://example.com", url=None, html=None, app=False)
+
+
+def test_origin_allowed_star_and_blank() -> None:
+    assert origin_allowed("https://evil.example/", "*")
+    assert origin_allowed("about:blank", INLINE_ORIGINS)
+    assert origin_allowed("", INLINE_ORIGINS)
+    assert not origin_allowed("https://evil.example/", INLINE_ORIGINS)
+    assert not origin_allowed("https://evil.example/", APP_ORIGINS)
+
+
+def test_app_and_untrusted_navigation_policy() -> None:
+    assert app_navigation_allowed("tkwry://localhost/index.html")
+    assert app_navigation_allowed("https://tkwry.localhost/x")
+    assert app_navigation_allowed("about:blank")
+    assert not app_navigation_allowed("https://example.com/")
+    assert not app_navigation_allowed("file:///tmp/x")
+
+    assert untrusted_navigation_allowed("https://example.com/")
+    assert untrusted_navigation_allowed("http://localhost:8080/")
+    assert untrusted_navigation_allowed("about:blank")
+    assert not untrusted_navigation_allowed("tkwry://localhost/")
+    assert not untrusted_navigation_allowed("https://tkwry.localhost/")
+    assert not untrusted_navigation_allowed("file:///tmp/x")
+    assert not untrusted_navigation_allowed("javascript:alert(1)")
