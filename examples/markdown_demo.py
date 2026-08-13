@@ -2222,6 +2222,9 @@ class MarkdownEditorDemo:
             preview_frame,
             html=HtmlPages.preview(),
             on_page_load=self._on_preview_page_load,
+            on_creation_failed=lambda exc: messagebox.showerror(
+                "WebView failed", str(exc), parent=self.root
+            ),
         )
 
         initial_tabs = [{"title": "readme.md", "content": SAMPLE_MARKDOWN}]
@@ -2229,6 +2232,9 @@ class MarkdownEditorDemo:
             editor_frame,
             html=HtmlPages.editor(initial_tabs),
             ipc_handler=self._on_editor_ipc,
+            on_creation_failed=lambda exc: messagebox.showerror(
+                "WebView failed", str(exc), parent=self.root
+            ),
         )
 
     def _new_tab(self) -> None:

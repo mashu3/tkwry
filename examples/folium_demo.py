@@ -7,7 +7,7 @@ Requires network access: Folium/Leaflet fetch map tiles from remote servers
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 import folium
 from folium import Element
@@ -108,7 +108,13 @@ def main() -> None:
     web_frame = tk.Frame(root, bg="#1a1a1a")
     web_frame.pack(side="right", fill="both", expand=True, padx=(0, 8), pady=8)
 
-    web = WebView(web_frame, html="<p>Loading map…</p>")
+    web = WebView(
+        web_frame,
+        html="<p>Loading map…</p>",
+        on_creation_failed=lambda exc: messagebox.showerror(
+            "WebView failed", str(exc), parent=root
+        ),
+    )
 
     def push_map() -> None:
         html = build_map_html(city_var.get(), zoom_var.get())

@@ -1,4 +1,8 @@
-"""Demo: multiple WebViews with pack, grid, place, and PanedWindow layouts."""
+"""Demo: multiple WebViews with pack, grid, place, and PanedWindow layouts.
+
+Panes share a ``WebSession`` so ``emit_all("flash")`` highlights every live
+view (including panes on other Notebook tabs that are already ready).
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,7 @@ import tkinter as tk
 from collections.abc import Callable
 from tkinter import ttk
 
-from tkwry import WebView
+from tkwry import WebSession, WebView
 
 # Distinct pane colours so mis-aligned embeds are obvious at a glance.
 PANES = (
@@ -35,6 +39,7 @@ def pane_html(title: str, accent: str, tag: str, layout: str) -> str:
       place-items: center;
       text-align: center;
     }}
+    body.flash {{ outline: 6px solid #fbbf24; outline-offset: -6px; }}
     .badge {{
       display: inline-block;
       font-size: 3rem;
@@ -57,6 +62,18 @@ def pane_html(title: str, accent: str, tag: str, layout: str) -> str:
     <h1>{title}</h1>
     <p>layout: <code>{layout}</code></p>
   </div>
+  <script>
+    function boot() {{
+      if (!window.tkwry || !window.tkwry.on || window._tkwryBooted) return;
+      window._tkwryBooted = true;
+      window.tkwry.on("flash", function () {{
+        document.body.classList.add("flash");
+        setTimeout(function () {{ document.body.classList.remove("flash"); }}, 400);
+      }});
+    }}
+    boot();
+    setInterval(boot, 100);
+  </script>
 </body>
 </html>
 """
@@ -68,6 +85,7 @@ def make_pane(
     accent: str,
     tag: str,
     layout: str,
+    session: WebSession,
 ) -> tuple[ttk.Frame, WebView]:
     """Return a labelled container and its WebView."""
     container = ttk.Frame(parent, padding=4)
@@ -81,29 +99,37 @@ def make_pane(
         highlightbackground="#404040",
     )
     frame.pack(fill="both", expand=True)
-    web = WebView(frame, html=pane_html(title, accent, tag, layout))
+    web = WebView(
+        frame,
+        html=pane_html(title, accent, tag, layout),
+        session=session,
+    )
     return container, web
 
 
-def build_pack_horizontal(parent: ttk.Frame, webs: list[WebView]) -> None:
+def build_pack_horizontal(
+    parent: ttk.Frame, webs: list[WebView], session: WebSession
+) -> None:
     row = ttk.Frame(parent)
     row.pack(fill="both", expand=True, padx=4, pady=4)
     for title, accent, tag in PANES[:2]:
-        container, web = make_pane(row, title, accent, tag, "pack (side=left)")
+        container, web = make_pane(row, title, accent, tag, "pack (side=left)", session)
         container.pack(side="left", fill="both", expand=True, padx=4)
         webs.append(web)
 
 
-def build_pack_vertical(parent: ttk.Frame, webs: list[WebView]) -> None:
+def build_pack_vertical(
+    parent: ttk.Frame, webs: list[WebView], session: WebSession
+) -> None:
     col = ttk.Frame(parent)
     col.pack(fill="both", expand=True, padx=4, pady=4)
     for title, accent, tag in PANES[:2]:
-        container, web = make_pane(col, title, accent, tag, "pack (side=top)")
+        container, web = make_pane(col, title, accent, tag, "pack (side=top)", session)
         container.pack(side="top", fill="both", expand=True, pady=4)
         webs.append(web)
 
 
-def build_grid(parent: ttk.Frame, webs: list[WebView]) -> None:
+def build_grid(parent: ttk.Frame, webs: list[WebView], session: WebSession) -> None:
     grid = ttk.Frame(parent)
     grid.pack(fill="both", expand=True, padx=4, pady=4)
     for row in range(2):
@@ -113,13 +139,18 @@ def build_grid(parent: ttk.Frame, webs: list[WebView]) -> None:
 
     for index, (title, accent, tag) in enumerate(PANES):
         container, web = make_pane(
-            grid, title, accent, tag, f"grid (row={index // 2}, col={index % 2})"
+            grid,
+            title,
+            accent,
+            tag,
+            f"grid (row={index // 2}, col={index % 2})",
+            session,
         )
         container.grid(row=index // 2, column=index % 2, sticky="nsew", padx=4, pady=4)
         webs.append(web)
 
 
-def build_place(parent: ttk.Frame, webs: list[WebView]) -> None:
+def build_place(parent: ttk.Frame, webs: list[WebView], session: WebSession) -> None:
     ttk.Label(
         parent,
         text="place: top-left 48% + bottom-right 48% (overlap gap intentional)",
@@ -134,12 +165,12 @@ def build_place(parent: ttk.Frame, webs: list[WebView]) -> None:
         (PANES[1], "place (relx=0.52, rely=0.52, 48%)", 0.52, 0.52),
     )
     for (title, accent, tag), layout, rx, ry in specs:
-        container, web = make_pane(canvas, title, accent, tag, layout)
+        container, web = make_pane(canvas, title, accent, tag, layout, session)
         container.place(relx=rx, rely=ry, relwidth=0.48, relheight=0.48)
         webs.append(web)
 
 
-def build_nested(parent: ttk.Frame, webs: list[WebView]) -> None:
+def build_nested(parent: ttk.Frame, webs: list[WebView], session: WebSession) -> None:
     """Toolbar (pack) + 2-column body (grid) — typical app shell."""
     ttk.Label(
         parent,
@@ -165,7 +196,7 @@ def build_nested(parent: ttk.Frame, webs: list[WebView]) -> None:
     sidebar = ttk.Frame(body, padding=4)
     sidebar.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
     sidebar_container, sidebar_web = make_pane(
-        sidebar, "Sidebar", PANES[2][1], PANES[2][2], "grid sidebar (weight=1)"
+        sidebar, "Sidebar", PANES[2][1], PANES[2][2], "grid sidebar (weight=1)", session
     )
     sidebar_container.pack(fill="both", expand=True)
     webs.append(sidebar_web)
@@ -173,13 +204,13 @@ def build_nested(parent: ttk.Frame, webs: list[WebView]) -> None:
     main = ttk.Frame(body, padding=4)
     main.grid(row=0, column=1, sticky="nsew")
     main_container, main_web = make_pane(
-        main, "Main", PANES[0][1], PANES[0][2], "grid main (weight=2)"
+        main, "Main", PANES[0][1], PANES[0][2], "grid main (weight=2)", session
     )
     main_container.pack(fill="both", expand=True)
     webs.append(main_web)
 
 
-def build_paned(parent: ttk.Frame, webs: list[WebView]) -> None:
+def build_paned(parent: ttk.Frame, webs: list[WebView], session: WebSession) -> None:
     ttk.Label(
         parent,
         text="PanedWindow: drag the sash to resize",
@@ -195,11 +226,15 @@ def build_paned(parent: ttk.Frame, webs: list[WebView]) -> None:
     for title, accent, tag in PANES[:2]:
         pane = tk.Frame(paned, bg="#0d0d0d")
         paned.add(pane, minsize=160, stretch="always")
-        web = WebView(pane, html=pane_html(title, accent, tag, "PanedWindow"))
+        web = WebView(
+            pane, html=pane_html(title, accent, tag, "PanedWindow"), session=session
+        )
         webs.append(web)
 
 
-def build_place_absolute(parent: ttk.Frame, webs: list[WebView]) -> None:
+def build_place_absolute(
+    parent: ttk.Frame, webs: list[WebView], session: WebSession
+) -> None:
     """Fixed-pixel place — useful for checking resize behaviour."""
     ttk.Label(
         parent,
@@ -217,12 +252,12 @@ def build_place_absolute(parent: ttk.Frame, webs: list[WebView]) -> None:
         (PANES[0], "place (x=8, y=160, 412×180)", 8, 160, 412, 180),
     )
     for (title, accent, tag), layout, x, y, w, h in specs:
-        container, web = make_pane(canvas, title, accent, tag, layout)
+        container, web = make_pane(canvas, title, accent, tag, layout, session)
         container.place(x=x, y=y, width=w, height=h)
         webs.append(web)
 
 
-TABS: list[tuple[str, Callable[[ttk.Frame, list[WebView]], None]]] = [
+TABS: list[tuple[str, Callable[[ttk.Frame, list[WebView], WebSession], None]]] = [
     ("pack ↔", build_pack_horizontal),
     ("pack ↕", build_pack_vertical),
     ("grid 2×2", build_grid),
@@ -246,10 +281,12 @@ def main() -> None:
         header,
         text=(
             "Switch tabs to exercise pack, grid, place, nested, "
-            "and PanedWindow layouts."
+            "and PanedWindow layouts. Flash all uses WebSession.emit_all."
         ),
         foreground="#555",
     ).pack(anchor="w")
+
+    session = WebSession(ephemeral=True)
 
     notebook = ttk.Notebook(root)
     notebook.pack(fill="both", expand=True, padx=8, pady=8)
@@ -260,7 +297,7 @@ def main() -> None:
         tab = ttk.Frame(notebook)
         notebook.add(tab, text=tab_name)
         webs: list[WebView] = []
-        builder(tab, webs)
+        builder(tab, webs, session)
         tab_webs.append(webs)
 
     status = tk.StringVar(
@@ -291,8 +328,11 @@ def main() -> None:
     ttk.Label(footer, textvariable=status, justify="left", foreground="#444").pack(
         anchor="w"
     )
+    ttk.Button(
+        footer, text="Flash all panes", command=lambda: session.emit_all("flash")
+    ).pack(side="left", pady=(4, 0))
     ttk.Button(footer, text="Refresh geometry", command=refresh_status).pack(
-        anchor="e", pady=(4, 0)
+        side="right", pady=(4, 0)
     )
 
     root.bind("<Configure>", lambda _e: root.after_idle(refresh_status))

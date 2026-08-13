@@ -5,6 +5,10 @@ Link context menu is a Tk "Open in New Tab" menu (the native WebKit
 middle-click, and ``window.open`` also open a tab. Creating another WebView
 from ``on_new_window`` deadlocks WKWebView, so that hook only denies.
 
+Downloads use ``on_download`` (save dialog) and ``on_download_complete``.
+``session.emit_all`` toasts a notice on every live tab. Print opens the
+system dialog. Native create failure is shown via ``on_creation_failed``.
+
 IPC is only used to intercept links (no privileged Python APIs). Arbitrary
 https pages need ``bridge_origins="*"`` (emits ``TkwrySecurityWarning``);
 do not copy that into apps that ``expose()`` desktop capabilities.
@@ -17,7 +21,7 @@ import tempfile
 import tkinter as tk
 from dataclasses import dataclass
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from tkwry import NewWindowResponse, PageLoadEvent, WebSession, WebView
 
@@ -75,6 +79,40 @@ LINK_HELPER_JS = """
     }
     return null;
   };
+  function showNotice(payload) {
+    var text = "";
+    if (payload && typeof payload === "object" && payload.text) {
+      text = String(payload.text);
+    } else if (payload != null) {
+      text = String(payload);
+    }
+    if (!text) return;
+    var el = document.createElement("div");
+    el.textContent = text;
+    el.setAttribute("data-tkwry-notice", "1");
+    el.style.cssText = [
+      "position:fixed",
+      "z-index:2147483647",
+      "right:12px",
+      "bottom:12px",
+      "max-width:min(360px,80vw)",
+      "padding:10px 14px",
+      "border-radius:8px",
+      "background:#111827",
+      "color:#f9fafb",
+      "font:13px/1.4 system-ui,sans-serif",
+      "box-shadow:0 8px 24px rgba(0,0,0,.35)",
+    ].join(";");
+    (document.body || document.documentElement).appendChild(el);
+    setTimeout(function () { el.remove(); }, 3500);
+  }
+  function bootNotice() {
+    if (!window.tkwry || !window.tkwry.on || window._tkwryNotice) return;
+    window._tkwryNotice = true;
+    window.tkwry.on("notice", showNotice);
+  }
+  bootNotice();
+  document.addEventListener("DOMContentLoaded", bootNotice);
 })();
 """
 
@@ -125,7 +163,11 @@ def main() -> None:
     url_entry = ttk.Entry(toolbar, textvariable=url_var)
 
     content = tk.Frame(root, bg="#1e1e1e")
-    content.pack(fill="both", expand=True, padx=8, pady=(4, 8))
+    content.pack(fill="both", expand=True, padx=8, pady=(4, 4))
+    status_var = tk.StringVar(value="Ready")
+    ttk.Label(root, textvariable=status_var, foreground="#555").pack(
+        fill="x", padx=8, pady=(0, 8)
+    )
 
     tabs: dict[str, Tab] = {}
     selected_id: str | None = None
@@ -227,6 +269,31 @@ def main() -> None:
             if event is PageLoadEvent.Finished and page_url and selected_id == tab_id:
                 url_var.set(page_url)
 
+        def on_create_failed(exc: BaseException) -> None:
+            status_var.set(f"Create failed: {exc}")
+            messagebox.showerror("WebView failed", str(exc), parent=root)
+
+        def on_download(url: str, suggested: str) -> str | bool:
+            name = Path(suggested).name or "download"
+            dest = filedialog.asksaveasfilename(
+                parent=root,
+                title="Save download",
+                initialfile=name,
+            )
+            if not dest:
+                status_var.set("Download cancelled")
+                return False
+            status_var.set(f"Downloading to {dest}")
+            return dest
+
+        def on_download_complete(url: str, dest: str | None, success: bool) -> None:
+            if success:
+                where = dest or url
+                status_var.set(f"Saved {where}")
+                session.emit_all("notice", {"text": f"Saved {Path(where).name}"})
+            else:
+                status_var.set("Download failed")
+
         web = WebView(
             frame,
             url=url,
@@ -238,6 +305,9 @@ def main() -> None:
             on_title_changed=on_title,
             on_page_load=on_page_load,
             on_new_window=lambda _url: NewWindowResponse.Deny,
+            on_creation_failed=on_create_failed,
+            on_download=on_download,
+            on_download_complete=on_download_complete,
         )
         tab = Tab(frame=frame, web=web, button=button, chip=chip)
         tabs[tab_id] = tab
@@ -272,6 +342,14 @@ def main() -> None:
         if tab is not None and tab.web.ready and tab.web.can_go_forward():
             tab.web.go_forward()
 
+    def print_current() -> None:
+        tab = current_tab()
+        if tab is None or not tab.web.ready:
+            return
+        tab.web.print()
+        status_var.set("Print dialog")
+        session.emit_all("notice", {"text": "Print dialog opened"})
+
     ttk.Button(tab_bar, text="+", width=3, command=lambda: add_tab(HOME)).pack(
         side="left"
     )
@@ -280,6 +358,9 @@ def main() -> None:
     ttk.Button(toolbar, text="Reload", command=reload_current).pack(side="left")
     url_entry.pack(side="left", fill="x", expand=True, padx=8)
     ttk.Button(toolbar, text="Go", command=go).pack(side="left")
+    ttk.Button(toolbar, text="Print", command=print_current).pack(
+        side="left", padx=(8, 0)
+    )
 
     def close_selected(_event: object = None) -> None:
         if selected_id:

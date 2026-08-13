@@ -15,7 +15,7 @@ import threading
 import tkinter as tk
 import urllib.request
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 import plotly.graph_objects as go
 
@@ -251,11 +251,26 @@ def main() -> None:
             web.destroy()
         if local:
             app_dir = local_app_dir()
-            web = WebView(web_frame, app=app_dir, app_dev=True, ipc_handler=on_ipc)
+            web = WebView(
+                web_frame,
+                app=app_dir,
+                app_dev=True,
+                ipc_handler=on_ipc,
+                on_creation_failed=lambda exc: messagebox.showerror(
+                    "WebView failed", str(exc), parent=root
+                ),
+            )
             web.watch_app()  # skip .vendor / node_modules; reload on html/js/css
             source_note.set("Local app= (plotly.js on disk)")
         else:
-            web = WebView(web_frame, html=page_html(PLOTLY_CDN), ipc_handler=on_ipc)
+            web = WebView(
+                web_frame,
+                html=page_html(PLOTLY_CDN),
+                ipc_handler=on_ipc,
+                on_creation_failed=lambda exc: messagebox.showerror(
+                    "WebView failed", str(exc), parent=root
+                ),
+            )
             source_note.set("Scripts from cdn.plot.ly")
         web.pack(fill="both", expand=True)
         web.when_ready(push_figure)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 try:
     from tkwry import DragDropEvent, WebView
@@ -125,6 +125,9 @@ def main() -> None:
         html=HTML,
         background_color=(26, 26, 46, 255),
         drag_drop_handler=on_drag_drop,
+        on_creation_failed=lambda exc: messagebox.showerror(
+            "WebView failed", str(exc), parent=root
+        ),
     )
 
     root.mainloop()

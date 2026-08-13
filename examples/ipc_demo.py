@@ -241,7 +241,15 @@ def main() -> None:
         else:
             status.set(f"Unknown action: {action}")
 
-    web = WebView(web_frame, html=HTML, ipc_handler=on_ipc, rpc_traceback=True)
+    web = WebView(
+        web_frame,
+        html=HTML,
+        ipc_handler=on_ipc,
+        rpc_traceback=True,
+        on_creation_failed=lambda exc: messagebox.showerror(
+            "WebView failed", str(exc), parent=root
+        ),
+    )
 
     @web.expose
     def add(a: int, b: int) -> int:

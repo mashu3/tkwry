@@ -507,9 +507,9 @@ pip install -e .
 
 | Script | Description |
 |--------|-------------|
-| [`examples/browser_demo.py`](examples/browser_demo.py) | URL bar, tabs, shared `WebSession`, open-in-new-tab (`bridge_origins="*"`; no `expose`) |
+| [`examples/browser_demo.py`](examples/browser_demo.py) | URL bar, tabs, shared `WebSession`, print / downloads / `emit_all` (`bridge_origins="*"`; no `expose`) |
 | [`examples/ipc_demo.py`](examples/ipc_demo.py) | IPC events, RPC (`call` / kwargs / worker), and `emit` |
-| [`examples/multi_demo.py`](examples/multi_demo.py) | Multiple WebViews, tabs, panes |
+| [`examples/multi_demo.py`](examples/multi_demo.py) | Multiple WebViews, tabs, panes; `emit_all` flash |
 | [`examples/plotly_demo.py`](examples/plotly_demo.py) | Plotly charts — CDN or local `app=` (`pip install plotly`) |
 | [`examples/folium_demo.py`](examples/folium_demo.py) | Folium maps (`pip install folium`; tiles need the network) |
 | [`examples/markdown_demo.py`](examples/markdown_demo.py) | Monaco markdown editor + live preview (CDN) |

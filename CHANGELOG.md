@@ -31,6 +31,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Bump wry ``0.55.1`` → ``0.56.1`` (IPC no longer panics on invalid document
   URIs; Windows minimized-focus / teardown crash fixes). macOS ``url()`` still
   uses the WKWebView workaround — wry's wrapper can still panic on inline HTML
+- Examples: ``browser_demo`` print / downloads / create-failed / ``emit_all``
+  toasts; ``multi_demo`` shared session + flash-all; ``ipc_demo``
+  ``on_creation_failed``
 
 ## [0.1.3] - 2026-08-13
 
