@@ -10,8 +10,10 @@ Roles:
   ``window.tkwry.on``.
 
 RPC envelopes use ``{"__tkwry": "rpc", ...}`` (optional ``kwargs`` object)
-and settle Promises with ``eval_js``. Low-level IPC traffic is unchanged.
-RPC is queued separately from IPC so event floods cannot drop calls.
+and settle Promises with ``eval_js``. ``window.tkwry.stream`` is additive
+(``stream: true`` on protocol ``version: 1``) and does not change ``call``.
+Low-level IPC traffic is unchanged. RPC is queued separately from IPC so
+event floods cannot drop calls.
 """
 
 from __future__ import annotations
@@ -46,10 +48,14 @@ _RPC_ID_RE = re.compile(r'"id"\s*:\s*"((?:\\.|[^"\\])*)"')
 
 _rpc_tls = threading.local()
 
+# Sentinel: handler already emitted stream chunks; settle with JSON null.
+RPC_STREAM_DONE = object()
+
 # Injected before user initialization_script / via eval_js after create.
 RPC_BOOTSTRAP_JS = """\
 (function () {
-  if (window.tkwry && window.tkwry.call && window.tkwry.on) return;
+  if (window.tkwry && window.tkwry.call && window.tkwry.stream
+      && window.tkwry.on) return;
   var seq = 0;
   var pending = Object.create(null);
   var listeners = Object.create(null);
@@ -139,6 +145,113 @@ RPC_BOOTSTRAP_JS = """\
       promise.cancel = function () { window.tkwry.cancel(id); };
       return promise;
     },
+    stream: function (method) {
+      var params = Array.prototype.slice.call(arguments, 1);
+      var options = null;
+      if (params.length && isCallOptions(params[params.length - 1])) {
+        options = params.pop();
+      }
+      var id = "r" + String(++seq);
+      var queue = [];
+      var waiting = null;
+      var finished = false;
+      var error = null;
+      var timer = null;
+      function finish(ok, value) {
+        if (finished) return;
+        finished = true;
+        if (timer !== null) clearTimeout(timer);
+        delete pending[id];
+        if (!ok) error = makeError(value);
+        if (waiting) {
+          var w = waiting;
+          waiting = null;
+          if (!ok) w.reject(error);
+          else w.resolve({ done: true, value: undefined });
+        }
+      }
+      pending[id] = {
+        finish: finish,
+        chunk: function (value) {
+          if (finished) return;
+          if (waiting) {
+            var w = waiting;
+            waiting = null;
+            w.resolve({ done: false, value: value });
+          } else {
+            queue.push(value);
+          }
+        }
+      };
+      if (options && options.timeout > 0) {
+        timer = setTimeout(function () {
+          finish(false, {
+            type: "RpcTimeoutError",
+            message: "rpc timeout after " + options.timeout + "ms"
+          });
+        }, options.timeout);
+      }
+      if (!window.ipc || !window.ipc.postMessage) {
+        finish(false, {
+          type: "RpcTransportError",
+          message: "window.ipc.postMessage unavailable"
+        });
+      } else {
+        var payload = {
+          __tkwry: "rpc",
+          version: 1,
+          id: id,
+          method: String(method),
+          params: params,
+          stream: true
+        };
+        if (options && options.kwargs && Object.keys(options.kwargs).length) {
+          payload.kwargs = options.kwargs;
+        }
+        window.ipc.postMessage(JSON.stringify(payload));
+      }
+      var iter = {
+        id: id,
+        cancel: function () { window.tkwry.cancel(id); },
+        next: function () {
+          if (queue.length) {
+            return Promise.resolve({ done: false, value: queue.shift() });
+          }
+          if (finished) {
+            if (error) return Promise.reject(error);
+            return Promise.resolve({ done: true, value: undefined });
+          }
+          return new Promise(function (resolve, reject) {
+            waiting = { resolve: resolve, reject: reject };
+          });
+        },
+        "return": function (value) {
+          if (!finished) {
+            finished = true;
+            if (timer !== null) clearTimeout(timer);
+            delete pending[id];
+            if (waiting) {
+              var w = waiting;
+              waiting = null;
+              w.resolve({ done: true, value: value });
+            }
+            if (window.ipc && window.ipc.postMessage) {
+              window.ipc.postMessage(JSON.stringify({
+                __tkwry: "rpc",
+                version: 1,
+                id: id,
+                cancel: true
+              }));
+            }
+          }
+          return Promise.resolve({ done: true, value: value });
+        }
+      };
+      if (typeof Symbol === "function" && Symbol.asyncIterator) {
+        iter[Symbol.asyncIterator] = function () { return iter; };
+      }
+      return iter;
+    },
     cancel: function (id) {
       id = String(id || "");
       if (!id) return;
@@ -188,6 +301,11 @@ RPC_BOOTSTRAP_JS = """\
           }
         }
       }
+    },
+    _chunk: function (id, value) {
+      var slot = pending[id];
+      if (!slot || !slot.chunk) return;
+      slot.chunk(value);
     },
     _settle: function (id, ok, value) {
       var slot = pending[id];
@@ -264,6 +382,7 @@ class RpcRequest:
     kwargs: dict[str, Any] = field(default_factory=dict)
     reject: dict[str, str] | None = None
     cancel: bool = False
+    stream: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -383,7 +502,13 @@ def parse_rpc_request(message: str) -> RpcRequest | None:
                 f"too many keyword arguments ({len(kwargs)} > {MAX_RPC_KWARGS})",
             ),
         )
-    return RpcRequest(id=req_id, method=method, params=tuple(params), kwargs=kwargs)
+    return RpcRequest(
+        id=req_id,
+        method=method,
+        params=tuple(params),
+        kwargs=kwargs,
+        stream=data.get("stream") is True,
+    )
 
 
 def format_rpc_error(
@@ -418,6 +543,55 @@ def settle_script(req_id: str, *, ok: bool, value: Any) -> str:
         "window.tkwry && window.tkwry._settle("
         f"{json.dumps(req_id)}, {json.dumps(ok)}, {payload});"
     )
+
+
+def stream_chunk_script(req_id: str, value: Any) -> str:
+    """Build ``eval_js`` source that delivers one streaming RPC chunk.
+
+    Raises :class:`~tkwry.RpcSerializationError` if *value* is not JSON.
+    """
+    payload = dumps_rpc_json(value)
+    return f"window.tkwry && window.tkwry._chunk({json.dumps(req_id)}, {payload});"
+
+
+def finalize_rpc_result(
+    result: Any,
+    *,
+    stream: bool,
+    on_stream_chunk: Callable[[Any], None] | None = None,
+) -> Any:
+    """Consume a handler return value, emitting stream chunks when needed.
+
+    Sync generators require ``stream=True`` (``window.tkwry.stream``).
+    Async generators are rejected. Returns :data:`RPC_STREAM_DONE` after a
+    stream has been fully emitted so the caller can settle with ``null``.
+    """
+    if inspect.isasyncgen(result):
+        raise TypeError("async generators are not supported; use a sync generator")
+    if inspect.isgenerator(result):
+        if not stream:
+            result.close()
+            raise TypeError("generator requires window.tkwry.stream()")
+        if on_stream_chunk is None:
+            result.close()
+            raise TypeError("stream RPC requires on_stream_chunk")
+        try:
+            for item in result:
+                if rpc_cancelled():
+                    break
+                dumps_rpc_json(item)
+                on_stream_chunk(item)
+        finally:
+            result.close()
+        return RPC_STREAM_DONE
+    if stream:
+        if on_stream_chunk is None:
+            raise TypeError("stream RPC requires on_stream_chunk")
+        dumps_rpc_json(result)
+        on_stream_chunk(result)
+        return RPC_STREAM_DONE
+    dumps_rpc_json(result)
+    return result
 
 
 def emit_script(event: str, data: Any = None) -> str:
@@ -532,6 +706,7 @@ def dispatch_rpc(
     *,
     submit_worker: Callable[[Callable[[], Any]], Future[Any]] | None = None,
     include_traceback: bool = False,
+    on_stream_chunk: Callable[[Any], None] | None = None,
 ) -> tuple[bool, Any] | Future[Any]:
     """Run *request* against *methods*.
 
@@ -563,7 +738,14 @@ def dispatch_rpc(
             )
         except TypeError as exc:
             raise TypeError(str(exc) or "invalid RPC arguments") from exc
-        return reg.handler(*args, **kwargs)
+        result = reg.handler(*args, **kwargs)
+        if isinstance(result, Future):
+            return result
+        return finalize_rpc_result(
+            result,
+            stream=request.stream,
+            on_stream_chunk=on_stream_chunk,
+        )
 
     if reg.run_in == "worker":
         if submit_worker is None:
@@ -582,10 +764,6 @@ def dispatch_rpc(
         return False, format_rpc_error(exc, include_traceback=include_traceback)
     if isinstance(result, Future):
         return result
-    try:
-        dumps_rpc_json(result)
-    except RpcSerializationError as exc:
-        return False, format_rpc_error(exc)
     return True, result
 
 

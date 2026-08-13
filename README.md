@@ -166,7 +166,8 @@ def greet(name: str) -> str:
 const text = await window.tkwry.call("greet", "Ada");
 ```
 
-Worker RPC, timeouts, JS `cancel`, argument limits, and `emit` are in
+Worker RPC, timeouts, JS `cancel`, streaming (`window.tkwry.stream`),
+argument limits, and `emit` are in
 [IPC / RPC / emit](docs/rpc.md). See also [`examples/ipc_demo.py`](examples/ipc_demo.py).
 
 ### Local app assets (``app=`` / ``tkwry://``)

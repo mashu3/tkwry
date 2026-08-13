@@ -445,6 +445,101 @@ def test_rpc_kwargs_call_roundtrip(tk_root) -> None:
     frame.destroy()
 
 
+def test_rpc_stream_roundtrip(tk_root) -> None:
+    """``window.tkwry.stream`` consumes a sync generator as JSON chunks."""
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<title>rpc</title><p>rpc</p>")
+
+    @web.expose
+    def ticks(count: int) -> object:
+        for i in range(int(count)):
+            yield i + 1
+
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=30)
+
+    web.eval_js(
+        """
+        (async function () {
+          if (!window.tkwry || !window.tkwry.stream) {
+            document.title = "no-stream";
+            return;
+          }
+          try {
+            var parts = [];
+            for await (var n of window.tkwry.stream("ticks", 3)) {
+              parts.push(n);
+            }
+            document.title = "ticks=" + parts.join(",");
+          } catch (e) {
+            document.title = "err=" + e;
+          }
+        })();
+        """
+    )
+
+    titles: list[str] = []
+
+    def read_title() -> None:
+        web.eval_js_with_callback("document.title", titles.append)
+
+    def title_ready() -> bool:
+        read_title()
+        return any("ticks=1,2,3" in str(t) for t in titles)
+
+    assert wait_until(tk_root, title_ready, steps=400), (
+        f"expected document.title ticks=1,2,3, got {titles!r}"
+    )
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_rpc_call_rejects_generator_roundtrip(tk_root) -> None:
+    """``window.tkwry.call`` on a generator rejects; Promise shape is unchanged."""
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<title>rpc</title><p>rpc</p>")
+
+    @web.expose
+    def ticks() -> object:
+        yield 1
+
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=30)
+
+    web.eval_js(
+        """
+        (function () {
+          if (!window.tkwry || !window.tkwry.call) {
+            document.title = "no-tkwry";
+            return;
+          }
+          window.tkwry.call("ticks").then(function () {
+            document.title = "unexpected-ok";
+          }).catch(function (e) {
+            document.title = "call=" + e.name;
+          });
+        })();
+        """
+    )
+
+    titles: list[str] = []
+
+    def read_title() -> None:
+        web.eval_js_with_callback("document.title", titles.append)
+
+    def title_ready() -> bool:
+        read_title()
+        return any("call=TypeError" in str(t) for t in titles)
+
+    assert wait_until(tk_root, title_ready, steps=400), (
+        f"expected document.title call=TypeError, got {titles!r}"
+    )
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_rpc_unknown_method_rejects(tk_root) -> None:
     frame = host_frame(tk_root)
     web = WebView(frame, html="<title>rpc</title><p>rpc</p>")

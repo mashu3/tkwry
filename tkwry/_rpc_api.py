@@ -32,6 +32,7 @@ from tkwry.exceptions import (
 )
 from tkwry.ipc import (
     MAX_IPC_MESSAGE_BYTES,
+    RPC_STREAM_DONE,
     RpcHandler,
     RpcRegistration,
     RpcRequest,
@@ -39,11 +40,13 @@ from tkwry.ipc import (
     bind_rpc_cancel_event,
     dispatch_rpc,
     emit_script,
+    finalize_rpc_result,
     format_rpc_error,
     merge_initialization_script,
     parse_rpc_request,
     rpc_error,
     settle_script,
+    stream_chunk_script,
 )
 from tkwry.ipc import (
     RPC_BOOTSTRAP_JS as _RPC_BOOTSTRAP_JS,
@@ -73,6 +76,8 @@ class WebViewRpcMixin:
         self._rpc_done_queue: queue.SimpleQueue[tuple[str, Future[Any]]] = (
             queue.SimpleQueue()
         )
+        self._rpc_stream_queue: queue.SimpleQueue[tuple[str, Any]] = queue.SimpleQueue()
+        self._rpc_stream_open: set[str] = set()
         self._rpc_timeout_after: dict[str, str] = {}
         self._rpc_cancel_events: dict[str, threading.Event] = {}
         self._rpc_user_cancelled: set[str] = set()
@@ -122,7 +127,11 @@ class WebViewRpcMixin:
         Use as ``@web.expose`` / ``@web.expose(name="foo")`` or
         ``web.expose(fn)``. Arguments may be positional and/or keyword
         (``window.tkwry.call(name, …, { kwargs: { … } })``). Return values
-        must be JSON-serializable.
+        must be JSON-serializable. A **sync generator** is streamed via
+        ``window.tkwry.stream`` (``call`` rejects it); each yield is one
+        JSON chunk, then the iterator completes. Async generators are not
+        supported. Prefer ``thread=True`` so cancel can interrupt between
+        yields (main-thread generators block Tk until they finish).
 
         Execution model:
 
@@ -368,6 +377,15 @@ class WebViewRpcMixin:
             try:
                 q.get_nowait()
             except queue.Empty:
+                break
+        self._discard_rpc_stream_queue()
+
+    def _discard_rpc_stream_queue(self) -> None:
+        q = self._rpc_stream_queue
+        while True:
+            try:
+                q.get_nowait()
+            except queue.Empty:
                 return
 
     def _abort_inflight_rpc(self) -> None:
@@ -381,6 +399,7 @@ class WebViewRpcMixin:
             except (tk.TclError, RuntimeError, ValueError):
                 pass
         self._rpc_timeout_after.clear()
+        self._rpc_stream_open.clear()
         for event in self._rpc_cancel_events.values():
             event.set()
         self._rpc_cancel_events.clear()
@@ -492,6 +511,7 @@ class WebViewRpcMixin:
         pending = self._rpc_inflight.pop(req_id, None)
         if pending is not None:
             pending.cancel()
+        self._rpc_stream_open.discard(req_id)
         if self._destroyed:
             return
         self._settle_rpc(
@@ -531,12 +551,27 @@ class WebViewRpcMixin:
             return self._get_rpc_executor().submit(wrapped)
 
         bind_rpc_cancel_event(cancel_event)
+        if request.stream:
+            self._rpc_stream_open.add(request.id)
+
+        def on_stream_chunk(item: Any) -> None:
+            if self._destroyed:
+                return
+            if threading.get_ident() == self._tk_thread_id:
+                self._push_rpc_chunk(request.id, item)
+                return
+            try:
+                self._rpc_stream_queue.put_nowait((request.id, item))
+            except Exception:
+                return
+
         try:
             outcome = dispatch_rpc(
                 self._rpc_methods,
                 request,
                 submit_worker=submit_worker,
                 include_traceback=self._rpc_traceback,
+                on_stream_chunk=on_stream_chunk,
             )
         finally:
             bind_rpc_cancel_event(None)
@@ -547,6 +582,8 @@ class WebViewRpcMixin:
             return
         self._drop_rpc_cancel(request.id)
         ok, value = outcome
+        if ok and value is RPC_STREAM_DONE:
+            value = None
         self._settle_rpc(request.id, ok=ok, value=value)
 
     def _settle_tracked_rpc_future(self, req_id: str, done_fut: Future[Any]) -> None:
@@ -570,10 +607,44 @@ class WebViewRpcMixin:
                 value=format_rpc_error(exc, include_traceback=self._rpc_traceback),
             )
             return
+        if value is RPC_STREAM_DONE:
+            self._settle_rpc(req_id, ok=True, value=None)
+            return
+        try:
+            value = finalize_rpc_result(
+                value,
+                stream=req_id in self._rpc_stream_open,
+                on_stream_chunk=lambda item: self._push_rpc_chunk(req_id, item),
+            )
+        except Exception as exc:
+            self._settle_rpc(
+                req_id,
+                ok=False,
+                value=format_rpc_error(exc, include_traceback=self._rpc_traceback),
+            )
+            return
+        if value is RPC_STREAM_DONE:
+            value = None
         self._settle_rpc(req_id, ok=True, value=value)
+
+    def _drain_rpc_stream_chunks(self) -> None:
+        """Deliver worker stream chunks on the Tk thread before settling."""
+        if self._destroyed:
+            self._discard_rpc_stream_queue()
+            return
+        while True:
+            try:
+                req_id, item = self._rpc_stream_queue.get_nowait()
+            except queue.Empty:
+                return
+            if self._destroyed:
+                self._discard_rpc_stream_queue()
+                return
+            self._push_rpc_chunk(req_id, item)
 
     def _drain_rpc_futures(self) -> None:
         """Settle worker RPC completions on the Tk thread (poll / idle)."""
+        self._drain_rpc_stream_chunks()
         if self._destroyed:
             self._discard_rpc_done_queue()
             return
@@ -586,6 +657,29 @@ class WebViewRpcMixin:
                 self._discard_rpc_done_queue()
                 return
             self._settle_tracked_rpc_future(req_id, done_fut)
+
+    def _push_rpc_chunk(self, req_id: str, value: object) -> None:
+        if self._destroyed or req_id not in self._rpc_stream_open:
+            return
+        try:
+            script = stream_chunk_script(req_id, value)
+        except RpcSerializationError:
+            self._settle_rpc(
+                req_id,
+                ok=False,
+                value=rpc_error(
+                    "RpcSerializationError",
+                    "value is not JSON-serializable",
+                ),
+            )
+            return
+        native = self._webview
+        if native is None:
+            return
+        try:
+            native.eval_js(script)
+        except Exception:
+            traceback.print_exc()
 
     def _track_rpc_future(
         self,
@@ -637,6 +731,7 @@ class WebViewRpcMixin:
 
     def _settle_rpc(self, req_id: str, *, ok: bool, value: object) -> None:
         self._rpc_user_cancelled.discard(req_id)
+        self._rpc_stream_open.discard(req_id)
         try:
             script = settle_script(req_id, ok=ok, value=value)
         except RpcSerializationError:

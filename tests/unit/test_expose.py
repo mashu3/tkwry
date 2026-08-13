@@ -86,6 +86,124 @@ def test_rpc_delivered_from_dedicated_queue(tk_root) -> None:
     frame.destroy()
 
 
+def test_rpc_stream_chunks_then_settles(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>rpc</p>")
+
+    @web.expose
+    def ticks() -> object:
+        yield 1
+        yield 2
+
+    native = MagicMock()
+    native.drain_rpc_messages.return_value = [
+        (
+            "about:blank",
+            json.dumps(
+                {
+                    "__tkwry": "rpc",
+                    "id": "s1",
+                    "method": "ticks",
+                    "params": [],
+                    "stream": True,
+                }
+            ),
+        )
+    ]
+    native.drain_ipc_messages.return_value = []
+    web._webview = native
+    web._deliver_ipc_messages()
+
+    scripts = [call.args[0] for call in native.eval_js.call_args_list]
+    chunks = [src for src in scripts if "_chunk" in src]
+    settles = [src for src in scripts if "_settle" in src]
+    assert len(chunks) == 2
+    assert any("1" in src for src in chunks)
+    assert any("2" in src for src in chunks)
+    assert len(settles) == 1
+    assert "true" in settles[0]
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_rpc_call_rejects_generator(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>rpc</p>")
+
+    @web.expose
+    def ticks() -> object:
+        yield 1
+
+    native = MagicMock()
+    native.drain_rpc_messages.return_value = [
+        (
+            "about:blank",
+            json.dumps({"__tkwry": "rpc", "id": "r1", "method": "ticks", "params": []}),
+        )
+    ]
+    native.drain_ipc_messages.return_value = []
+    web._webview = native
+    web._deliver_ipc_messages()
+
+    native.eval_js.assert_called_once()
+    script = native.eval_js.call_args[0][0]
+    assert "_settle" in script
+    assert "false" in script
+    assert "TypeError" in script
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_rpc_worker_stream_hops_to_tk(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame)
+    web._cancel_deferred_callbacks()
+    started = threading.Event()
+
+    @web.expose(thread=True)
+    def ticks() -> object:
+        started.set()
+        yield 1
+        yield 2
+
+    native = MagicMock()
+    native.drain_rpc_messages.return_value = [
+        (
+            "about:blank",
+            json.dumps(
+                {
+                    "__tkwry": "rpc",
+                    "id": "s1",
+                    "method": "ticks",
+                    "params": [],
+                    "stream": True,
+                }
+            ),
+        )
+    ]
+    native.drain_ipc_messages.return_value = []
+    web._webview = native
+    web._deliver_ipc_messages()
+    assert started.wait(timeout=2.0)
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        web._drain_rpc_futures()
+        scripts = [call.args[0] for call in native.eval_js.call_args_list]
+        chunks = [src for src in scripts if "_chunk" in src]
+        settles = [src for src in scripts if "_settle" in src]
+        if len(chunks) >= 2 and settles:
+            break
+        time.sleep(0.02)
+    scripts = [call.args[0] for call in native.eval_js.call_args_list]
+    assert len([src for src in scripts if "_chunk" in src]) == 2
+    assert any("_settle" in src for src in scripts)
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_rpc_timeout_sets_cancel_flag(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>rpc</p>")

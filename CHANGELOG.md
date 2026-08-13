@@ -23,6 +23,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ``WebView.print()`` → wry system print dialog
 - ``WebSession.emit_all(event, data)`` broadcasts ``emit`` to siblings sharing
   the session (skips untrusted / not-ready / disallowed ``bridge_origins``)
+- Streaming RPC: ``window.tkwry.stream`` consumes sync generator
+  ``@web.expose`` handlers as JSON chunks (protocol ``version: 1`` +
+  ``stream: true``); ``call`` on a generator rejects with ``TypeError``
 
 ### Changed
 

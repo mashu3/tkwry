@@ -14,6 +14,7 @@ from tkwry.ipc import (
     MAX_RPC_KWARGS,
     MAX_RPC_MESSAGE_BYTES,
     RPC_BOOTSTRAP_JS,
+    RPC_STREAM_DONE,
     RPC_VERSION,
     RpcRegistration,
     RpcRequest,
@@ -26,6 +27,7 @@ from tkwry.ipc import (
     rpc_cancel_event,
     rpc_cancelled,
     settle_script,
+    stream_chunk_script,
 )
 
 
@@ -38,6 +40,7 @@ def test_parse_rpc_request_ok() -> None:
     assert req.params == (1, 2)
     assert req.kwargs == {}
     assert req.cancel is False
+    assert req.stream is False
 
 
 def test_parse_rpc_request_version_and_cancel() -> None:
@@ -423,6 +426,9 @@ def test_bootstrap_includes_on_and_timeout() -> None:
     assert "console.error" in RPC_BOOTSTRAP_JS
     assert "tkwry.debug" in RPC_BOOTSTRAP_JS
     assert "window.tkwry.cancel" in RPC_BOOTSTRAP_JS
+    assert "window.tkwry.stream" in RPC_BOOTSTRAP_JS
+    assert "_chunk" in RPC_BOOTSTRAP_JS
+    assert "stream: true" in RPC_BOOTSTRAP_JS
     assert "version: 1" in RPC_BOOTSTRAP_JS
 
 
@@ -435,3 +441,138 @@ def test_merge_initialization_script() -> None:
     assert merged.endswith("void 0;")
     only = merge_initialization_script(None, rpc_enabled=True)
     assert only == RPC_BOOTSTRAP_JS
+
+
+def test_parse_rpc_request_stream_flag() -> None:
+    req = parse_rpc_request(
+        json.dumps(
+            {
+                "__tkwry": "rpc",
+                "version": 1,
+                "id": "s1",
+                "method": "ticks",
+                "params": [3],
+                "stream": True,
+            }
+        )
+    )
+    assert req is not None
+    assert req.stream is True
+    ignored = parse_rpc_request(
+        json.dumps(
+            {
+                "__tkwry": "rpc",
+                "id": "s2",
+                "method": "ticks",
+                "params": [],
+                "stream": "yes",
+            }
+        )
+    )
+    assert ignored is not None
+    assert ignored.stream is False
+
+
+def test_stream_chunk_script() -> None:
+    src = stream_chunk_script("r1", {"n": 2})
+    assert "_chunk" in src
+    assert "r1" in src
+    assert "2" in src
+
+
+def test_dispatch_rpc_stream_generator() -> None:
+    def ticks() -> object:
+        yield 1
+        yield 2
+
+    chunks: list[object] = []
+    req = parse_rpc_request(
+        json.dumps(
+            {
+                "__tkwry": "rpc",
+                "id": "1",
+                "method": "ticks",
+                "params": [],
+                "stream": True,
+            }
+        )
+    )
+    assert req is not None
+    ok, value = dispatch_rpc(
+        {"ticks": ticks},
+        req,
+        on_stream_chunk=chunks.append,
+    )
+    assert ok is True
+    assert value is RPC_STREAM_DONE
+    assert chunks == [1, 2]
+
+
+def test_dispatch_rpc_generator_requires_stream() -> None:
+    def ticks() -> object:
+        yield 1
+
+    req = parse_rpc_request(
+        json.dumps({"__tkwry": "rpc", "id": "1", "method": "ticks", "params": []})
+    )
+    assert req is not None
+    ok, value = dispatch_rpc({"ticks": ticks}, req)
+    assert ok is False
+    assert value["type"] == "TypeError"
+    assert "stream" in value["message"]
+
+
+def test_dispatch_rpc_stream_single_value() -> None:
+    def ping() -> str:
+        return "pong"
+
+    chunks: list[object] = []
+    req = parse_rpc_request(
+        json.dumps(
+            {
+                "__tkwry": "rpc",
+                "id": "1",
+                "method": "ping",
+                "params": [],
+                "stream": True,
+            }
+        )
+    )
+    assert req is not None
+    ok, value = dispatch_rpc(
+        {"ping": ping},
+        req,
+        on_stream_chunk=chunks.append,
+    )
+    assert ok is True
+    assert value is RPC_STREAM_DONE
+    assert chunks == ["pong"]
+
+
+def test_dispatch_rpc_rejects_async_generator() -> None:
+    async def agen() -> object:
+        yield 1
+
+    def handler() -> object:
+        return agen()
+
+    req = parse_rpc_request(
+        json.dumps(
+            {
+                "__tkwry": "rpc",
+                "id": "1",
+                "method": "agen",
+                "params": [],
+                "stream": True,
+            }
+        )
+    )
+    assert req is not None
+    ok, value = dispatch_rpc(
+        {"agen": handler},
+        req,
+        on_stream_chunk=lambda _item: None,
+    )
+    assert ok is False
+    assert value["type"] == "TypeError"
+    assert "async" in value["message"]

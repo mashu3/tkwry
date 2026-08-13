@@ -1,7 +1,8 @@
-"""Demo: JS ↔ Python bridge — IPC events, RPC calls, and ``emit``.
+"""Demo: JS ↔ Python bridge — IPC events, RPC calls, streams, and ``emit``.
 
 - **IPC** — fire-and-forget JS → Python (``window.ipc.postMessage``)
 - **RPC** — request/response (``window.tkwry.call`` / ``@web.expose``)
+- **Stream** — chunked RPC (``window.tkwry.stream`` / generator ``@web.expose``)
 - **Emit** — fire-and-forget Python → JS (``web.emit`` / ``window.tkwry.on``)
 """
 
@@ -98,11 +99,12 @@ HTML = """\
       <button class="secondary" onclick="send('notify')">Notify Tk</button>
       <button class="accent" onclick="send('color')">Tint Tk panel</button>
     </div>
-    <div class="label">RPC — tkwry.call</div>
+    <div class="label">RPC — tkwry.call / stream</div>
     <div class="row">
       <button class="rpc" id="sum" type="button">add(2, 3)</button>
       <button class="rpc" id="greet" type="button">greet kwargs</button>
       <button class="rpc" id="heavy" type="button">heavy (worker)</button>
+      <button class="rpc" id="ticks" type="button">stream ticks</button>
     </div>
     <div id="log">Waiting for messages…</div>
   </div>
@@ -151,6 +153,19 @@ HTML = """\
         show("RPC heavy running…");
         var n = await window.tkwry.call("heavy", { timeout: 10000 });
         show("RPC heavy done on thread " + n);
+      } catch (e) {
+        show(e.name + ": " + e.message);
+      }
+    };
+    document.getElementById("ticks").onclick = async function () {
+      try {
+        show("RPC stream…");
+        var parts = [];
+        for await (var n of window.tkwry.stream("ticks", 5)) {
+          parts.push(n);
+          show("RPC stream " + parts.join(", "));
+        }
+        show("RPC stream done: " + parts.join(", "));
       } catch (e) {
         show(e.name + ": " + e.message);
       }
@@ -267,6 +282,14 @@ def main() -> None:
                 break
             time.sleep(0.05)
         return threading.get_ident()
+
+    @web.expose(thread=True)
+    def ticks(count: int = 5) -> object:
+        for i in range(int(count)):
+            if rpc_cancelled():
+                return
+            time.sleep(0.2)
+            yield i + 1
 
     def tk_increment(delta: int) -> None:
         counter.set(counter.get() + delta)

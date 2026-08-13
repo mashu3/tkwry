@@ -2,12 +2,13 @@
 
 Use **IPC** for fire-and-forget events and **RPC** for request/response.
 Landing snippets live in [README.md](../README.md); this page is the
-execution model, cancel contract, and limits.
+execution model, cancel contract, streaming, and limits.
 
 | Direction | Role | Python | JavaScript |
 |-----------|------|--------|------------|
 | JS → Python | IPC (event) | `set_ipc_handler` / `ipc_handler=` | `window.ipc.postMessage(str)` |
 | JS → Python | RPC (call) | `@web.expose` | `await window.tkwry.call(name, ...)` |
+| JS → Python | RPC (stream) | sync generator `@web.expose` | `for await (const x of window.tkwry.stream(name, ...))` |
 | Python → JS | Emit (event) | `web.emit(event, data)` | `window.tkwry.on(event, handler)` |
 
 These APIs run with **desktop-app privileges**. By default only the initial
@@ -93,6 +94,39 @@ rejects with `RpcCancelledError`. Argument mismatches reject with a stable
 `str` / `bool` / `list` / `dict` / `Optional`). Envelopes include
 `version: 1`; unknown versions reject with `RpcProtocolError` (omitted
 version is treated as 1).
+
+### Streaming (`window.tkwry.stream`)
+
+A **sync generator** handler is consumed as a chunked stream. Protocol stays
+`version: 1` with an additive `"stream": true` flag — `call` is unchanged.
+
+```python
+@web.expose(thread=True)
+def ticks(count: int = 5):
+    from tkwry import rpc_cancelled
+
+    for i in range(count):
+        if rpc_cancelled():
+            return
+        yield i + 1
+```
+
+```js
+const parts = [];
+const stream = window.tkwry.stream("ticks", 5);
+// stream.id / stream.cancel() — same cancel envelope as call
+for await (const n of stream) {
+  parts.push(n);
+}
+```
+
+Each `yield` is one JSON chunk (`window.tkwry._chunk`). The iterator then
+completes. `call()` on a generator rejects with `TypeError` (do not collect
+into an array). A non-generator `stream()` yields the return value as a
+single chunk. Async generators and full-duplex RPC are not supported.
+Prefer `thread=True` so `cancel` / timeout can stop between yields;
+a main-thread generator blocks Tk until it finishes. Breaking a
+`for await` loop calls the iterator `return()` and sends cancel.
 
 ### Limits
 
