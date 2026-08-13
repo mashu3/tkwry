@@ -606,6 +606,13 @@ fn try_compact_ipc_queue(queue: &mut VecDeque<IpcEnvelope>) -> bool {
 }
 
 /// Schemes that must never navigate, even without a Python ``on_navigation``.
+///
+/// ``data:`` is intentionally *not* listed: WebView2 implements ``html=`` /
+/// ``load_html`` via ``NavigateToString``, which surfaces as a ``data:``
+/// navigation. Blocking it leaves the view on the initial ``about:blank``
+/// (created before init/IPC scripts) so ``window.ipc`` / ``window.tkwry``
+/// never appear. ``app=`` / ``untrusted=True`` still reject ``data:`` in
+/// Python navigation policy.
 fn is_dangerous_nav_url(url: &str) -> bool {
     let trimmed = url.trim();
     let Some((scheme, _)) = trimmed.split_once(':') else {
@@ -613,7 +620,7 @@ fn is_dangerous_nav_url(url: &str) -> bool {
     };
     matches!(
         scheme.to_ascii_lowercase().as_str(),
-        "javascript" | "data" | "vbscript" | "blob" | "mailto"
+        "javascript" | "vbscript" | "blob" | "mailto"
     )
 }
 
@@ -701,6 +708,7 @@ fn rpc_reject_envelope(id: &str, type_name: &str, message: &str) -> String {
 ///
 /// Oversized RPC is replaced with a small ``RpcMessageTooLarge`` envelope when
 /// the request id can be recovered so the JS Promise can reject.
+#[allow(clippy::too_many_arguments)]
 fn enqueue_window_ipc_body(
     listening: &AtomicBool,
     ipc_pending: &IpcPending,
@@ -2295,10 +2303,11 @@ mod tests {
     #[test]
     fn dangerous_nav_schemes_are_rejected() {
         assert!(is_dangerous_nav_url("javascript:alert(1)"));
-        assert!(is_dangerous_nav_url("DATA:text/html,hi"));
         assert!(is_dangerous_nav_url("vbscript:msgbox(1)"));
         assert!(is_dangerous_nav_url("blob:https://example.com/uuid"));
         assert!(is_dangerous_nav_url("mailto:user@example.com"));
+        // WebView2 NavigateToString (html=) reports data:; do not block it here.
+        assert!(!is_dangerous_nav_url("DATA:text/html,hi"));
         assert!(!is_dangerous_nav_url("https://example.com/"));
         assert!(!is_dangerous_nav_url("tkwry://localhost/index.html"));
         assert!(!is_dangerous_nav_url("file:///tmp/index.html"));

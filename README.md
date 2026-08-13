@@ -266,9 +266,10 @@ Defaults:
 - **``untrusted=True``** — viewer mode: no IPC handler, no ``expose`` /
   ``emit``, ephemeral session, http(s) only, no ``tkwry://`` / ``file:``, new
   windows denied. Use this for arbitrary websites.
-- **Dangerous schemes** — ``javascript:`` / ``data:`` / ``blob:`` /
-  ``vbscript:`` / ``mailto:`` are denied at the native navigation hook even
-  without Python ``on_navigation``.
+- **Dangerous schemes** — ``javascript:`` / ``blob:`` / ``vbscript:`` /
+  ``mailto:`` are denied at the native navigation hook even without Python
+  ``on_navigation``. ``data:`` is not blocked there (WebView2 ``html=`` /
+  ``NavigateToString``); ``app=`` still rejects it.
 - **``tkwry://``** — custom-protocol requests with a non-app ``Origin`` or
   ``Referer`` return 403 (top-level loads with no Origin still work).
 
@@ -514,7 +515,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
 - **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` hide unmapped views)
 - **Deferred callbacks** — IPC, RPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
-- **URL safety** — Python `load_url` normalizes/validates schemes; in-page nav denies `javascript:`/`data:`/…; `app=` stays on `tkwry://`; IPC/RPC origin allowlist
+- **URL safety** — Python `load_url` normalizes/validates schemes; in-page nav denies `javascript:`/`blob:`/… (`data:` under `app=`); `app=` stays on `tkwry://`; IPC/RPC origin allowlist
 - **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()` (macOS: private APIs)
 - **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)
 - **Navigation hooks** — all handlers on the Tk thread; `on_navigation` / `on_new_window` block WebKit until they return

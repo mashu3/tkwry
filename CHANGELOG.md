@@ -15,8 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``on_new_window`` is set
 - IPC/RPC carry the page URL; foreign origins drop IPC and reject RPC with
   ``RpcOriginError``; ``tkwry://`` requests with a non-app ``Origin``/``Referer``
-  return 403; native navigation denies ``javascript:`` / ``data:`` / ``blob:`` /
-  ``vbscript:`` / ``mailto:``
+  return 403; native navigation denies ``javascript:`` / ``blob:`` /
+  ``vbscript:`` / ``mailto:`` (not ``data:`` — WebView2 ``html=`` uses it);
+  ``app=`` still rejects ``data:`` in Python policy
 - RPC protocol ``version: 1`` (unknown versions → ``RpcProtocolError``);
   ``window.tkwry.cancel(id)`` / ``promise.cancel()`` → ``RpcCancelledError``
 - Typed RPC bind: arity / simple annotation mismatch rejects as ``TypeError``

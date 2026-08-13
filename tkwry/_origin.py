@@ -17,6 +17,12 @@ APP_ORIGINS = frozenset(
 )
 INLINE_ORIGINS = frozenset({"about:blank", "null"})
 _DEFAULT_PORTS = {"http": 80, "https": 443}
+# app= must not escape via opaque documents. Not applied globally in Rust:
+# WebView2 ``html=`` uses NavigateToString (``data:``). untrusted+html= still
+# allows ``data:`` (null origin, no bridge).
+_APP_NAV_DENIED_SCHEMES = frozenset(
+    {"javascript", "data", "vbscript", "blob", "mailto"}
+)
 
 
 def origin_of(url: str | None) -> str:
@@ -114,8 +120,14 @@ def origin_allowed(url: str | None, allowlist: BridgeAllowlist) -> bool:
     return False
 
 
+def _nav_scheme(url: str) -> str:
+    return (urlparse(url.strip()).scheme or "").lower()
+
+
 def app_navigation_allowed(url: str) -> bool:
     """Default ``app=`` policy: stay on ``tkwry://`` (plus blank during load)."""
+    if _nav_scheme(url) in _APP_NAV_DENIED_SCHEMES:
+        return False
     origin = origin_of(url)
     return origin in APP_ORIGINS or origin in INLINE_ORIGINS
 

@@ -66,6 +66,8 @@ def test_app_and_untrusted_navigation_policy() -> None:
     assert app_navigation_allowed("about:blank")
     assert not app_navigation_allowed("https://example.com/")
     assert not app_navigation_allowed("file:///tmp/x")
+    assert not app_navigation_allowed("data:text/html,<p>x</p>")
+    assert not app_navigation_allowed("blob:https://example.com/uuid")
 
     assert untrusted_navigation_allowed("https://example.com/")
     assert untrusted_navigation_allowed("http://localhost:8080/")
