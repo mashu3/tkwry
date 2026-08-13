@@ -493,12 +493,16 @@ class WebViewRpcMixin:
         self._rpc_inflight[req_id] = fut
 
         def _done(done_fut: Future[Any]) -> None:
+            # Worker threads; Tk may already be gone (destroy / pytest teardown).
+            if self._destroyed:
+                return
+
             def _settle() -> None:
                 after_id = self._rpc_timeout_after.pop(req_id, None)
                 if after_id is not None:
                     try:
                         self._frame.after_cancel(after_id)
-                    except (tk.TclError, ValueError):
+                    except (tk.TclError, RuntimeError, ValueError):
                         pass
                 if self._rpc_inflight.pop(req_id, None) is None:
                     return
@@ -520,7 +524,7 @@ class WebViewRpcMixin:
 
             try:
                 self._frame.after_idle(_settle)
-            except tk.TclError:
+            except (tk.TclError, RuntimeError):
                 pass
 
         fut.add_done_callback(_done)

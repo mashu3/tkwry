@@ -54,6 +54,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``WebView.__init__``, README, and ``examples/browser_demo.py``; Python raises
   ``ValueError`` before native create when roots differ
 
+### Fixed
+
+- Worker RPC ``done`` callbacks skip Tk after ``destroy`` (avoids Windows
+  ``Tcl_AsyncDelete`` / ``main thread is not in main loop`` on teardown)
+
 ## [0.1.2] - 2026-08-12
 
 Local ``app=`` / ``tkwry://`` apps, JS↔Python RPC and ``emit``, shared
