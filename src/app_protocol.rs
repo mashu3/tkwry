@@ -37,6 +37,10 @@ pub(crate) fn navigate_url(url: &str) -> Cow<'_, str> {
 }
 
 /// Resolve a request path under ``root``, rejecting ``..`` and absolute escapes.
+///
+/// This only sanitizes URL components. Callers must still
+/// [`resolve_under_root`] so symlinks / junctions / reparse points cannot
+/// escape ``root``.
 pub(crate) fn safe_join(root: &Path, url_path: &str) -> Option<PathBuf> {
     let trimmed = url_path.trim_start_matches('/');
     let mut out = root.to_path_buf();
@@ -54,6 +58,33 @@ pub(crate) fn safe_join(root: &Path, url_path: &str) -> Option<PathBuf> {
         }
     }
     Some(out)
+}
+
+enum ServeResolve {
+    Ok(PathBuf),
+    Forbidden,
+    NotFound,
+}
+
+enum ServeError {
+    Forbidden,
+    NotFound,
+}
+
+/// Canonicalize *candidate* and require the real path to stay under *root*.
+///
+/// Follows symlinks, Windows junctions, and other reparse points. Internal
+/// links that remain inside *root* are allowed; anything that escapes is
+/// forbidden.
+fn resolve_under_root(root: &Path, candidate: &Path) -> ServeResolve {
+    let Ok(root) = root.canonicalize() else {
+        return ServeResolve::NotFound;
+    };
+    match candidate.canonicalize() {
+        Ok(path) if path.starts_with(&root) => ServeResolve::Ok(path),
+        Ok(_) => ServeResolve::Forbidden,
+        Err(_) => ServeResolve::NotFound,
+    }
 }
 
 fn mime_for_path(path: &Path) -> &'static str {
@@ -144,6 +175,21 @@ fn file_response(
     })
 }
 
+fn read_under_root(
+    root: &Path,
+    candidate: &Path,
+    options: &AppServeOptions,
+) -> Result<Response<Cow<'static, [u8]>>, ServeError> {
+    match resolve_under_root(root, candidate) {
+        ServeResolve::Ok(file_path) => match std::fs::read(&file_path) {
+            Ok(bytes) => Ok(file_response(&file_path, bytes, options)),
+            Err(_) => Err(ServeError::NotFound),
+        },
+        ServeResolve::Forbidden => Err(ServeError::Forbidden),
+        ServeResolve::NotFound => Err(ServeError::NotFound),
+    }
+}
+
 /// Serve a file from ``root`` for a ``tkwry://`` request.
 pub(crate) fn serve_app_request(
     root: &Path,
@@ -154,13 +200,18 @@ pub(crate) fn serve_app_request(
     let Some(file_path) = safe_join(root, path) else {
         return error_response(StatusCode::FORBIDDEN, "forbidden path");
     };
-    match std::fs::read(&file_path) {
-        Ok(bytes) => file_response(&file_path, bytes, options),
-        Err(_) => {
+    match read_under_root(root, &file_path, options) {
+        Ok(response) => response,
+        Err(ServeError::Forbidden) => error_response(StatusCode::FORBIDDEN, "forbidden path"),
+        Err(ServeError::NotFound) => {
             if options.spa_fallback && !looks_like_static_asset(path) {
                 let index = root.join("index.html");
-                if let Ok(bytes) = std::fs::read(&index) {
-                    return file_response(&index, bytes, options);
+                match read_under_root(root, &index, options) {
+                    Ok(response) => return response,
+                    Err(ServeError::Forbidden) => {
+                        return error_response(StatusCode::FORBIDDEN, "forbidden path");
+                    }
+                    Err(ServeError::NotFound) => {}
                 }
             }
             error_response(
@@ -226,5 +277,140 @@ mod tests {
         assert!(!looks_like_static_asset("/index.html"));
         assert!(looks_like_static_asset("/assets/app.js"));
         assert!(looks_like_static_asset("/style.css"));
+    }
+
+    fn make_temp_dir(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir =
+            std::env::temp_dir().join(format!("tkwry-app-{label}-{}-{nanos}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    fn try_symlink_file(link: &Path, target: &Path) -> bool {
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(target, link).is_ok()
+        }
+        #[cfg(windows)]
+        {
+            std::os::windows::fs::symlink_file(target, link).is_ok()
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = (link, target);
+            false
+        }
+    }
+
+    fn dummy_request(path: &str) -> Request<Vec<u8>> {
+        Request::builder()
+            .uri(format!("tkwry://localhost{path}"))
+            .body(Vec::new())
+            .unwrap()
+    }
+
+    #[test]
+    fn serve_rejects_symlink_outside_root() {
+        let tmp = make_temp_dir("symlink-escape");
+        let root = tmp.join("app");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("index.html"), b"<p>ok</p>").unwrap();
+        let secret = tmp.join("secret.txt");
+        std::fs::write(&secret, b"secret").unwrap();
+        let link = root.join("leak.txt");
+        if !try_symlink_file(&link, &secret) {
+            let _ = std::fs::remove_dir_all(&tmp);
+            eprintln!("skip serve_rejects_symlink_outside_root: cannot create symlink");
+            return;
+        }
+        let resp = serve_app_request(
+            &root,
+            dummy_request("/leak.txt"),
+            &AppServeOptions::default(),
+        );
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn serve_allows_symlink_inside_root() {
+        let tmp = make_temp_dir("symlink-internal");
+        let root = tmp.join("app");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("index.html"), b"<p>ok</p>").unwrap();
+        let target = root.join("real.js");
+        std::fs::write(&target, b"console.log(1)").unwrap();
+        let link = root.join("alias.js");
+        if !try_symlink_file(&link, &target) {
+            let _ = std::fs::remove_dir_all(&tmp);
+            eprintln!("skip serve_allows_symlink_inside_root: cannot create symlink");
+            return;
+        }
+        let resp = serve_app_request(
+            &root,
+            dummy_request("/alias.js"),
+            &AppServeOptions::default(),
+        );
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.body().as_ref(), b"console.log(1)");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn serve_rejects_junction_outside_root() {
+        let tmp = make_temp_dir("junction-escape");
+        let root = tmp.join("app");
+        let outside = tmp.join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(root.join("index.html"), b"<p>ok</p>").unwrap();
+        std::fs::write(outside.join("secret.txt"), b"secret").unwrap();
+        let link = root.join("escape");
+        let ok = std::process::Command::new("cmd")
+            .args([
+                "/C",
+                "mklink",
+                "/J",
+                &link.to_string_lossy(),
+                &outside.to_string_lossy(),
+            ])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !ok {
+            let _ = std::fs::remove_dir_all(&tmp);
+            eprintln!("skip serve_rejects_junction_outside_root: cannot create junction");
+            return;
+        }
+        let resp = serve_app_request(
+            &root,
+            dummy_request("/escape/secret.txt"),
+            &AppServeOptions::default(),
+        );
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn serve_regular_file_under_root() {
+        let tmp = make_temp_dir("regular");
+        let root = tmp.join("app");
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::write(root.join("index.html"), b"<p>ok</p>").unwrap();
+        std::fs::write(root.join("assets").join("main.js"), b"1").unwrap();
+        let resp = serve_app_request(
+            &root,
+            dummy_request("/assets/main.js"),
+            &AppServeOptions::default(),
+        );
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.body().as_ref(), b"1");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

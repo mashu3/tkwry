@@ -7,6 +7,7 @@ preserving the public ``WebView`` methods unchanged.
 from __future__ import annotations
 
 import os
+import threading
 import tkinter as tk
 import traceback
 from collections.abc import Callable
@@ -15,18 +16,18 @@ from pathlib import Path
 from typing import Any
 
 from tkwry.exceptions import (
+    RpcSerializationError,
     RpcTimeoutError,
     WebViewCreationError,
     WebViewDestroyedError,
 )
 from tkwry.ipc import (
-    RPC_BOOTSTRAP_JS as _RPC_BOOTSTRAP_JS,
-)
-from tkwry.ipc import (
+    MAX_IPC_MESSAGE_BYTES,
     RpcHandler,
     RpcRegistration,
     RpcRequest,
     RpcRunIn,
+    bind_rpc_cancel_event,
     dispatch_rpc,
     emit_script,
     format_rpc_error,
@@ -34,6 +35,9 @@ from tkwry.ipc import (
     parse_rpc_request,
     rpc_error,
     settle_script,
+)
+from tkwry.ipc import (
+    RPC_BOOTSTRAP_JS as _RPC_BOOTSTRAP_JS,
 )
 
 
@@ -56,6 +60,7 @@ class WebViewRpcMixin:
         self._rpc_executor: ThreadPoolExecutor | None = None
         self._rpc_inflight: dict[str, Future[Any]] = {}
         self._rpc_timeout_after: dict[str, str] = {}
+        self._rpc_cancel_events: dict[str, threading.Event] = {}
         self._app_watch_after_id: str | None = None
         self._app_watch_mtime: float | None = None
 
@@ -104,9 +109,13 @@ class WebViewRpcMixin:
         - ``thread=True`` or ``run_in="worker"`` — handler runs on a background
           thread pool; settle returns to Tk via ``after_idle``.
 
-        Optional *timeout* (seconds) rejects the Promise if the handler (or a
-        returned ``Future``) does not finish in time. Re-registering the same
-        name raises ``ValueError`` unless ``replace=True``.
+        Optional *timeout* (seconds) applies to ``run_in="worker"`` handlers
+        and handlers that return a ``Future``. It rejects the Promise if work
+        does not finish in time. ``Future.cancel()`` cannot stop Python that
+        is already running; handlers should poll :func:`tkwry.rpc_cancelled`
+        (or :func:`tkwry.rpc_cancel_event`) for cooperative cancel. Timeout on
+        a synchronous ``run_in="main"`` handler is ignored. Re-registering the
+        same name raises ``ValueError`` unless ``replace=True``.
 
         The low-level ``ipc_handler`` remains available for raw
         ``window.ipc.postMessage`` traffic (IPC = events; RPC = request/response).
@@ -160,15 +169,18 @@ class WebViewRpcMixin:
         """Emit a fire-and-forget event to JavaScript (``window.tkwry.on``).
 
         Complements IPC/RPC (JS → Python). Listeners register with
-        ``window.tkwry.on(event, handler)``. Payload must be JSON-serializable.
+        ``window.tkwry.on(event, handler)``. Payload must be JSON-serializable
+        (``datetime``, NaN/Inf, and custom objects raise
+        :class:`~tkwry.RpcSerializationError`).
         """
         self._require_tk_thread()
         if not event:
             raise ValueError("emit: event name must be non-empty")
+        script = emit_script(event, data)
         self._require_ready("emit")
         self._rpc_bridge_wanted = True
         self._enable_rpc()
-        self.eval_js(emit_script(event, data))
+        self.eval_js(script)
 
     def watch_app(self, *, interval_ms: int = 700) -> None:
         """Poll ``app=`` files and :meth:`reload` when mtimes change (dev helper).
@@ -236,22 +248,33 @@ class WebViewRpcMixin:
             except (tk.TclError, ValueError):
                 pass
         self._rpc_timeout_after.clear()
+        for event in self._rpc_cancel_events.values():
+            event.set()
+        self._rpc_cancel_events.clear()
         for req_id, fut in pending:
             fut.cancel()
             self._settle_rpc(req_id, ok=False, value=error)
+
+    def _signal_rpc_cancel(self, req_id: str) -> None:
+        event = self._rpc_cancel_events.pop(req_id, None)
+        if event is not None:
+            event.set()
+
+    def _drop_rpc_cancel(self, req_id: str) -> None:
+        self._rpc_cancel_events.pop(req_id, None)
 
     def _scan_app_mtime(self) -> float:
         root = Path(self._app_root or "")
         latest = 0.0
         if not root.is_dir():
             return latest
-        for path in root.rglob("*"):
-            if not path.is_file():
-                continue
-            try:
-                latest = max(latest, path.stat().st_mtime)
-            except OSError:
-                continue
+        for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+            for name in filenames:
+                path = Path(dirpath) / name
+                try:
+                    latest = max(latest, path.lstat().st_mtime)
+                except OSError:
+                    continue
         return latest
 
     def _schedule_app_watch(self, interval_ms: int) -> None:
@@ -295,26 +318,51 @@ class WebViewRpcMixin:
             if request is not None:
                 self._handle_rpc_request(request)
                 continue
+            try:
+                oversized = len(message.encode("utf-8")) > MAX_IPC_MESSAGE_BYTES
+            except UnicodeEncodeError:
+                oversized = True
+            if oversized:
+                continue
             handler = self._ipc_handler
             if handler is not None:
                 self._invoke_callback(handler, message)
 
     def _handle_rpc_request(self, request: RpcRequest) -> None:
+        if request.reject is not None:
+            self._settle_rpc(request.id, ok=False, value=request.reject)
+            return
+
         reg = self._rpc_methods.get(request.method)
+        cancel_event = threading.Event()
+        self._rpc_cancel_events[request.id] = cancel_event
 
         def submit_worker(fn: Callable[[], Any]) -> Future[Any]:
-            return self._get_rpc_executor().submit(fn)
+            def wrapped() -> Any:
+                bind_rpc_cancel_event(cancel_event)
+                try:
+                    return fn()
+                finally:
+                    bind_rpc_cancel_event(None)
 
-        outcome = dispatch_rpc(
-            self._rpc_methods,
-            request,
-            submit_worker=submit_worker,
-            include_traceback=self._rpc_traceback,
-        )
+            return self._get_rpc_executor().submit(wrapped)
+
+        bind_rpc_cancel_event(cancel_event)
+        try:
+            outcome = dispatch_rpc(
+                self._rpc_methods,
+                request,
+                submit_worker=submit_worker,
+                include_traceback=self._rpc_traceback,
+            )
+        finally:
+            bind_rpc_cancel_event(None)
+
         timeout = reg.timeout if reg is not None else None
         if isinstance(outcome, Future):
             self._track_rpc_future(request.id, outcome, timeout=timeout)
             return
+        self._drop_rpc_cancel(request.id)
         ok, value = outcome
         self._settle_rpc(request.id, ok=ok, value=value)
 
@@ -339,6 +387,7 @@ class WebViewRpcMixin:
                     return
                 if self._destroyed:
                     return
+                self._drop_rpc_cancel(req_id)
                 try:
                     value = done_fut.result()
                 except Exception as exc:
@@ -347,20 +396,6 @@ class WebViewRpcMixin:
                         ok=False,
                         value=format_rpc_error(
                             exc, include_traceback=self._rpc_traceback
-                        ),
-                    )
-                    return
-                try:
-                    import json as _json
-
-                    _json.dumps(value)
-                except (TypeError, ValueError):
-                    self._settle_rpc(
-                        req_id,
-                        ok=False,
-                        value=rpc_error(
-                            "RpcSerializationError",
-                            "rpc result is not JSON-serializable",
                         ),
                     )
                     return
@@ -381,6 +416,7 @@ class WebViewRpcMixin:
             pending = self._rpc_inflight.pop(req_id, None)
             if pending is None:
                 return
+            self._signal_rpc_cancel(req_id)
             pending.cancel()
             if self._destroyed:
                 return
@@ -401,7 +437,21 @@ class WebViewRpcMixin:
             pass
 
     def _settle_rpc(self, req_id: str, *, ok: bool, value: object) -> None:
-        script = settle_script(req_id, ok=ok, value=value)
+        try:
+            script = settle_script(req_id, ok=ok, value=value)
+        except RpcSerializationError:
+            try:
+                script = settle_script(
+                    req_id,
+                    ok=False,
+                    value=rpc_error(
+                        "RpcSerializationError",
+                        "value is not JSON-serializable",
+                    ),
+                )
+            except RpcSerializationError:
+                traceback.print_exc()
+                return
         native = self._webview
         if native is None:
             return

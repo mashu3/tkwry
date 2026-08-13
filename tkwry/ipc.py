@@ -17,17 +17,32 @@ RPC is queued separately from IPC so event floods cannot drop calls.
 from __future__ import annotations
 
 import json
+import re
+import threading
 import traceback
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypeAlias
 
+from tkwry.exceptions import RpcSerializationError
+
 RpcHandler: TypeAlias = Callable[..., Any]
 RpcRunIn: TypeAlias = Literal["main", "worker"]
 
 RPC_MARKER = "rpc"
 RPC_KEY = "__tkwry"
+RPC_REJECT_KEY = "__tkwry_reject"
+
+# Keep in sync with ``MAX_IPC_MESSAGE_BYTES`` / ``MAX_RPC_MESSAGE_BYTES`` in src/lib.rs.
+MAX_RPC_MESSAGE_BYTES = 10 * 1024 * 1024
+MAX_IPC_MESSAGE_BYTES = MAX_RPC_MESSAGE_BYTES
+MAX_RPC_ARGS = 256
+MAX_RPC_KWARGS = 256
+_RPC_ID_SCAN_CHARS = 8192
+_RPC_ID_RE = re.compile(r'"id"\s*:\s*"((?:\\.|[^"\\])*)"')
+
+_rpc_tls = threading.local()
 
 # Injected before user initialization_script / via eval_js after create.
 RPC_BOOTSTRAP_JS = """\
@@ -152,12 +167,71 @@ RPC_BOOTSTRAP_JS = """\
 """
 
 
+def rpc_cancelled() -> bool:
+    """Return whether the current RPC call has been timed out or aborted.
+
+    Worker handlers should poll this during long work. Timeout and
+    :meth:`~tkwry.WebView.destroy` set the flag; they do **not** forcibly
+    stop Python already running on a worker thread.
+    """
+    event = getattr(_rpc_tls, "cancel_event", None)
+    return isinstance(event, threading.Event) and event.is_set()
+
+
+def rpc_cancel_event() -> threading.Event | None:
+    """Return the cancellation event for the current RPC, or ``None``.
+
+    Capture this inside a handler if background work runs on another thread
+    that should observe :func:`rpc_cancelled`.
+    """
+    event = getattr(_rpc_tls, "cancel_event", None)
+    if isinstance(event, threading.Event):
+        return event
+    return None
+
+
+def bind_rpc_cancel_event(event: threading.Event | None) -> None:
+    """Associate *event* with this thread for :func:`rpc_cancelled` (internal)."""
+    _rpc_tls.cancel_event = event
+
+
+def dumps_rpc_json(value: Any) -> str:
+    """Serialize *value* with strict JSON (no ``default=str``, no NaN/Inf)."""
+    try:
+        return json.dumps(value, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise RpcSerializationError(
+            "value is not JSON-serializable"
+        ) from exc
+
+
+def _extract_rpc_request_id(message: str) -> str | None:
+    match = _RPC_ID_RE.search(message[:_RPC_ID_SCAN_CHARS])
+    if match is None:
+        return None
+    try:
+        loaded = json.loads(f'"{match.group(1)}"')
+    except json.JSONDecodeError:
+        return None
+    if isinstance(loaded, str) and loaded:
+        return loaded
+    return None
+
+
+def _message_size(message: str) -> int | None:
+    try:
+        return len(message.encode("utf-8"))
+    except UnicodeEncodeError:
+        return None
+
+
 @dataclass(frozen=True, slots=True)
 class RpcRequest:
     id: str
     method: str
     params: tuple[Any, ...]
     kwargs: dict[str, Any] = field(default_factory=dict)
+    reject: dict[str, str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +249,23 @@ def is_rpc_envelope(data: object) -> bool:
 
 def parse_rpc_request(message: str) -> RpcRequest | None:
     """Return an :class:`RpcRequest` if *message* is a tkwry RPC envelope."""
+    size = _message_size(message)
+    if size is None:
+        return None
+    if size > MAX_RPC_MESSAGE_BYTES:
+        req_id = _extract_rpc_request_id(message)
+        if not req_id:
+            return None
+        return RpcRequest(
+            id=req_id,
+            method="",
+            params=(),
+            reject=rpc_error(
+                "RpcMessageTooLarge",
+                f"RPC message exceeds {MAX_RPC_MESSAGE_BYTES} byte limit "
+                f"({size} bytes)",
+            ),
+        )
     try:
         data = json.loads(message)
     except json.JSONDecodeError:
@@ -182,9 +273,20 @@ def parse_rpc_request(message: str) -> RpcRequest | None:
     if not is_rpc_envelope(data):
         return None
     req_id = data.get("id")
-    method = data.get("method")
     if not isinstance(req_id, str) or not req_id:
         return None
+    reject_type = data.get(RPC_REJECT_KEY)
+    if isinstance(reject_type, str) and reject_type:
+        message_text = data.get("message")
+        if not isinstance(message_text, str) or not message_text:
+            message_text = reject_type
+        return RpcRequest(
+            id=req_id,
+            method="",
+            params=(),
+            reject=rpc_error(reject_type, message_text),
+        )
+    method = data.get("method")
     if not isinstance(method, str) or not method:
         return None
     params = data.get("params", [])
@@ -203,6 +305,26 @@ def parse_rpc_request(message: str) -> RpcRequest | None:
         kwargs = dict(kwargs_raw)
     else:
         return None
+    if len(params) > MAX_RPC_ARGS:
+        return RpcRequest(
+            id=req_id,
+            method=method,
+            params=(),
+            reject=rpc_error(
+                "RpcArgumentLimitError",
+                f"too many positional arguments ({len(params)} > {MAX_RPC_ARGS})",
+            ),
+        )
+    if len(kwargs) > MAX_RPC_KWARGS:
+        return RpcRequest(
+            id=req_id,
+            method=method,
+            params=(),
+            reject=rpc_error(
+                "RpcArgumentLimitError",
+                f"too many keyword arguments ({len(kwargs)} > {MAX_RPC_KWARGS})",
+            ),
+        )
     return RpcRequest(id=req_id, method=method, params=tuple(params), kwargs=kwargs)
 
 
@@ -229,8 +351,11 @@ def rpc_error(type_name: str, message: str) -> dict[str, str]:
 
 
 def settle_script(req_id: str, *, ok: bool, value: Any) -> str:
-    """Build ``eval_js`` source that resolves/rejects a pending Promise."""
-    payload = json.dumps(value, ensure_ascii=False, default=str)
+    """Build ``eval_js`` source that resolves/rejects a pending Promise.
+
+    Raises :class:`~tkwry.RpcSerializationError` if *value* is not JSON.
+    """
+    payload = dumps_rpc_json(value)
     return (
         "window.tkwry && window.tkwry._settle("
         f"{json.dumps(req_id)}, {json.dumps(ok)}, {payload});"
@@ -238,8 +363,11 @@ def settle_script(req_id: str, *, ok: bool, value: Any) -> str:
 
 
 def emit_script(event: str, data: Any = None) -> str:
-    """Build ``eval_js`` source that delivers a Python→JS event."""
-    payload = json.dumps(data, ensure_ascii=False, default=str)
+    """Build ``eval_js`` source that delivers a Python→JS event.
+
+    Raises :class:`~tkwry.RpcSerializationError` if *data* is not JSON.
+    """
+    payload = dumps_rpc_json(data)
     return f"window.tkwry && window.tkwry._emit({json.dumps(event)}, {payload});"
 
 
@@ -270,6 +398,8 @@ def dispatch_rpc(
     are passed through. Default ``run_in="main"`` runs on the caller thread
     (Tk main thread in the WebView).
     """
+    if request.reject is not None:
+        return False, request.reject
     entry = methods.get(request.method)
     if entry is None:
         return False, rpc_error(
@@ -298,12 +428,9 @@ def dispatch_rpc(
     if isinstance(result, Future):
         return result
     try:
-        json.dumps(result)
-    except (TypeError, ValueError):
-        return False, rpc_error(
-            "RpcSerializationError",
-            "rpc result is not JSON-serializable",
-        )
+        dumps_rpc_json(result)
+    except RpcSerializationError as exc:
+        return False, format_rpc_error(exc)
     return True, result
 
 

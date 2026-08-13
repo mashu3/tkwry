@@ -29,9 +29,14 @@ def resolve_app(app: str | Path) -> tuple[str, str]:
     - a path to an ``.html`` / ``.htm`` file (root = parent directory)
 
     Returns an absolute filesystem root and a ``tkwry://localhost/...`` URL.
+
+    The native ``tkwry://`` handler canonicalizes each request (following
+    symlinks, Windows junctions, and reparse points) and refuses anything
+    outside this root. Internal links that stay under the root are allowed.
     """
     path = Path(app).expanduser()
     # Match file-URL policy: do not follow symlinks via resolve().
+    # Serving still canonicalizes per request so links cannot escape root.
     path = path.absolute()
     if path.is_file():
         if path.suffix.lower() not in {".html", ".htm"}:

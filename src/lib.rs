@@ -58,8 +58,12 @@ const NAV_SYNC_DEFAULT_MISSING: bool = true;
 /// Drag-drop events without a position from the platform (e.g. Leave).
 const DRAG_DROP_NO_POSITION: (i32, i32) = (-1, -1);
 
-/// Maximum IPC message size (10 MiB). Messages exceeding this are dropped.
+/// Maximum IPC / RPC message size (10 MiB). Oversized IPC is dropped; oversized
+/// RPC tries to settle with ``RpcMessageTooLarge`` when the request id can be
+/// recovered. Keep in sync with ``tkwry.ipc.MAX_RPC_MESSAGE_BYTES``.
 const MAX_IPC_MESSAGE_BYTES: usize = 10 * 1024 * 1024;
+const MAX_RPC_MESSAGE_BYTES: usize = MAX_IPC_MESSAGE_BYTES;
+const RPC_ID_SCAN_BYTES: usize = 8192;
 
 /// Navigation/new-window hooks block the WebKit thread until the Tk thread drains
 /// them; cap wait time so a stuck handler cannot freeze the page indefinitely.
@@ -620,6 +624,129 @@ fn is_rpc_envelope(body: &str) -> bool {
     rest.trim_start().starts_with("\"rpc\"")
 }
 
+fn json_escape_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", u32::from(c))),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn scan_prefix(body: &str, max_bytes: usize) -> &str {
+    if body.len() <= max_bytes {
+        return body;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    &body[..end]
+}
+
+/// Scan the start of an RPC envelope for ``"id": "..."`` without parsing JSON.
+fn extract_rpc_request_id(body: &str) -> Option<&str> {
+    let head = scan_prefix(body, RPC_ID_SCAN_BYTES);
+    let mut rest = head;
+    while let Some(at) = rest.find("\"id\"") {
+        let after_key = rest[at + 4..].trim_start();
+        let Some(after_colon) = after_key.strip_prefix(':').map(str::trim_start) else {
+            rest = &rest[at + 4..];
+            continue;
+        };
+        let Some(after_quote) = after_colon.strip_prefix('"') else {
+            rest = &rest[at + 4..];
+            continue;
+        };
+        let Some(end) = after_quote.find('"') else {
+            return None;
+        };
+        let id = &after_quote[..end];
+        if !id.is_empty() {
+            return Some(id);
+        }
+        rest = &rest[at + 4..];
+    }
+    None
+}
+
+fn rpc_reject_envelope(id: &str, type_name: &str, message: &str) -> String {
+    format!(
+        r#"{{"__tkwry":"rpc","id":"{}","__tkwry_reject":"{}","message":"{}"}}"#,
+        json_escape_string(id),
+        json_escape_string(type_name),
+        json_escape_string(message),
+    )
+}
+
+/// Apply per-message size limits, then queue IPC/RPC bodies.
+///
+/// Oversized RPC is replaced with a small ``RpcMessageTooLarge`` envelope when
+/// the request id can be recovered so the JS Promise can reject.
+fn enqueue_window_ipc_body(
+    listening: &AtomicBool,
+    ipc_pending: &IpcPending,
+    ipc_dropped: &AtomicU64,
+    rpc_pending: &IpcPending,
+    rpc_dropped: &AtomicU64,
+    body: String,
+    wakeup: Option<&Arc<AtomicI32>>,
+) -> Result<(), ()> {
+    let rpc = is_rpc_envelope(&body);
+    let limit = if rpc {
+        MAX_RPC_MESSAGE_BYTES
+    } else {
+        MAX_IPC_MESSAGE_BYTES
+    };
+    if body.len() > limit {
+        if rpc {
+            if let Some(id) = extract_rpc_request_id(&body) {
+                let envelope = rpc_reject_envelope(
+                    id,
+                    "RpcMessageTooLarge",
+                    &format!(
+                        "RPC message exceeds {limit} byte limit ({} bytes)",
+                        body.len()
+                    ),
+                );
+                return push_window_ipc_body(
+                    listening,
+                    ipc_pending,
+                    ipc_dropped,
+                    rpc_pending,
+                    rpc_dropped,
+                    envelope,
+                    wakeup,
+                );
+            }
+        }
+        let dropped = if rpc { rpc_dropped } else { ipc_dropped };
+        let label = if rpc { "RPC" } else { "IPC" };
+        dropped.fetch_add(1, Ordering::SeqCst);
+        eprintln!(
+            "tkwry: {label} message dropped ({} bytes exceeds {limit} byte limit)",
+            body.len()
+        );
+        return Ok(());
+    }
+    push_window_ipc_body(
+        listening,
+        ipc_pending,
+        ipc_dropped,
+        rpc_pending,
+        rpc_dropped,
+        body,
+        wakeup,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn push_window_ipc_body(
     listening: &AtomicBool,
@@ -1043,23 +1170,7 @@ impl WebView {
         let wakeup_for_ipc = wakeup_write_fd.clone();
         let ipc_handler_wry = move |req: wry::http::Request<String>| {
             let body = req.body().clone();
-            if body.len() > MAX_IPC_MESSAGE_BYTES {
-                let rpc = is_rpc_envelope(&body);
-                let dropped = if rpc {
-                    &rpc_overflow_clone
-                } else {
-                    &ipc_overflow_clone
-                };
-                let label = if rpc { "RPC" } else { "IPC" };
-                dropped.fetch_add(1, Ordering::SeqCst);
-                eprintln!(
-                    "tkwry: {label} message dropped ({} bytes exceeds {} byte limit)",
-                    body.len(),
-                    MAX_IPC_MESSAGE_BYTES
-                );
-                return;
-            }
-            let _ = push_window_ipc_body(
+            let _ = enqueue_window_ipc_body(
                 &ipc_listening_clone,
                 &ipc_pending_clone,
                 &ipc_overflow_clone,
@@ -1265,7 +1376,10 @@ impl WebView {
         }
 
         if register_app {
-            let root_for_protocol = app_root_path.expect("register_app implies app_root");
+            let root_for_protocol = {
+                let root = app_root_path.expect("register_app implies app_root");
+                root.canonicalize().unwrap_or(root)
+            };
             let serve_options = app_protocol::AppServeOptions {
                 spa_fallback,
                 cache_control: app_cache_control,
@@ -1531,6 +1645,33 @@ impl WebView {
 
     fn _enqueue_ipc_message(&self, message: String) -> PyResult<()> {
         self.require_owner_thread()?;
+        if is_rpc_envelope(&message) && message.len() > MAX_RPC_MESSAGE_BYTES {
+            if let Some(id) = extract_rpc_request_id(&message) {
+                let envelope = rpc_reject_envelope(
+                    id,
+                    "RpcMessageTooLarge",
+                    &format!(
+                        "RPC message exceeds {} byte limit ({} bytes)",
+                        MAX_RPC_MESSAGE_BYTES,
+                        message.len()
+                    ),
+                );
+                return push_window_ipc_body(
+                    &self.ipc_listening,
+                    &self.ipc_pending,
+                    &self.ipc_overflow_dropped,
+                    &self.rpc_pending,
+                    &self.rpc_overflow_dropped,
+                    envelope,
+                    None,
+                )
+                .map_err(|()| queue_lock_poisoned());
+            }
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "RPC message exceeds {} byte limit",
+                MAX_RPC_MESSAGE_BYTES
+            )));
+        }
         if message.len() > MAX_IPC_MESSAGE_BYTES {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(
                 "IPC message exceeds {} byte limit",
@@ -2023,6 +2164,47 @@ mod tests {
         assert!(!is_rpc_envelope(r#"{"action":"increment"}"#));
         assert!(!is_rpc_envelope("not-json"));
         assert!(!is_rpc_envelope(r#"{"__tkwry":"event"}"#));
+    }
+
+    #[test]
+    fn extract_rpc_request_id_from_envelope() {
+        assert_eq!(
+            extract_rpc_request_id(r#"{"__tkwry":"rpc","id":"r42","method":"x"}"#),
+            Some("r42")
+        );
+        assert_eq!(
+            extract_rpc_request_id(r#"{ "id" : "spaced" , "__tkwry":"rpc"}"#),
+            Some("spaced")
+        );
+        assert_eq!(extract_rpc_request_id(r#"{"action":"x"}"#), None);
+        assert_eq!(extract_rpc_request_id("not-json"), None);
+    }
+
+    #[test]
+    fn oversized_rpc_enqueues_reject_envelope() {
+        let listening = AtomicBool::new(true);
+        let ipc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
+        let rpc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
+        let ipc_dropped = AtomicU64::new(0);
+        let rpc_dropped = AtomicU64::new(0);
+        let padding = "x".repeat(MAX_RPC_MESSAGE_BYTES + 8);
+        let body = format!(r#"{{"__tkwry":"rpc","id":"r9","method":"x","params":["{padding}"]}}"#);
+        assert!(enqueue_window_ipc_body(
+            &listening,
+            &ipc_pending,
+            &ipc_dropped,
+            &rpc_pending,
+            &rpc_dropped,
+            body,
+            None,
+        )
+        .is_ok());
+        assert_eq!(rpc_dropped.load(Ordering::SeqCst), 0);
+        let queued = rpc_pending.lock().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert!(queued[0].contains("RpcMessageTooLarge"));
+        assert!(queued[0].contains(r#""id":"r9""#));
+        assert!(queued[0].len() < 4096);
     }
 
     #[test]

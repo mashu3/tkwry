@@ -18,4 +18,18 @@ class WebViewDestroyedError(RuntimeError):
 
 
 class RpcTimeoutError(TimeoutError):
-    """Structured RPC error when an exposed handler exceeds its timeout."""
+    """Structured RPC error when an exposed handler exceeds its timeout.
+
+    Timeout rejects the JS Promise and signals cooperative cancellation
+    (:func:`tkwry.rpc_cancelled`). It does **not** forcibly stop Python
+    already running on a worker thread; ``Future.cancel()`` only skips
+    work that has not started.
+    """
+
+
+class RpcSerializationError(ValueError):
+    """Raised when an RPC result or ``emit`` payload is not JSON-serializable.
+
+    ``datetime``, custom objects, ``NaN`` / ``Infinity``, and anything else
+    outside standard JSON fail explicitly instead of being stringified.
+    """

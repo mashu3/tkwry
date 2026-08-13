@@ -4,6 +4,29 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- ``tkwry://`` / ``app=`` serving canonicalizes paths and refuses symlinks,
+  Windows junctions, and reparse points that escape the app root
+- ``RpcSerializationError`` for non-JSON RPC results and ``emit`` payloads
+  (no more ``default=str`` / NaN / Infinity)
+- Structured ``RpcMessageTooLarge`` when an RPC envelope exceeds 10 MiB
+  (request id is recovered when possible so the Promise can reject)
+- ``RpcArgumentLimitError`` when an RPC call has more than 256 positional
+  args or kwargs
+- Cooperative RPC cancel: ``rpc_cancelled()`` / ``rpc_cancel_event()``;
+  timeout and destroy set the flag (``Future.cancel()`` still cannot stop
+  running Python)
+
+### Changed
+
+- Documented that ``expose(timeout=…)`` does not preempt worker threads and
+  is ignored for synchronous ``run_in="main"`` handlers
+- ``watch_app()`` no longer follows directory or file symlinks when scanning
+  mtimes
+
 ## [0.1.2] - 2026-08-12
 
 Local ``app=`` / ``tkwry://`` apps, JS↔Python RPC and ``emit``, shared

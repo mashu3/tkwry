@@ -13,7 +13,7 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from tkwry import WebView
+from tkwry import WebView, rpc_cancelled
 
 HTML = """\
 <!DOCTYPE html>
@@ -253,7 +253,11 @@ def main() -> None:
 
     @web.expose(thread=True, timeout=15.0)
     def heavy() -> int:
-        time.sleep(0.4)
+        deadline = time.monotonic() + 0.4
+        while time.monotonic() < deadline:
+            if rpc_cancelled():
+                break
+            time.sleep(0.05)
         return threading.get_ident()
 
     def tk_increment(delta: int) -> None:

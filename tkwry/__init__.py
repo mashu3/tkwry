@@ -4,11 +4,13 @@ import sys
 
 from tkwry._version import __version__
 from tkwry.exceptions import (
+    RpcSerializationError,
     RpcTimeoutError,
     WebViewCreationError,
     WebViewDestroyedError,
     WebViewNotReadyError,
 )
+from tkwry.ipc import rpc_cancel_event, rpc_cancelled
 
 _LINUX_CORE_BUILD_HINT = (
     "tkwry publishes pre-built wheels for Windows and macOS only. "
@@ -70,7 +72,10 @@ __all__ = [
     "PageLoadEvent",
     "PageLoadHandler",
     "TitleChangedHandler",
+    "RpcSerializationError",
     "RpcTimeoutError",
+    "rpc_cancel_event",
+    "rpc_cancelled",
     "WebSession",
     "WebView",
     "WebViewCreationError",

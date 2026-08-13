@@ -108,6 +108,9 @@ def test_public_exports() -> None:
     assert tkwry.WebViewCreationError is not None
     assert tkwry.WebViewDestroyedError is not None
     assert tkwry.RpcTimeoutError is not None
+    assert tkwry.RpcSerializationError is not None
+    assert tkwry.rpc_cancelled is not None
+    assert tkwry.rpc_cancel_event is not None
     for alias in PUBLIC_TYPE_ALIASES:
         assert alias is not None
 

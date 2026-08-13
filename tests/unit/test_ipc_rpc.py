@@ -4,15 +4,25 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import Future
+from datetime import datetime, timezone
 
+import pytest
+
+from tkwry.exceptions import RpcSerializationError
 from tkwry.ipc import (
+    MAX_RPC_ARGS,
+    MAX_RPC_KWARGS,
+    MAX_RPC_MESSAGE_BYTES,
     RPC_BOOTSTRAP_JS,
     RpcRegistration,
+    RpcRequest,
     dispatch_rpc,
     emit_script,
     format_rpc_error,
     merge_initialization_script,
     parse_rpc_request,
+    rpc_cancel_event,
+    rpc_cancelled,
     settle_script,
 )
 
@@ -100,6 +110,81 @@ def test_dispatch_rpc_future_passthrough() -> None:
     assert outcome is fut
 
 
+def test_parse_rpc_request_rejects_oversize(monkeypatch: pytest.MonkeyPatch) -> None:
+    import tkwry.ipc as ipc
+
+    monkeypatch.setattr(ipc, "MAX_RPC_MESSAGE_BYTES", 64)
+    raw = json.dumps(
+        {"__tkwry": "rpc", "id": "r9", "method": "x", "params": ["y" * 80]}
+    )
+    req = ipc.parse_rpc_request(raw)
+    assert req is not None
+    assert req.id == "r9"
+    assert req.reject is not None
+    assert req.reject["type"] == "RpcMessageTooLarge"
+    ok, value = dispatch_rpc({}, req)
+    assert ok is False
+    assert value["type"] == "RpcMessageTooLarge"
+
+
+def test_parse_rpc_request_rejects_native_reject_envelope() -> None:
+    raw = json.dumps(
+        {
+            "__tkwry": "rpc",
+            "id": "r1",
+            "__tkwry_reject": "RpcMessageTooLarge",
+            "message": "RPC message exceeds limit",
+        }
+    )
+    req = parse_rpc_request(raw)
+    assert req is not None
+    assert req.reject is not None
+    assert req.reject["type"] == "RpcMessageTooLarge"
+    assert "exceeds" in req.reject["message"]
+
+
+def test_parse_rpc_request_rejects_too_many_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tkwry.ipc as ipc
+
+    monkeypatch.setattr(ipc, "MAX_RPC_ARGS", 2)
+    raw = json.dumps(
+        {"__tkwry": "rpc", "id": "r1", "method": "x", "params": [1, 2, 3]}
+    )
+    req = ipc.parse_rpc_request(raw)
+    assert req is not None
+    assert req.reject is not None
+    assert req.reject["type"] == "RpcArgumentLimitError"
+
+
+def test_parse_rpc_request_rejects_too_many_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tkwry.ipc as ipc
+
+    monkeypatch.setattr(ipc, "MAX_RPC_KWARGS", 1)
+    raw = json.dumps(
+        {
+            "__tkwry": "rpc",
+            "id": "r1",
+            "method": "x",
+            "params": [],
+            "kwargs": {"a": 1, "b": 2},
+        }
+    )
+    req = ipc.parse_rpc_request(raw)
+    assert req is not None
+    assert req.reject is not None
+    assert req.reject["type"] == "RpcArgumentLimitError"
+
+
+def test_rpc_limits_match_documented_defaults() -> None:
+    assert MAX_RPC_MESSAGE_BYTES == 10 * 1024 * 1024
+    assert MAX_RPC_ARGS == 256
+    assert MAX_RPC_KWARGS == 256
+
+
 def test_dispatch_rpc_exception_and_non_json() -> None:
     def boom() -> None:
         raise RuntimeError("nope")
@@ -132,6 +217,56 @@ def test_dispatch_rpc_exception_and_non_json() -> None:
     ok, value = dispatch_rpc({"bad": bad_result}, bad_req)
     assert ok is False
     assert value["type"] == "RpcSerializationError"
+
+
+def test_dispatch_rpc_rejects_datetime_and_nan() -> None:
+    def now() -> datetime:
+        return datetime.now(timezone.utc)
+
+    def inf() -> float:
+        return float("inf")
+
+    req = parse_rpc_request(
+        json.dumps({"__tkwry": "rpc", "id": "1", "method": "now", "params": []})
+    )
+    assert req is not None
+    ok, value = dispatch_rpc({"now": now}, req)
+    assert ok is False
+    assert value["type"] == "RpcSerializationError"
+
+    inf_req = parse_rpc_request(
+        json.dumps({"__tkwry": "rpc", "id": "2", "method": "inf", "params": []})
+    )
+    assert inf_req is not None
+    ok, value = dispatch_rpc({"inf": inf}, inf_req)
+    assert ok is False
+    assert value["type"] == "RpcSerializationError"
+
+
+def test_settle_and_emit_reject_non_json() -> None:
+    with pytest.raises(RpcSerializationError):
+        settle_script("r1", ok=True, value=object())
+    with pytest.raises(RpcSerializationError):
+        emit_script("evt", datetime.now(timezone.utc))
+    with pytest.raises(RpcSerializationError):
+        emit_script("evt", float("nan"))
+
+
+def test_rpc_cancelled_false_outside_handler() -> None:
+    assert rpc_cancelled() is False
+    assert rpc_cancel_event() is None
+
+
+def test_dispatch_rpc_reject_passthrough() -> None:
+    req = RpcRequest(
+        id="r1",
+        method="",
+        params=(),
+        reject={"type": "RpcMessageTooLarge", "message": "too big"},
+    )
+    ok, value = dispatch_rpc({}, req)
+    assert ok is False
+    assert value["type"] == "RpcMessageTooLarge"
 
 
 def test_dispatch_rpc_worker_submit() -> None:

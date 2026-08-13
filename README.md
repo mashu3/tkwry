@@ -157,6 +157,9 @@ web = WebView(frame, app="./web")          # loads tkwry://localhost/index.html
 Constructor ``app=`` fixes the filesystem root at create time. Later
 ``load_url("tkwry://localhost/other.html")`` can navigate within that root
 (Windows WebView2 rewrites this to ``https://tkwry.localhost/...`` internally).
+The ``tkwry://`` handler canonicalizes each path (following symlinks, Windows
+junctions, and reparse points) and returns 403 if the real file would leave
+the app root; internal links that stay under the root are allowed.
 Monaco / CDN scripts may still be loaded from the network inside that HTML when
 you choose not to vendor them yet. The Plotly demo toggles **CDN** vs **Local**
 (``app=``); Local caches ``plotly.js`` under ``examples/.vendor/``.
@@ -178,7 +181,11 @@ def read_file(path: str) -> str:
 # Heavy I/O / CPU — run off the Tk thread so the UI stays responsive
 @web.expose(thread=True, timeout=30.0)
 def heavy_task(data: dict) -> dict:
+    from tkwry import rpc_cancelled
+
     ...
+    if rpc_cancelled():
+        return {"status": "cancelled"}
     return result
 ```
 
@@ -194,13 +201,27 @@ await window.tkwry.call("heavy_task", payload, {
 **Execution model:** default handlers run on the **Tk main thread** (safe for
 Tk APIs; long work blocks the UI). Pass ``thread=True`` / ``run_in="worker"``
 to use a background pool. Handlers may also return a
-``concurrent.futures.Future``. Errors reject the Promise with a structured
-payload (``error.name`` / ``error.message``; set ``rpc_traceback=True`` or
-``TKWRY_RPC_TRACEBACK=1`` for tracebacks). Duplicate method names raise unless
-``replace=True``. Destroy rejects in-flight RPCs. Keyword args go in
-``{ kwargs: { … } }`` (a trailing ``{ timeout: ms }`` is still call options,
-not a positional dict). Worker ``cancel`` is cooperative. RPC has its own
-2048-deep queue so IPC overflow cannot drop ``tkwry.call``.
+``concurrent.futures.Future``. Return values and ``emit`` payloads must be
+strict JSON (no ``datetime``, custom objects, ``NaN`` / ``Infinity``) —
+otherwise the Promise rejects / ``emit`` raises ``RpcSerializationError``.
+Errors reject the Promise with a structured payload (``error.name`` /
+``error.message``; set ``rpc_traceback=True`` or ``TKWRY_RPC_TRACEBACK=1``
+for tracebacks). Duplicate method names raise unless ``replace=True``.
+Destroy rejects in-flight RPCs. Keyword args go in ``{ kwargs: { … } }``
+(a trailing ``{ timeout: ms }`` is still call options, not a positional dict).
+
+**Timeout & cancel:** optional ``timeout`` on ``expose`` applies to worker
+handlers and returned ``Future``s (ignored for a synchronous main-thread
+handler). It rejects the JS Promise and sets a cooperative cancel flag;
+``Future.cancel()`` cannot stop Python that is already running on a worker.
+Long handlers should poll ``rpc_cancelled()`` (or capture
+``rpc_cancel_event()`` for other threads). JS ``call(..., { timeout: ms })``
+is independent and only settles the Promise on the JS side.
+
+**Limits:** IPC/RPC messages cap at **10 MiB**; RPC allows at most **256**
+positional args and **256** kwargs. Oversized RPC rejects with
+``RpcMessageTooLarge``; too many args with ``RpcArgumentLimitError``. RPC has
+its own 2048-deep queue so IPC overflow cannot drop ``tkwry.call``.
 
 ### Python → JS events (``emit``)
 
@@ -296,7 +317,7 @@ deferred): WKWebView deadlocks. Intercept links in JS instead (see
 [`examples/browser_demo.py`](examples/browser_demo.py)). Timed-out sync hooks
 are canceled after about **60s** total wait.
 
-Async queues (IPC, RPC, page-load, title, drag-drop, eval) cap at **2048** pending items each; further events are compacted or dropped. RPC is a separate queue from IPC. Use `take_queue_drop_counts()` to observe overflows — it returns `(ipc, page_load, title, drag_drop, eval, rpc)`.
+Async queues (IPC, RPC, page-load, title, drag-drop, eval) cap at **2048** pending items each; further events are compacted or dropped. Each IPC/RPC **message** also caps at **10 MiB**. RPC is a separate queue from IPC. Use `take_queue_drop_counts()` to observe overflows — it returns `(ipc, page_load, title, drag_drop, eval, rpc)`.
 
 Callback exceptions are printed to stderr and do not stop event delivery.
 
@@ -346,7 +367,7 @@ Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`, `WebViewPhase`.
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
-`RpcTimeoutError`.
+`RpcTimeoutError`, `RpcSerializationError`. Helpers: `rpc_cancelled`, `rpc_cancel_event`.
 
 Type aliases: `IpcHandler`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`.
 
@@ -366,7 +387,8 @@ Short checklist — **details live in [Platform notes](#-platform-notes)** (espe
 - **macOS IME / focus** — not Safari-parity; mid-composition focus flips can mis-route input
 - **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
 - **`url()` on macOS** — may be `None` for inline HTML until a concrete `load_url` (WKWebView has no document `NSURL`)
-- **Sync hooks / queues** — `on_navigation` / `on_new_window` may block WebKit up to ~60s; do not create a WebView from `on_new_window`; async event queues cap at 2048 (see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks))
+- **Sync hooks / queues** — `on_navigation` / `on_new_window` may block WebKit up to ~60s; do not create a WebView from `on_new_window`; async event queues cap at 2048; IPC/RPC messages cap at 10 MiB (see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks))
+- **RPC timeout** — rejects the Promise and sets `rpc_cancelled()`; does **not** kill an already-running Python worker (`Future.cancel()` is cooperative only)
 - **Drag & drop** — WebView area only (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
@@ -421,8 +443,8 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 
 ## 🧩 Features
 
-- **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, `watch_app()` hot reload)
-- **IPC / RPC / emit** — events vs request/response; worker RPC; structured errors; Python→JS `emit`
+- **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, `watch_app()` hot reload; symlink/junction confinement)
+- **IPC / RPC / emit** — events vs request/response; worker RPC; strict JSON; cooperative cancel; Python→JS `emit`
 - **WebSession** — shared wry `WebContext` (cookies / cache / localStorage) across WebViews
 - **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay

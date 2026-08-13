@@ -226,6 +226,8 @@ class WebView(WebViewRpcMixin):
     entry file is served through the ``tkwry://`` custom protocol — relative
     CSS/JS/assets resolve without a localhost HTTP server. Relative navigation
     uses ``tkwry://localhost/...``. The app root is fixed at create time.
+    Requests are canonicalized (symlinks, Windows junctions, reparse points);
+    paths that escape the root are forbidden.
 
     **Sessions** (``session=`` / ``data_directory=`` / ``ephemeral=``): share a
     wry ``WebContext`` (cookies / cache / localStorage where the platform
