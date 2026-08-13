@@ -92,6 +92,14 @@ use a worker (`thread=True`). `on_navigation` / `on_new_window` still make
 WebKit wait for a return value — see
 [README — Navigation / lifecycle callbacks](../README.md#navigation--lifecycle-callbacks).
 
+## Screenshot
+
+wry **0.56.1** has no `WebView` screenshot / capture method
+([PR #1674](https://github.com/tauri-apps/wry/pull/1674) is still open).
+tkwry does **not** add `screenshot()` / `capture()`, and does not ship a
+JS visible-region helper. When wry exposes capture, wrap it the same way as
+`print()`.
+
 ## Related
 
 - [Trust boundaries](trust.md)

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from support.linux import noop_linux_runtime
 
-from tkwry import NewWindowResponse, WebView
+from tkwry import NewWindowResponse, WebView, WebViewNavigationError
 
 
 @pytest.fixture(autouse=True)
@@ -143,6 +143,48 @@ def test_sync_hook_timeout_skips_late_handler(tk_root, monkeypatch) -> None:
 
     assert result_holder == [False]
     assert seen == []
+    web.destroy()
+
+
+def test_sync_hook_timeout_signals_navigation_error(tk_root, monkeypatch) -> None:
+    import time
+
+    _frame, web = _make_web(tk_root)
+    fired: list[object] = []
+    web.bind("<<WebViewNavigationFailed>>", lambda evt: fired.append(evt))
+
+    def slow_handler(url: str) -> bool:
+        time.sleep(0.2)
+        return True
+
+    web.set_on_navigation(slow_handler)
+    monkeypatch.setattr("tkwry.webview._SYNC_HOOK_TIMEOUT_S", 0.05)
+    monkeypatch.setattr("tkwry.webview._SYNC_HOOK_MAX_WAIT_S", 0.1)
+    monkeypatch.setattr(web, "_ensure_event_poll", lambda: None, raising=False)
+
+    scheduled: list[object] = []
+    monkeypatch.setattr(
+        web._frame,
+        "after",
+        lambda _delay, callback: scheduled.append(callback) or "after-id",
+    )
+
+    result_holder: list[bool] = []
+
+    def worker() -> None:
+        result_holder.append(web._native_navigation("https://example.com/late"))
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=0.5)
+    assert not thread.is_alive()
+    assert result_holder == [False]
+
+    web._deliver_navigation_errors()
+    assert fired
+    assert isinstance(web.last_navigation_error, WebViewNavigationError)
+    assert "on_navigation" in str(web.last_navigation_error)
+
     web.destroy()
 
 

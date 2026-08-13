@@ -305,7 +305,7 @@ web.open_devtools()
 
 Rapid `load_url` / `load_html` calls are **coalesced (last-wins)** — `load(A); load(B); load(C)` loads `C` only.
 
-`eval_js` does not return a result (not synchronous). Use `eval_js_with_callback` when you need the JavaScript return value as a `str`. Pass `on_error=` to handle evaluation failures on the Tk main thread; otherwise the traceback is printed to stderr (`EvalErrorHandler`).
+`eval_js` does not return a result (not synchronous). Use `eval_js_with_callback` when you need the JavaScript return value as a `str`. Failures and the 30s callback timeout call `on_error=` (if set), generate `<<WebViewEvalFailed>>`, and set `last_eval_error` (`WebViewTimeoutError` on timeout). Without `on_error` the error is also printed to stderr.
 
 ### Layout / resize
 
@@ -366,7 +366,10 @@ a value — keep them fast (heavy work → return deny/default and defer with
 deferred): WKWebView deadlocks. Prefer ``open_external=True`` or
 ``open_in_browser(url)``; intercept links in JS for in-app tabs (see
 [`examples/browser_demo.py`](examples/browser_demo.py)). Timed-out sync hooks
-are canceled after about **60s** total wait.
+are canceled after about **60s** total wait. Navigation / new-window timeouts
+still return the default (deny) and signal `WebViewNavigationError` via
+`<<WebViewNavigationFailed>>` / `last_navigation_error` — they are not raised
+on the WebKit thread.
 
 Async queues (IPC, RPC, page-load, title, drag-drop, eval) cap at **2048** pending items each; further events are compacted or dropped. Each IPC/RPC **message** also caps at **10 MiB**. RPC is a separate queue from IPC. Use `take_queue_drop_counts()` to observe overflows — it returns `(ipc, page_load, title, drag_drop, eval, rpc)`.
 
@@ -403,13 +406,13 @@ web.destroy()   # release native webview; host Frame is kept
 | Category | Members |
 |----------|---------|
 | Content | `load_url`, `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `print`, `url` |
-| JavaScript | `eval_js` (`on_error`), `eval_js_with_callback` |
+| JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `last_eval_error`, `<<WebViewEvalFailed>>` |
 | IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_complete` |
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
 | Layout | `pack`, `grid`, `place`, `sync_bounds` (delegate to host `Frame` except `sync_bounds`) |
-| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `untrusted`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
+| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `untrusted`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
 | Diagnostics | `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
@@ -422,6 +425,7 @@ callback hooks above.
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`, `WebViewPhase`.
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
+`WebViewTimeoutError`, `WebViewNavigationError`,
 `RpcTimeoutError`, `RpcCancelledError`, `RpcSerializationError`.
 Warning: `TkwrySecurityWarning`. Helpers: `rpc_cancelled`, `rpc_cancel_event`,
 `open_in_browser`, `DEFAULT_CSP`.
@@ -447,7 +451,9 @@ Short checklist — **details live in [Platform notes](docs/platforms.md)** (esp
 - **`url()` on macOS** — may be `None` for inline HTML until a concrete `load_url` (WKWebView has no document `NSURL`)
 - **Sync hooks / queues** — `on_navigation` / `on_new_window` may block WebKit up to ~60s; do not create a WebView from `on_new_window` (use `open_external=True` / `open_in_browser`); async event queues cap at 2048; IPC/RPC messages cap at 10 MiB (see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks))
 - **RPC cancel / destroy** — timeout, JS `cancel`, and `destroy()` are **cooperative only** (`rpc_cancelled()`); Python cannot preempt a running worker. `destroy()` joins the pool for ~2 seconds; leftover threads are logged to stderr (see [IPC / RPC / emit](docs/rpc.md#timeout-and-cancel))
+- **Eval / navigation timeout** — `eval_js_with_callback` timeout (30s) is `WebViewTimeoutError` (`on_error`, `<<WebViewEvalFailed>>`, `last_eval_error`); `on_navigation` / `on_new_window` timeout still returns the default deny and signals `WebViewNavigationError` (`<<WebViewNavigationFailed>>`, `last_navigation_error`) — not raised on the WebKit thread
 - **Drag & drop** — WebView area only (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
+- **Screenshot** — no `WebView` capture API; wry 0.56.1 does not expose one yet ([wry#1674](https://github.com/tauri-apps/wry/pull/1674)). tkwry will wrap it when upstream ships; no JS fallback (see [Platform notes](docs/platforms.md#screenshot))
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
 
@@ -482,7 +488,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
 - **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` hide unmapped views)
-- **Create-failed signal** — constructor never raises; `<<WebViewCreateFailed>>` / `when_failed` / `on_creation_failed=` (check `creation_failed` if you skip them)
+- **Typed failure signals** — create: `<<WebViewCreateFailed>>` / `when_failed`; eval: `<<WebViewEvalFailed>>` / `WebViewTimeoutError`; nav hook timeout: `<<WebViewNavigationFailed>>` / `WebViewNavigationError` (native still returns the default deny)
 - **Deferred callbacks** — IPC, RPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
 - **URL safety** — Python `load_url` normalizes/validates schemes; in-page nav denies `javascript:`/`blob:`/… (`data:` under `app=`); `app=` stays on `tkwry://`; IPC/RPC origin/path allowlist + `bridge_allow`
 - **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()` (macOS: private APIs)

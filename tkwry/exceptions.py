@@ -31,6 +31,24 @@ class WebViewDestroyedError(RuntimeError):
     """Raised when a WebView API is called after :meth:`~tkwry.WebView.destroy`."""
 
 
+class WebViewTimeoutError(TimeoutError):
+    """Eval did not finish before the deadline.
+
+    :meth:`~tkwry.WebView.eval_js_with_callback` delivers this to ``on_error``
+    and ``<<WebViewEvalFailed>>`` (``last_eval_error``). The call site does
+    not raise — evaluation is asynchronous.
+    """
+
+
+class WebViewNavigationError(RuntimeError):
+    """``on_navigation`` / ``on_new_window`` did not finish before the deadline.
+
+    The native hook still returns the documented default (deny navigation /
+    deny new window). Observe via ``<<WebViewNavigationFailed>>`` and
+    ``last_navigation_error``. Not raised on the WebKit thread.
+    """
+
+
 class RpcTimeoutError(TimeoutError):
     """Structured RPC error when an exposed handler exceeds its timeout.
 

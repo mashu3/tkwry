@@ -107,6 +107,8 @@ WEBVIEW_PROPERTIES = (
     "phase",
     "creation_failed",
     "creation_error",
+    "last_eval_error",
+    "last_navigation_error",
 )
 
 
@@ -136,6 +138,8 @@ def test_public_exports() -> None:
     assert tkwry.WebViewNotReadyError is not None
     assert tkwry.WebViewCreationError is not None
     assert tkwry.WebViewDestroyedError is not None
+    assert tkwry.WebViewTimeoutError is not None
+    assert tkwry.WebViewNavigationError is not None
     assert tkwry.RpcTimeoutError is not None
     assert tkwry.RpcCancelledError is not None
     assert tkwry.RpcSerializationError is not None

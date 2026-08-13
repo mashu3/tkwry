@@ -26,6 +26,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Streaming RPC: ``window.tkwry.stream`` consumes sync generator
   ``@web.expose`` handlers as JSON chunks (protocol ``version: 1`` +
   ``stream: true``); ``call`` on a generator rejects with ``TypeError``
+- ``WebViewTimeoutError`` / ``WebViewNavigationError``: eval timeout and
+  dropped eval results generate ``<<WebViewEvalFailed>>`` (``last_eval_error``);
+  ``on_navigation`` / ``on_new_window`` hook timeouts still return the default
+  deny and generate ``<<WebViewNavigationFailed>>`` (``last_navigation_error``)
 
 ### Changed
 
@@ -37,6 +41,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Examples: ``browser_demo`` print / downloads / create-failed / ``emit_all``
   toasts; ``multi_demo`` shared session + flash-all; ``ipc_demo``
   ``on_creation_failed``
+- Document that screenshot is unavailable until wry exposes capture
+  (``WebView`` has no API in 0.56.1; [wry#1674](https://github.com/tauri-apps/wry/pull/1674))
 
 ## [0.1.3] - 2026-08-13
 

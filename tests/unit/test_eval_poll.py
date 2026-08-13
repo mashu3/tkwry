@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tkwry import WebView
+from tkwry import WebView, WebViewTimeoutError
 
 
 @pytest.fixture(autouse=True)
@@ -384,4 +384,47 @@ def test_poll_events_expires_stale_eval_callbacks_with_on_error(
 
     assert len(errors) == 1
     assert isinstance(errors[0], TimeoutError)
+    assert isinstance(errors[0], WebViewTimeoutError)
+    assert web.last_eval_error is errors[0]
     assert web._pending_eval_callbacks == 0
+
+
+def test_eval_timeout_without_on_error_fires_virtual_event(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _make_web(tk_root)
+    _configure_poll_test(web, monkeypatch)
+    fired: list[object] = []
+    web.bind("<<WebViewEvalFailed>>", lambda evt: fired.append(evt))
+    token = web._register_pending_eval(lambda _r: None, None)
+    web._pending_eval_tokens[token] = (0.0, lambda _r: None, None)
+    web._event_poll_active = True
+
+    web._poll_events()
+
+    assert fired
+    assert isinstance(web.last_eval_error, WebViewTimeoutError)
+    assert web._pending_eval_callbacks == 0
+
+
+def test_eval_dropped_result_signals_without_on_error(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _make_web(tk_root)
+    _configure_poll_test(web, monkeypatch)
+    native = MagicMock()
+    web._webview = native
+    py_token = web._register_pending_eval(lambda _r: None, None)
+    web._native_eval_wait[1] = (
+        web._eval_epoch,
+        py_token,
+        lambda _r: None,
+        None,
+    )
+    native.drain_eval_callbacks.return_value = [(1, lambda _r: None, None)]
+    web._event_poll_active = True
+
+    web._poll_events()
+
+    assert isinstance(web.last_eval_error, RuntimeError)
+    assert "dropped" in str(web.last_eval_error)

@@ -12,7 +12,9 @@ from tkwry.exceptions import (
     TkwrySecurityWarning,
     WebViewCreationError,
     WebViewDestroyedError,
+    WebViewNavigationError,
     WebViewNotReadyError,
+    WebViewTimeoutError,
 )
 from tkwry.ipc import rpc_cancel_event, rpc_cancelled
 
@@ -98,7 +100,9 @@ __all__ = [
     "WebView",
     "WebViewCreationError",
     "WebViewDestroyedError",
+    "WebViewNavigationError",
     "WebViewNotReadyError",
+    "WebViewTimeoutError",
     "WebViewPhase",
     "__version__",
 ]

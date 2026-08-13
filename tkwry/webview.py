@@ -67,7 +67,9 @@ from tkwry.exceptions import (
     TkwrySecurityWarning,
     WebViewCreationError,
     WebViewDestroyedError,
+    WebViewNavigationError,
     WebViewNotReadyError,
+    WebViewTimeoutError,
 )
 from tkwry.session import WebSession
 
@@ -583,6 +585,11 @@ class WebView(WebViewRpcMixin):
         self._in_poll_events = False
         self._pending_eval_js: tuple[str, EvalErrorHandler | None] | None = None
         self._eval_js_scheduled = False
+        self._last_eval_error: BaseException | None = None
+        self._last_navigation_error: BaseException | None = None
+        self._navigation_error_queue: queue.SimpleQueue[BaseException] = (
+            queue.SimpleQueue()
+        )
         self._local_queue_drop_counts = [0] * (_QUEUE_DROP_RPC + 1)
         self._bounds_sync_scheduled = False
         self._stacking_sync_scheduled = False
@@ -715,6 +722,18 @@ class WebView(WebViewRpcMixin):
         """The exception from the final failed creation attempt, if any."""
         self._require_tk_thread()
         return self._creation_error
+
+    @property
+    def last_eval_error(self) -> BaseException | None:
+        """Most recent eval failure (timeout, native error, or dropped result)."""
+        self._require_tk_thread()
+        return self._last_eval_error
+
+    @property
+    def last_navigation_error(self) -> BaseException | None:
+        """Most recent ``on_navigation`` / ``on_new_window`` hook timeout."""
+        self._require_tk_thread()
+        return self._last_navigation_error
 
     @property
     def native(self) -> NativeWebView | None:
@@ -1054,6 +1073,7 @@ class WebView(WebViewRpcMixin):
         self._pending_eval_js = None
         self._eval_js_scheduled = False
         self._abort_sync_hooks()
+        self._discard_navigation_error_queue()
         if clear_ready:
             self._ready_delivered = False
             self._ready_pending = False
@@ -1443,8 +1463,9 @@ class WebView(WebViewRpcMixin):
 
         The script is scheduled on the Tk idle loop (not synchronous). There is
         no return value; use :meth:`eval_js_with_callback` when you need the
-        result. If *on_error* is provided, it is called with the exception on
-        failure; otherwise the traceback is printed to stderr.
+        result. Failures call *on_error* (if set) and generate
+        ``<<WebViewEvalFailed>>`` (``last_eval_error``); without *on_error*
+        the traceback is also printed to stderr.
         """
         self._require_ready("eval_js")
         self._pending_eval_js = (script, on_error)
@@ -1461,9 +1482,11 @@ class WebView(WebViewRpcMixin):
 
         Asynchronous: *callback* runs on the **Tk main thread** after the script
         completes. The result is always a ``str`` (including JSON literals).
-        If *on_error* is provided, it is called with the exception on failure
-        or on timeout (30s); otherwise the traceback is printed to stderr and
-        *callback* is not invoked on timeout.
+        Failures and the 30s timeout call *on_error* (if set) with
+        :class:`~tkwry.WebViewTimeoutError` on timeout, generate
+        ``<<WebViewEvalFailed>>``, and set ``last_eval_error``. Without
+        *on_error* the error is also printed to stderr; *callback* is not
+        invoked on timeout.
         """
         self._require_ready("eval_js_with_callback")
         epoch = self._eval_epoch
@@ -1481,10 +1504,7 @@ class WebView(WebViewRpcMixin):
                 )
             except Exception as exc:
                 self._release_pending_eval(token)
-                if on_error is not None:
-                    self._invoke_callback(on_error, exc)
-                else:
-                    traceback.print_exc()
+                self._signal_eval_error(exc, on_error=on_error)
                 return
             self._native_eval_wait[native_token] = (
                 epoch,
@@ -2351,12 +2371,19 @@ class WebView(WebViewRpcMixin):
         def _timeout_msg(prefix: str) -> None:
             print(f"tkwry: {prefix}{suffix}", file=sys.stderr)
 
+        def _on_timeout(prefix: str) -> None:
+            _timeout_msg(prefix)
+            if kind in ("on_navigation", "on_new_window"):
+                self._queue_navigation_error(
+                    WebViewNavigationError(f"{prefix}{suffix}")
+                )
+
         while not done.is_set():
             if not started[0]:
                 remaining = min(deadline, absolute_deadline) - time.monotonic()
                 if remaining <= 0:
                     cancelled[0] = True
-                    _timeout_msg(f"{kind} timed out after {_SYNC_HOOK_TIMEOUT_S:g}s")
+                    _on_timeout(f"{kind} timed out after {_SYNC_HOOK_TIMEOUT_S:g}s")
                     return default
                 done.wait(timeout=min(0.05, remaining))
             else:
@@ -2365,11 +2392,11 @@ class WebView(WebViewRpcMixin):
                 if remaining <= 0:
                     cancelled[0] = True
                     if time.monotonic() >= absolute_deadline:
-                        _timeout_msg(
+                        _on_timeout(
                             f"{kind} timed out after {_SYNC_HOOK_MAX_WAIT_S:g}s total"
                         )
                     else:
-                        _timeout_msg(
+                        _on_timeout(
                             f"{kind} handler timed out after "
                             f"{_SYNC_HOOK_HANDLER_TIMEOUT_S:g}s"
                         )
@@ -2378,6 +2405,57 @@ class WebView(WebViewRpcMixin):
             # Wake the Tk thread; native/Python drains run on the owner thread only.
             self._schedule_sync_hook_drain()
         return cast(_T, result[0])
+
+    def _discard_navigation_error_queue(self) -> None:
+        q = self._navigation_error_queue
+        while True:
+            try:
+                q.get_nowait()
+            except queue.Empty:
+                return
+
+    def _queue_navigation_error(self, exc: WebViewNavigationError) -> None:
+        try:
+            self._navigation_error_queue.put_nowait(exc)
+        except Exception:
+            return
+        self._wake_tk_for_sync_hook()
+
+    def _deliver_navigation_errors(self) -> None:
+        """Deliver queued nav/new-window timeouts on the Tk thread."""
+        if self._destroyed:
+            self._discard_navigation_error_queue()
+            return
+        while True:
+            try:
+                exc = self._navigation_error_queue.get_nowait()
+            except queue.Empty:
+                return
+            self._last_navigation_error = exc
+            try:
+                self._frame.event_generate("<<WebViewNavigationFailed>>")
+            except (tk.TclError, RuntimeError):
+                pass
+
+    def _signal_eval_error(
+        self,
+        exc: BaseException,
+        *,
+        on_error: EvalErrorHandler | None,
+    ) -> None:
+        self._last_eval_error = exc
+        if not self._destroyed:
+            try:
+                self._frame.event_generate("<<WebViewEvalFailed>>")
+            except (tk.TclError, RuntimeError):
+                pass
+        if on_error is not None:
+            self._invoke_callback(on_error, exc)
+            return
+        if isinstance(exc, WebViewTimeoutError) or exc.__traceback__ is None:
+            print(f"tkwry: {exc}", file=sys.stderr)
+        else:
+            traceback.print_exception(type(exc), exc, exc.__traceback__)
 
     def _run_sync_hook_invoke(self, invoke: Callable[[], _T], default: _T) -> _T:
         self._sync_hook_depth += 1
@@ -2460,6 +2538,7 @@ class WebView(WebViewRpcMixin):
         if native is not None:
             native.drain_sync_hooks()
         self._drain_sync_hooks()
+        self._deliver_navigation_errors()
         if self._ipc_listening_wanted():
             self._deliver_ipc_messages()
         self._drain_rpc_futures()
@@ -2560,14 +2639,13 @@ class WebView(WebViewRpcMixin):
                 self._release_pending_eval(token)
                 self._drop_native_eval_wait_for_py_token(token)
                 self._bump_queue_drop(_QUEUE_DROP_EVAL)
-                exc = TimeoutError(
-                    f"eval_js_with_callback timed out after "
-                    f"{_EVAL_CALLBACK_TIMEOUT_S:g}s"
+                self._signal_eval_error(
+                    WebViewTimeoutError(
+                        f"eval_js_with_callback timed out after "
+                        f"{_EVAL_CALLBACK_TIMEOUT_S:g}s"
+                    ),
+                    on_error=on_error,
                 )
-                if on_error is not None:
-                    self._invoke_callback(on_error, exc)
-                else:
-                    print(f"tkwry: {exc}", file=sys.stderr)
 
     def _disarm_event_poll(self) -> None:
         """Unconditionally clear the poll latch (ignores remaining work)."""
@@ -2616,11 +2694,10 @@ class WebView(WebViewRpcMixin):
                 continue
             if result is None:
                 self._bump_queue_drop(_QUEUE_DROP_EVAL)
-                if on_error is not None:
-                    self._invoke_callback(
-                        on_error,
-                        RuntimeError("eval result dropped (pending queue full)"),
-                    )
+                self._signal_eval_error(
+                    RuntimeError("eval result dropped (pending queue full)"),
+                    on_error=on_error,
+                )
                 continue
             self._invoke_callback(expected_cb, result)
 
@@ -2638,6 +2715,7 @@ class WebView(WebViewRpcMixin):
             return
         self._finish_native_teardown()
         if self._destroyed:
+            self._discard_navigation_error_queue()
             if self._native_teardown_pending is not None:
                 try:
                     if self._frame.winfo_exists():
@@ -2666,6 +2744,7 @@ class WebView(WebViewRpcMixin):
         if native is not None:
             native.drain_sync_hooks()
         self._drain_sync_hooks()
+        self._deliver_navigation_errors()
 
         if self._ipc_listening_wanted():
             self._deliver_ipc_messages()
@@ -2704,6 +2783,11 @@ class WebView(WebViewRpcMixin):
             return True
         if self._rpc_inflight:
             return True
+        try:
+            if not self._navigation_error_queue.empty():
+                return True
+        except Exception:
+            pass
         return self._pending_eval_callbacks > 0 or bool(self._native_eval_wait)
 
     def _try_create(self) -> None:
@@ -2866,10 +2950,7 @@ class WebView(WebViewRpcMixin):
         try:
             self._webview.eval_js(script)
         except Exception as exc:
-            if on_error is not None:
-                self._invoke_callback(on_error, exc)
-            else:
-                traceback.print_exc()
+            self._signal_eval_error(exc, on_error=on_error)
 
     def _frame_ready_for_initial_load(self) -> bool:
         """Whether the host frame is laid out enough to load content.
