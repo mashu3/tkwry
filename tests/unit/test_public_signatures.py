@@ -122,7 +122,9 @@ def test_webview_init_kwonly_matches_frozen_list() -> None:
 
 def test_native_webview_stub_matches_rust_signature() -> None:
     stub = _stub_new_kwonly("WebView")
-    rust = _rust_signature_kwonly(LIB_RS.read_text(encoding="utf-8"), "#[pyo3(signature = (")
+    rust = _rust_signature_kwonly(
+        LIB_RS.read_text(encoding="utf-8"), "#[pyo3(signature = ("
+    )
     assert stub == NATIVE_WEBVIEW_KWONLY
     assert rust == NATIVE_WEBVIEW_KWONLY
 
