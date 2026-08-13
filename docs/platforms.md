@@ -13,9 +13,10 @@ source-only (**best-effort** by design). Install steps live in
 ## Windows
 
 [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
-must be installed (common on Windows 10/11). Without it, creation fails with
-`WebViewCreationError` (install link in the message). There is **no**
-fallback engine.
+must be installed (common on Windows 10/11). Without it, native create is
+abandoned (`creation_failed` / `<<WebViewCreateFailed>>` / `when_failed`;
+gated APIs raise `WebViewCreationError` with an install link). The constructor
+does **not** raise. There is **no** fallback engine.
 
 **DPI:** `set_bounds` uses **physical** pixels on Windows. After process DPI
 awareness (e.g. `tkface.win.enable_dpi_awareness()` before `tk.Tk()`), Tk

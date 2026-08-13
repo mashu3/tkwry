@@ -19,7 +19,12 @@ class WebViewNotReadyError(RuntimeError):
 
 
 class WebViewCreationError(RuntimeError):
-    """Raised when the native WebView could not be created after all retries."""
+    """Raised when a gated API is used after native creation was abandoned.
+
+    The constructor itself does not raise. Listen for
+    ``<<WebViewCreateFailed>>`` / :meth:`~tkwry.WebView.when_failed` or check
+    ``creation_failed``.
+    """
 
 
 class WebViewDestroyedError(RuntimeError):

@@ -44,6 +44,7 @@ WEBVIEW_INIT_KWONLY = (
     "on_title_changed",
     "on_new_window",
     "drag_drop_handler",
+    "on_creation_failed",
 )
 
 NATIVE_WEBVIEW_KWONLY = (

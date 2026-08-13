@@ -1485,6 +1485,64 @@ def test_creation_failed_public_api(tk_root, monkeypatch: pytest.MonkeyPatch) ->
     assert str(web.creation_error) == "native create failed"
 
 
+def test_create_failed_event_when_failed_and_ctor(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root, width=400, height=300)
+    frame.pack_propagate(False)
+    frame.pack()
+    tk_root.update_idletasks()
+    ctor_errs: list[BaseException] = []
+    web = WebView(
+        frame,
+        width=400,
+        height=300,
+        on_creation_failed=lambda exc: ctor_errs.append(exc),
+    )
+    bind_events: list[object] = []
+    when_errs: list[BaseException] = []
+    web.bind("<<WebViewCreateFailed>>", lambda evt: bind_events.append(evt))
+    web.when_failed(lambda exc: when_errs.append(exc))
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("native create failed")
+
+    monkeypatch.setattr("tkwry.webview.NativeWebView", boom)
+    monkeypatch.setattr(WebView, "_try_create", _real_try_create)
+    web._create_attempt = _CREATE_MAX_ATTEMPTS - 1
+    web._try_create()
+    tk_root.update_idletasks()
+
+    assert web.creation_failed is True
+    err = web.creation_error
+    assert isinstance(err, RuntimeError)
+    assert str(err) == "native create failed"
+    assert len(bind_events) == 1
+    assert ctor_errs == [err]
+    assert when_errs == [err]
+
+    late_bind: list[object] = []
+    late_when: list[BaseException] = []
+    web.bind("<<WebViewCreateFailed>>", lambda evt: late_bind.append(evt))
+    web.when_failed(lambda exc: late_when.append(exc))
+    tk_root.update_idletasks()
+    assert len(late_bind) == 1
+    assert late_when == [err]
+
+    web._try_create()
+    tk_root.update_idletasks()
+    assert len(bind_events) == 1
+
+
+def test_when_failed_raises_after_destroy(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _web_with_creation_failure(tk_root, monkeypatch)
+    web.destroy()
+    with pytest.raises(WebViewDestroyedError):
+        web.when_failed(lambda _exc: None)
+
+
 def test_url_property_reports_pending_html(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>hi</p>")

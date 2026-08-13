@@ -9,6 +9,7 @@ import tkwry
 from tkwry import (
     BridgeAllow,
     BridgeOrigins,
+    CreationFailedHandler,
     DragDropEvent,
     DragDropHandler,
     EvalCallback,
@@ -29,6 +30,7 @@ from tkwry._core import WebView as NativeWebView
 PUBLIC_TYPE_ALIASES = (
     BridgeAllow,
     BridgeOrigins,
+    CreationFailedHandler,
     DragDropHandler,
     EvalCallback,
     EvalErrorHandler,
@@ -77,6 +79,7 @@ WEBVIEW_METHODS = (
     "grid",
     "place",
     "when_ready",
+    "when_failed",
     "wait_until_ready",
 )
 

@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   0.56); ``examples/browser_demo.py`` Back / Forward buttons
 - ``app=`` / ``tkwry://`` default Content-Security-Policy (``csp=False`` or a
   custom string to override); optional ``coop=True`` / ``corp=True``
+- Create-failed observability: ``<<WebViewCreateFailed>>``, ``when_failed``,
+  and constructor ``on_creation_failed=`` (constructor still does not raise)
 
 ### Changed
 

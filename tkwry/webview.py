@@ -91,6 +91,7 @@ NewWindowHandler: TypeAlias = Callable[[str], NewWindowResponse]
 DragDropHandler: TypeAlias = Callable[[DragDropEvent, list[str], tuple[int, int]], None]
 EvalCallback: TypeAlias = Callable[[str], None]
 EvalErrorHandler: TypeAlias = Callable[[Exception], None]
+CreationFailedHandler: TypeAlias = Callable[[BaseException], None]
 _PendingLoad: TypeAlias = tuple[Literal["url"], str] | tuple[Literal["html"], str]
 _PendingEval: TypeAlias = tuple[float, EvalCallback, EvalErrorHandler | None]
 _NativeEvalWait: TypeAlias = tuple[int, int, EvalCallback, EvalErrorHandler | None]
@@ -200,7 +201,10 @@ class WebView(WebViewRpcMixin):
     |               |        |       |           | ``sync_bounds``,          |
     |               |        |       |           | ``destroy``               |
     +---------------+--------+-------+-----------+---------------------------+
-    | CREATE_FAILED | None   | False | False     | ``load_*`` / handlers     |
+    | CREATE_FAILED | None   | False | False     | ``when_failed`` /         |
+    |               |        |       |           | ``<<WebViewCreateFailed>>``|
+    |               |        |       |           | ``creation_failed``;      |
+    |               |        |       |           | ``load_*`` / handlers     |
     |               |        |       |           | raise                     |
     |               |        |       |           | ``WebViewCreationError``  |
     +---------------+--------+-------+-----------+---------------------------+
@@ -291,6 +295,12 @@ class WebView(WebViewRpcMixin):
     re-fire the event. Layout-change paths funnel through
     ``_sync_bounds_and_stacking`` (plus create) into ``_maybe_fire_ready``.
 
+    **Create failed** (``<<WebViewCreateFailed>>`` / :meth:`when_failed` /
+    ``on_creation_failed=``): fires once when native creation is abandoned
+    (retries exhausted, WebView2 missing, …). The constructor does **not**
+    raise; apps that never call a gated API must handle this signal or check
+    ``creation_failed``. Late ``bind`` / ``when_failed`` still run once (idle).
+
     **Page load** (``on_page_load``): fires ``Started`` and ``Finished`` for
     every navigation **while a handler is registered** (native listening
     follows the handler). Events are queued up to a fixed cap while listening;
@@ -373,6 +383,7 @@ class WebView(WebViewRpcMixin):
         on_title_changed: TitleChangedHandler | None = None,
         on_new_window: NewWindowHandler | None = None,
         drag_drop_handler: DragDropHandler | None = None,
+        on_creation_failed: CreationFailedHandler | None = None,
     ) -> None:
         """Embed a WebView in *frame*.
 
@@ -441,9 +452,14 @@ class WebView(WebViewRpcMixin):
         self._ready_delivered = False
         self._ready_pending = False
         self._ready_callbacks: list[Callable[[], None]] = []
+        self._failed_delivered = False
+        self._failed_pending = False
+        self._failed_callbacks: list[CreationFailedHandler] = []
         self._create_pending = False
         self._create_attempt = 0
         self._creation_error: BaseException | None = None
+        if on_creation_failed is not None:
+            self._failed_callbacks.append(on_creation_failed)
         self._flush_load_attempt = 0
         self._embed = tk_embed_parent(frame)
         self._webview: NativeWebView | None = None
@@ -670,7 +686,10 @@ class WebView(WebViewRpcMixin):
 
     @property
     def creation_failed(self) -> bool:
-        """``True`` when native creation was abandoned after all retries."""
+        """``True`` when native creation was abandoned after all retries.
+
+        Also delivered as ``<<WebViewCreateFailed>>`` / :meth:`when_failed`.
+        """
         self._require_tk_thread()
         return self._creation_error is not None
 
@@ -801,32 +820,38 @@ class WebView(WebViewRpcMixin):
         self._require_not_destroyed("bind")
         result = self._frame.bind(sequence, func, add=add)
         if sequence == "<<WebViewReady>>" and self._ready_delivered:
-
-            def _deliver_ready(
-                _func: Callable = func, _frame: tk.Misc = self._frame
-            ) -> None:
-                if self._destroyed:
-                    return
-                captured: list[tk.Event] = []
-                probe = "<<WebViewReady-Synthetic>>"
-
-                def _capture(evt: tk.Event) -> None:
-                    captured.append(evt)
-
-                bind_id = _frame.bind(probe, _capture)
-                try:
-                    _frame.event_generate(probe)
-                finally:
-                    _frame.unbind(probe, bind_id)
-                if captured:
-                    evt = captured[0]
-                else:
-                    evt = tk.Event()
-                    evt.widget = _frame
-                self._invoke_callback(_func, evt)
-
-            self._frame.after_idle(_deliver_ready)
+            self._deliver_late_virtual_event("<<WebViewReady>>", func)
+        elif sequence == "<<WebViewCreateFailed>>" and self._failed_delivered:
+            self._deliver_late_virtual_event("<<WebViewCreateFailed>>", func)
         return result
+
+    def _deliver_late_virtual_event(
+        self, sequence: str, func: Callable[..., object]
+    ) -> None:
+        def _deliver(
+            _func: Callable = func, _frame: tk.Misc = self._frame, _seq: str = sequence
+        ) -> None:
+            if self._destroyed:
+                return
+            captured: list[tk.Event] = []
+            probe = f"{_seq[:-2]}-Synthetic>>"
+
+            def _capture(evt: tk.Event) -> None:
+                captured.append(evt)
+
+            bind_id = _frame.bind(probe, _capture)
+            try:
+                _frame.event_generate(probe)
+            finally:
+                _frame.unbind(probe, bind_id)
+            if captured:
+                evt = captured[0]
+            else:
+                evt = tk.Event()
+                evt.widget = _frame
+            self._invoke_callback(_func, evt)
+
+        self._frame.after_idle(_deliver)
 
     def when_ready(self, callback: Callable[[], None]) -> None:
         """Schedule *callback* once the native view exists and the host is laid out."""
@@ -844,6 +869,30 @@ class WebView(WebViewRpcMixin):
         else:
             self._ready_callbacks.append(callback)
 
+    def when_failed(self, callback: CreationFailedHandler) -> None:
+        """Schedule *callback* once native creation is permanently abandoned.
+
+        *callback* receives the exception stored in :attr:`creation_error`.
+        Prefer this or ``bind(\"<<WebViewCreateFailed>>\")`` over only checking
+        after a gated API raises :exc:`~tkwry.WebViewCreationError`.
+        """
+        self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
+        err = self._creation_error
+        if err is not None and self._failed_delivered:
+
+            def _deliver() -> None:
+                if self._destroyed:
+                    return
+                self._invoke_callback(callback, err)
+
+            self._frame.after_idle(_deliver)
+            return
+        self._failed_callbacks.append(callback)
+        if err is not None and not self._failed_pending:
+            self._fire_create_failed()
+
     def wait_until_ready(self, timeout: float = 30.0) -> bool:
         """Pump a nested Tk event loop until the webview is laid out or *timeout*.
 
@@ -855,7 +904,7 @@ class WebView(WebViewRpcMixin):
 
         *timeout* must be a finite number of seconds ``> 0`` so unmapped or
         never-laid-out hosts cannot spin forever. Returns ``True`` if ready,
-        ``False`` on timeout or if destroyed while waiting.
+        ``False`` on timeout, destroy, or :attr:`creation_failed`.
 
         Raises:
             ValueError: if *timeout* is missing, non-positive, or non-finite.
@@ -1849,6 +1898,37 @@ class WebView(WebViewRpcMixin):
 
         self._track_after(self._frame.after_idle(_deliver_ready))
 
+    def _mark_creation_failed(self, exc: BaseException) -> None:
+        if self._creation_error is None:
+            self._creation_error = exc
+        self._fire_create_failed()
+
+    def _fire_create_failed(self) -> None:
+        if self._failed_delivered or self._failed_pending:
+            return
+        if self._creation_error is None:
+            return
+        self._failed_pending = True
+
+        def _deliver_failed() -> None:
+            if self._destroyed:
+                self._failed_pending = False
+                return
+            if self._failed_delivered:
+                return
+            self._frame.event_generate("<<WebViewCreateFailed>>")
+            self._failed_delivered = True
+            self._failed_pending = False
+            err = self._creation_error
+            callbacks = self._failed_callbacks
+            self._failed_callbacks = []
+            if err is None:
+                return
+            for callback in callbacks:
+                self._invoke_callback(callback, err)
+
+        self._track_after(self._frame.after_idle(_deliver_failed))
+
     def _needs_event_poll(self) -> bool:
         return any(
             (
@@ -2466,7 +2546,13 @@ class WebView(WebViewRpcMixin):
             return
 
         size = self._creation_size()
-        if size is None:
+        # ``update_idletasks`` inside ``_creation_size`` can re-enter create.
+        if (
+            size is None
+            or self._destroyed
+            or self._webview is not None
+            or self._creation_error is not None
+        ):
             return
         width, height = size
 
@@ -2537,7 +2623,7 @@ class WebView(WebViewRpcMixin):
             )
 
             if not is_webview2_runtime_available():
-                self._creation_error = webview2_missing_error()
+                self._mark_creation_failed(webview2_missing_error())
                 print(f"tkwry: {WEBVIEW2_MISSING_MESSAGE}", file=sys.stderr)
                 return
 
@@ -2561,12 +2647,12 @@ class WebView(WebViewRpcMixin):
                     not is_webview2_runtime_available()
                 )
                 if missing:
-                    self._creation_error = webview2_missing_error(exc)
+                    self._mark_creation_failed(webview2_missing_error(exc))
                     print(f"tkwry: {WEBVIEW2_MISSING_MESSAGE}", file=sys.stderr)
                     return
             self._create_attempt += 1
             if self._create_attempt >= _CREATE_MAX_ATTEMPTS:
-                self._creation_error = exc
+                self._mark_creation_failed(exc)
                 print(
                     f"tkwry: failed to create native WebView after "
                     f"{_CREATE_MAX_ATTEMPTS} attempts; giving up",

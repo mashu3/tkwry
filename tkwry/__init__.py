@@ -47,6 +47,7 @@ try:
     from tkwry.webview import (
         BridgeAllow,
         BridgeOrigins,
+        CreationFailedHandler,
         DragDropHandler,
         EvalCallback,
         EvalErrorHandler,
@@ -70,6 +71,7 @@ __all__ = [
     "DEFAULT_CSP",
     "BridgeAllow",
     "BridgeOrigins",
+    "CreationFailedHandler",
     "DragDropEvent",
     "DragDropHandler",
     "EvalCallback",

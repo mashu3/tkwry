@@ -121,9 +121,16 @@ frame = tk.Frame(root, bg="#222")
 frame.pack(fill="both", expand=True, padx=8, pady=8)
 
 web = WebView(frame, url="https://github.com")
+web.when_failed(lambda exc: print("native create failed:", exc))
 
 root.mainloop()
 ```
+
+The constructor **does not raise** if the native view cannot be created
+(WebView2 missing, retries exhausted, …). Handle
+`<<WebViewCreateFailed>>` / `when_failed` / `on_creation_failed=`, or check
+`creation_failed` before treating the widget as live. Gated APIs still raise
+`WebViewCreationError`.
 
 ### IPC and RPC (JavaScript ↔ Python)
 
@@ -389,15 +396,15 @@ web.destroy()   # release native webview; host Frame is kept
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
 | Layout | `pack`, `grid`, `place`, `sync_bounds` (delegate to host `Frame` except `sync_bounds`) |
-| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `wait_until_ready`, `bind`, `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `untrusted`, `navigation_allow`, `open_external`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
+| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `untrusted`, `navigation_allow`, `open_external`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
 | Diagnostics | `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
 `app_dev`, `csp` / `coop` / `corp`, `session` / `data_directory` / `ephemeral`,
 `untrusted`, `bridge_origins`, `bridge_allow`, `navigation_allow`,
 `open_external`, `ipc_handler`, `rpc_traceback`, `devtools`,
-`background_color`, `user_agent`, `initialization_script`, `focused`, plus the
-callback hooks above.
+`background_color`, `user_agent`, `initialization_script`, `focused`,
+`on_creation_failed`, plus the callback hooks above.
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`, `WebViewPhase`.
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
@@ -405,7 +412,7 @@ Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedErr
 Warning: `TkwrySecurityWarning`. Helpers: `rpc_cancelled`, `rpc_cancel_event`,
 `open_in_browser`, `DEFAULT_CSP`.
 
-Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`.
+Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`, `CreationFailedHandler`.
 
 ---
 
@@ -414,7 +421,7 @@ Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`,
 Short checklist — **details live in [Platform notes](docs/platforms.md)** (especially [macOS embedding](docs/platforms.md#macos-embedding)).
 
 - **Alpha** — APIs may change; not for production yet (see banner above)
-- **Windows** — WebView2 Runtime required; missing runtime → `WebViewCreationError`
+- **Windows** — WebView2 Runtime required; missing runtime → `creation_failed` / `<<WebViewCreateFailed>>` (gated APIs raise `WebViewCreationError`)
 - **Windows DevTools** — wry/WebView2 reports `is_devtools_open()` as `False` and `close_devtools()` is a no-op; `open_devtools()` still opens the inspector
 - **Linux** — no PyPI wheel (by design); best-effort source install
 - **Linux concurrent `eval_js_with_callback`** — evaluating on multiple WebViews at once can stall WebKitGTK; prefer sequential evals (see [Linux](docs/platforms.md#linux))
@@ -461,6 +468,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
 - **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` hide unmapped views)
+- **Create-failed signal** — constructor never raises; `<<WebViewCreateFailed>>` / `when_failed` / `on_creation_failed=` (check `creation_failed` if you skip them)
 - **Deferred callbacks** — IPC, RPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
 - **URL safety** — Python `load_url` normalizes/validates schemes; in-page nav denies `javascript:`/`blob:`/… (`data:` under `app=`); `app=` stays on `tkwry://`; IPC/RPC origin/path allowlist + `bridge_allow`
 - **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()` (macOS: private APIs)
