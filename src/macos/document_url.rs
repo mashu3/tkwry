@@ -1,8 +1,8 @@
 //! macOS: read the document URL without wry's panicking ``url()`` wrapper.
 //!
-//! wry 0.55's ``url_from_webview`` uses ``Option::unwrap()`` when WebKit has no
-//! ``NSURL`` (inline HTML). objc2-web-kit exposes ``URL()`` as ``Option``, so we
-//! can distinguish "no document URL" from real WebKit/wry failures.
+//! wry 0.55–0.56 ``url_from_webview`` still uses ``Option::unwrap()`` when WebKit
+//! has no ``NSURL`` (inline HTML). objc2-web-kit exposes ``URL()`` as ``Option``,
+//! so we can distinguish "no document URL" from real WebKit/wry failures.
 
 use std::ffi::c_char;
 

@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.28", features = ["abi3-py310"] }
-wry = { version = "0.55", features = ["devtools"] }
+wry = { version = "0.56.1", features = ["devtools"] }
 raw-window-handle = "0.6"
 libc = "0.2"
 
