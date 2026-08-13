@@ -68,8 +68,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   from the pool thread; destroy aborts inflight RPC without ``eval_js``,
   joins pool threads, and does not reschedule poll on a dead frame
   (avoids Tcl/native abort on the next Tk update)
-- ``tkwry://`` open+inode (Unix) / file-index (Windows) check closes the
-  canonicalize-then-read TOCTOU window for escaped symlinks / reparse points
+- ``tkwry://`` open+inode (Unix) / ``GetFileInformationByHandle`` (Windows)
+  check closes the canonicalize-then-read TOCTOU window for escaped
+  symlinks / reparse points (stable std; no ``windows_by_handle``)
 
 ## [0.1.2] - 2026-08-12
 

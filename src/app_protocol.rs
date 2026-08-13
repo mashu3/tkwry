@@ -132,33 +132,79 @@ enum ServeError {
     NotFound,
 }
 
-/// True when *opened* and *path_meta* refer to the same inode / file index.
-fn same_file_identity(opened: &std::fs::Metadata, path_meta: &std::fs::Metadata) -> bool {
+/// True when the opened *file* and *path* refer to the same inode / file index.
+fn same_file_identity(file: &File, path: &Path) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        opened.dev() == path_meta.dev() && opened.ino() == path_meta.ino()
+        let Ok(opened_meta) = file.metadata() else {
+            return false;
+        };
+        let Ok(path_meta) = std::fs::metadata(path) else {
+            return false;
+        };
+        opened_meta.dev() == path_meta.dev() && opened_meta.ino() == path_meta.ino()
     }
     #[cfg(windows)]
     {
-        use std::os::windows::fs::MetadataExt;
-        match (
-            opened.volume_serial_number(),
-            path_meta.volume_serial_number(),
-            opened.file_index(),
-            path_meta.file_index(),
-        ) {
-            (Some(vol_a), Some(vol_b), Some(idx_a), Some(idx_b)) => {
-                vol_a == vol_b && idx_a == idx_b
-            }
+        let Ok(other) = File::open(path) else {
+            return false;
+        };
+        match (windows_file_id(file), windows_file_id(&other)) {
+            (Some(a), Some(b)) => a == b,
             _ => false,
         }
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = (opened, path_meta);
+        let _ = (file, path);
         false
     }
+}
+
+/// Volume serial + file index from an open handle (stable; no `windows_by_handle`).
+#[cfg(windows)]
+fn windows_file_id(file: &File) -> Option<(u32, u64)> {
+    use std::mem::MaybeUninit;
+    use std::os::windows::io::AsRawHandle;
+
+    #[repr(C)]
+    struct FileTime {
+        dw_low_date_time: u32,
+        dw_high_date_time: u32,
+    }
+
+    #[repr(C)]
+    #[allow(dead_code)]
+    struct ByHandleFileInformation {
+        dw_file_attributes: u32,
+        ft_creation_time: FileTime,
+        ft_last_access_time: FileTime,
+        ft_last_write_time: FileTime,
+        dw_volume_serial_number: u32,
+        n_file_size_high: u32,
+        n_file_size_low: u32,
+        n_number_of_links: u32,
+        n_file_index_high: u32,
+        n_file_index_low: u32,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetFileInformationByHandle(
+            handle: *mut core::ffi::c_void,
+            info: *mut ByHandleFileInformation,
+        ) -> i32;
+    }
+
+    let mut info = MaybeUninit::<ByHandleFileInformation>::uninit();
+    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle(), info.as_mut_ptr()) };
+    if ok == 0 {
+        return None;
+    }
+    let info = unsafe { info.assume_init() };
+    let index = (u64::from(info.n_file_index_high) << 32) | u64::from(info.n_file_index_low);
+    Some((info.dw_volume_serial_number, index))
 }
 
 /// Open *candidate* and require the opened file to stay under *root*.
@@ -182,8 +228,7 @@ fn open_under_root(root: &Path, candidate: &Path) -> Result<(File, PathBuf), Ser
     if !real.starts_with(&root) {
         return Err(ServeError::Forbidden);
     }
-    let path_meta = std::fs::metadata(&real).map_err(|_| ServeError::NotFound)?;
-    if !same_file_identity(&opened_meta, &path_meta) {
+    if !same_file_identity(&file, &real) {
         return Err(ServeError::Forbidden);
     }
     Ok((file, real))
