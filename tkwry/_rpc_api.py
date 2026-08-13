@@ -7,14 +7,21 @@ preserving the public ``WebView`` methods unchanged.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import tkinter as tk
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from concurrent.futures import Future, ThreadPoolExecutor
-from pathlib import Path
 from typing import Any
 
+from tkwry._app import (
+    WATCH_DEFAULT_IGNORE_DIRS,
+    WATCH_DEFAULT_MAX_FILES,
+    WATCH_DEFAULT_SUFFIXES,
+    normalize_watch_suffixes,
+    scan_app_mtime,
+)
 from tkwry.exceptions import (
     RpcSerializationError,
     RpcTimeoutError,
@@ -63,6 +70,10 @@ class WebViewRpcMixin:
         self._rpc_cancel_events: dict[str, threading.Event] = {}
         self._app_watch_after_id: str | None = None
         self._app_watch_mtime: float | None = None
+        self._app_watch_suffixes: frozenset[str] | None = WATCH_DEFAULT_SUFFIXES
+        self._app_watch_ignore_dirs: frozenset[str] = WATCH_DEFAULT_IGNORE_DIRS
+        self._app_watch_max_files = WATCH_DEFAULT_MAX_FILES
+        self._app_watch_limit_warned = False
 
     def set_ipc_handler(self, handler: Callable[[str], None] | None) -> None:
         """Register or clear the JS → Python IPC handler (Tk main thread).
@@ -182,12 +193,25 @@ class WebViewRpcMixin:
         self._enable_rpc()
         self.eval_js(script)
 
-    def watch_app(self, *, interval_ms: int = 700) -> None:
+    def watch_app(
+        self,
+        *,
+        interval_ms: int = 700,
+        suffixes: Collection[str] | str | None = None,
+        ignore_dirs: Collection[str] | None = None,
+        max_files: int = WATCH_DEFAULT_MAX_FILES,
+    ) -> None:
         """Poll ``app=`` files and :meth:`reload` when mtimes change (dev helper).
 
         Requires ``app=`` at construction. Prefer with ``app_dev=True`` so
         browsers do not cache stale assets. Stopped automatically on
         :meth:`destroy`.
+
+        This is a bounded Tk poll (not OS file notifications). By default only
+        common web suffixes are watched and directories such as ``node_modules``,
+        ``.git``, and ``.vendor`` are skipped, up to *max_files* (2000). Pass
+        ``suffixes="*"`` to watch every file, *ignore_dirs* to override skipped
+        directory names, or raise *max_files* for large trees.
         """
         self._require_tk_thread()
         if self._destroyed:
@@ -196,6 +220,31 @@ class WebViewRpcMixin:
             raise ValueError("watch_app() requires app= at construction")
         if interval_ms < 100:
             raise ValueError("watch_app: interval_ms must be >= 100")
+        if max_files <= 0:
+            raise ValueError("watch_app: max_files must be positive")
+        if isinstance(suffixes, str):
+            if suffixes != "*":
+                raise ValueError(
+                    'watch_app: suffixes must be "*" or a collection of '
+                    'extensions, not a single string (use suffixes=[".js"])'
+                )
+            self._app_watch_suffixes = None
+        elif suffixes is None:
+            self._app_watch_suffixes = WATCH_DEFAULT_SUFFIXES
+        else:
+            self._app_watch_suffixes = normalize_watch_suffixes(suffixes)
+        if isinstance(ignore_dirs, str):
+            raise ValueError(
+                "watch_app: ignore_dirs must be a collection of directory "
+                'names, not a string (use ignore_dirs=["node_modules"])'
+            )
+        self._app_watch_ignore_dirs = (
+            WATCH_DEFAULT_IGNORE_DIRS
+            if ignore_dirs is None
+            else frozenset(str(name) for name in ignore_dirs)
+        )
+        self._app_watch_max_files = max_files
+        self._app_watch_limit_warned = False
         self._stop_app_watch()
         self._app_watch_mtime = self._scan_app_mtime()
         self._schedule_app_watch(interval_ms)
@@ -264,17 +313,21 @@ class WebViewRpcMixin:
         self._rpc_cancel_events.pop(req_id, None)
 
     def _scan_app_mtime(self) -> float:
-        root = Path(self._app_root or "")
-        latest = 0.0
-        if not root.is_dir():
-            return latest
-        for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
-            for name in filenames:
-                path = Path(dirpath) / name
-                try:
-                    latest = max(latest, path.lstat().st_mtime)
-                except OSError:
-                    continue
+        root = self._app_root or ""
+        latest, _seen, truncated = scan_app_mtime(
+            root,
+            suffixes=self._app_watch_suffixes,
+            ignore_dirs=self._app_watch_ignore_dirs,
+            max_files=self._app_watch_max_files,
+        )
+        if truncated and not self._app_watch_limit_warned:
+            self._app_watch_limit_warned = True
+            print(
+                f"tkwry: watch_app scanned {self._app_watch_max_files} files "
+                f"under {root}; further files ignored "
+                "(raise max_files= or narrow suffixes=/ignore_dirs=)",
+                file=sys.stderr,
+            )
         return latest
 
     def _schedule_app_watch(self, interval_ms: int) -> None:

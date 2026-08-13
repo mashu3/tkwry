@@ -232,8 +232,9 @@ class WebView(WebViewRpcMixin):
     **Sessions** (``session=`` / ``data_directory=`` / ``ephemeral=``): share a
     wry ``WebContext`` (cookies / cache / localStorage where the platform
     supports it) across WebViews. Prefer one :class:`~tkwry.WebSession` per
-    profile. On Linux, WebViews that share a session must use the same
-    ``app=`` root (custom protocols are registered once per context).
+    profile. WebViews that share a **non-ephemeral** session must use the
+    **same** ``app=`` root (``ValueError`` otherwise). Linux can register
+    ``tkwry://`` only once per context; tkwry enforces the same rule everywhere.
 
     **Navigation hooks** (``on_navigation``, ``on_new_window``) run on the
     **Tk main thread**, but WebKit **blocks** until they return a value.
@@ -326,6 +327,12 @@ class WebView(WebViewRpcMixin):
         on_new_window: NewWindowHandler | None = None,
         drag_drop_handler: DragDropHandler | None = None,
     ) -> None:
+        """Embed a WebView in *frame*.
+
+        See the class docstring for lifecycle, RPC, and platform notes.
+        WebViews that share a non-ephemeral ``session`` must use the same
+        ``app=`` root (``ValueError`` otherwise).
+        """
         require_tk_thread(frame)
         if background_color is not None:
             _validate_background_color(background_color)
@@ -423,6 +430,8 @@ class WebView(WebViewRpcMixin):
             self._app_root = app_root
             if html is None:
                 url = app_entry_url
+        if self._session is not None:
+            self._session._bind_app_root(self._app_root)
         if url is not None:
             url = _normalize_url(url)
             _validate_url(url)

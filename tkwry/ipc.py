@@ -151,10 +151,18 @@ RPC_BOOTSTRAP_JS = """\
       }
       listeners[key] = list.filter(function (h) { return h !== handler; });
     },
+    debug: true,
     _emit: function (event, payload) {
       var list = listeners[String(event)] || [];
       for (var i = 0; i < list.length; i++) {
-        try { list[i](payload); } catch (e) {}
+        try {
+          list[i](payload);
+        } catch (e) {
+          if (window.tkwry.debug !== false
+              && typeof console !== "undefined" && console.error) {
+            console.error("tkwry.emit listener error (" + event + "):", e);
+          }
+        }
       }
     },
     _settle: function (id, ok, value) {

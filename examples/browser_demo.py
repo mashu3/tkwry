@@ -101,6 +101,9 @@ def _tab_label(title: str) -> str:
 
 def main() -> None:
     profile = Path(tempfile.mkdtemp(prefix="tkwry-browser-"))
+    # Shared profile for all tabs. If you also pass app=, every WebView on this
+    # session must use the same app= root (Linux registers tkwry:// once per
+    # WebContext; tkwry enforces this on all platforms).
     session = WebSession(data_directory=profile)
 
     root = tk.Tk()

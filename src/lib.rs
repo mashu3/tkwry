@@ -1323,7 +1323,9 @@ impl WebView {
             (Some(root), Some(guard)) if !guard.ephemeral => match &guard.registered_app_root {
                 Some(existing) if existing != root => {
                     return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "WebSession already has app root {}; cannot use {}",
+                        "WebSession already has app root {}; cannot use {}. \
+WebViews that share a session must use the same app= root \
+(Linux registers tkwry:// once per WebContext)",
                         existing.display(),
                         root.display()
                     )));

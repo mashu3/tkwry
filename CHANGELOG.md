@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- ``watch_app(suffixes=..., ignore_dirs=..., max_files=...)`` — default web
+  suffixes, skip ``node_modules`` / ``.git`` / ``.vendor`` / build dirs, cap
+  at 2000 files (``suffixes="*"`` watches everything)
+- ``window.tkwry.debug`` (default on) logs ``emit`` listener exceptions via
+  ``console.error``; set ``false`` to silence
 - ``tkwry://`` / ``app=`` serving canonicalizes paths and refuses symlinks,
   Windows junctions, and reparse points that escape the app root
 - ``RpcSerializationError`` for non-JSON RPC results and ``emit`` payloads
@@ -26,6 +31,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is ignored for synchronous ``run_in="main"`` handlers
 - ``watch_app()`` no longer follows directory or file symlinks when scanning
   mtimes
+- Shared ``WebSession`` + ``app=`` constraint is called out on ``WebSession`` /
+  ``WebView.__init__``, README, and ``examples/browser_demo.py``; Python raises
+  ``ValueError`` before native create when roots differ
 
 ## [0.1.2] - 2026-08-12
 

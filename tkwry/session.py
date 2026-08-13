@@ -14,6 +14,12 @@ class WebSession:
     uses it is alive (required on macOS when ``app=`` / custom protocols are
     involved).
 
+    **``app=`` sharing:** WebViews that share a **non-ephemeral** session must
+    use the **same** ``app=`` root. Linux can register the ``tkwry://`` custom
+    protocol only once per ``WebContext``; tkwry raises ``ValueError`` if a
+    second root is used (all platforms). Use a separate ``WebSession`` for
+    unrelated local apps. Ephemeral sessions are not bound to one root.
+
     Parameters
     ----------
     data_directory:
@@ -40,6 +46,27 @@ class WebSession:
             resolved.mkdir(parents=True, exist_ok=True)
             path = str(resolved)
         self._native = NativeWebSession(data_directory=path, ephemeral=ephemeral)
+        self._app_root: str | None = None
+
+    def _bind_app_root(self, root: str | None) -> None:
+        """Record ``app=`` root for this session; reject a conflicting root."""
+        if root is None or self.ephemeral:
+            return
+        existing = self._app_root
+        if existing is None:
+            self._app_root = root
+            return
+        if existing != root:
+            raise ValueError(
+                f"WebSession already has app root {existing}; cannot use {root}. "
+                "WebViews that share a session must use the same app= root "
+                "(Linux registers tkwry:// once per WebContext)."
+            )
+
+    @property
+    def app_root(self) -> Path | None:
+        """``app=`` filesystem root bound to this session, if any."""
+        return Path(self._app_root) if self._app_root else None
 
     @property
     def data_directory(self) -> Path | None:

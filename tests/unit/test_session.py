@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tkwry import WebSession
+from tkwry import WebSession, WebView
 
 
 def test_session_creates_data_directory(tmp_path: Path) -> None:
@@ -33,3 +33,39 @@ def test_native_session_exposed() -> None:
     session = WebSession(ephemeral=True)
     assert session.native is not None
     assert session.native.ephemeral is True
+
+
+def test_session_bind_app_root_mismatch(tmp_path: Path) -> None:
+    session = WebSession(data_directory=tmp_path / "profile")
+    session._bind_app_root("/tmp/app-a")
+    session._bind_app_root("/tmp/app-a")
+    assert session.app_root == Path("/tmp/app-a")
+    with pytest.raises(ValueError, match="same app="):
+        session._bind_app_root("/tmp/app-b")
+
+
+def test_ephemeral_session_allows_distinct_app_roots(tmp_path: Path) -> None:
+    session = WebSession(ephemeral=True)
+    session._bind_app_root(str(tmp_path / "a"))
+    session._bind_app_root(str(tmp_path / "b"))
+    assert session.app_root is None
+
+
+def test_webview_shared_session_rejects_mismatched_app(tk_root, tmp_path: Path) -> None:
+    import tkinter as tk
+
+    app_a = tmp_path / "a"
+    app_b = tmp_path / "b"
+    app_a.mkdir()
+    app_b.mkdir()
+    (app_a / "index.html").write_text("<p>a</p>", encoding="utf-8")
+    (app_b / "index.html").write_text("<p>b</p>", encoding="utf-8")
+    session = WebSession(data_directory=tmp_path / "profile")
+    frame_a = tk.Frame(tk_root)
+    frame_b = tk.Frame(tk_root)
+    web_a = WebView(frame_a, app=app_a, session=session)
+    with pytest.raises(ValueError, match="same app="):
+        WebView(frame_b, app=app_b, session=session)
+    web_a.destroy()
+    frame_a.destroy()
+    frame_b.destroy()

@@ -250,6 +250,7 @@ def main() -> None:
         if local:
             app_dir = local_app_dir()
             web = WebView(web_frame, app=app_dir, app_dev=True, ipc_handler=on_ipc)
+            web.watch_app()  # skip .vendor / node_modules; reload on html/js/css
             source_note.set("Local app= (plotly.js on disk)")
         else:
             web = WebView(web_frame, html=page_html(PLOTLY_CDN), ipc_handler=on_ipc)

@@ -152,6 +152,7 @@ web = WebView(frame, app="./web")          # loads tkwry://localhost/index.html
 # or: WebView(frame, app="./web/index.html")
 # SPA client routes: spa_fallback=True
 # Dev: app_dev=True (Cache-Control: no-store) + web.watch_app() for reload
+# watch_app() polls web suffixes (skips node_modules/.git/.vendor; max 2000 files)
 ```
 
 Constructor ``app=`` fixes the filesystem root at create time. Later
@@ -231,6 +232,7 @@ web.emit("data_updated", {"n": 1})
 
 ```js
 window.tkwry.on("data_updated", (payload) => { ... });
+// listener errors are logged with console.error (set window.tkwry.debug = false to silence)
 ```
 
 See [`examples/ipc_demo.py`](examples/ipc_demo.py).
@@ -250,8 +252,12 @@ right = WebView(frame_b, html=HTML, session=session)
 
 Convenience: ``WebView(..., data_directory=...)`` or ``ephemeral=True``
 creates an owned session. Keep the ``WebSession`` alive while any WebView
-uses it (especially with ``app=`` on macOS). On Linux, WebViews that share a
-session must use the same ``app=`` root. See
+uses it (especially with ``app=`` on macOS).
+
+**Shared ``app=``:** WebViews that share a **non-ephemeral** ``WebSession``
+must use the **same** ``app=`` root. Linux can register ``tkwry://`` only once
+per WebContext; tkwry raises ``ValueError`` if a second root is used (all
+platforms). Use a separate session for unrelated local apps. See
 [`examples/browser_demo.py`](examples/browser_demo.py).
 
 ### Load HTML / evaluate JavaScript
@@ -382,7 +388,7 @@ Short checklist — **details live in [Platform notes](#-platform-notes)** (espe
 - **Windows DevTools** — wry/WebView2 reports `is_devtools_open()` as `False` and `close_devtools()` is a no-op; `open_devtools()` still opens the inspector
 - **Linux** — no PyPI wheel (by design); best-effort source install
 - **Linux concurrent `eval_js_with_callback`** — evaluating on multiple WebViews at once can stall WebKitGTK; prefer sequential evals (see [Linux](#linux))
-- **Linux shared `WebSession` + `app=`** — WebViews that share a session must use the same `app=` root (custom protocol is registered once per context)
+- **Shared `WebSession` + `app=`** — WebViews that share a non-ephemeral session must use the same `app=` root (`ValueError` otherwise; Linux can register `tkwry://` only once per context)
 - **macOS DevTools** — create with `devtools=True`, then `open_devtools()` (flag alone does not open; `open_devtools()` without the flag is a no-op on macOS); uses private APIs — avoid in Mac App Store builds
 - **macOS IME / focus** — not Safari-parity; mid-composition focus flips can mis-route input
 - **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
@@ -443,9 +449,9 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 
 ## 🧩 Features
 
-- **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, `watch_app()` hot reload; symlink/junction confinement)
-- **IPC / RPC / emit** — events vs request/response; worker RPC; strict JSON; cooperative cancel; Python→JS `emit`
-- **WebSession** — shared wry `WebContext` (cookies / cache / localStorage) across WebViews
+- **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, bounded `watch_app()`; symlink/junction confinement)
+- **IPC / RPC / emit** — events vs request/response; worker RPC; strict JSON; cooperative cancel; Python→JS `emit` (`console.error` on listener errors)
+- **WebSession** — shared wry `WebContext`; shared `app=` roots must match
 - **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
 - **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` hide unmapped views)
