@@ -2,6 +2,7 @@
 
 import sys
 
+from tkwry._app import DEFAULT_CSP
 from tkwry._origin import open_in_browser
 from tkwry._version import __version__
 from tkwry.exceptions import (
@@ -66,6 +67,7 @@ if sys.platform == "darwin":
     install_automatic_window_tabbing_disable()
 
 __all__ = [
+    "DEFAULT_CSP",
     "BridgeAllow",
     "BridgeOrigins",
     "DragDropEvent",

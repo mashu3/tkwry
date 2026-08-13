@@ -7,10 +7,13 @@ from pathlib import Path
 import pytest
 
 from tkwry._app import (
+    DEFAULT_CSP,
     WATCH_DEFAULT_IGNORE_DIRS,
     app_url,
     resolve_app,
+    resolve_app_csp,
     scan_app_mtime,
+    validate_app_isolation,
 )
 
 
@@ -100,3 +103,65 @@ def test_scan_app_mtime_respects_max_files(tmp_path: Path) -> None:
     assert seen == 2
     assert truncated is True
     assert latest > 0.0
+
+
+def test_resolve_app_csp_default_and_overrides() -> None:
+    assert resolve_app_csp(None, has_app=True) == DEFAULT_CSP
+    assert resolve_app_csp(None, has_app=False) is None
+    assert resolve_app_csp(True, has_app=True) == DEFAULT_CSP
+    assert resolve_app_csp(False, has_app=True) is None
+    assert resolve_app_csp("default-src 'none'", has_app=True) == "default-src 'none'"
+    with pytest.raises(ValueError, match="requires app"):
+        resolve_app_csp(True, has_app=False)
+    with pytest.raises(ValueError, match="requires app"):
+        resolve_app_csp("default-src 'self'", has_app=False)
+    with pytest.raises(ValueError, match="single-line"):
+        resolve_app_csp("default-src 'self'\nimg-src *", has_app=True)
+    with pytest.raises(TypeError):
+        resolve_app_csp(1, has_app=True)  # type: ignore[arg-type]
+    validate_app_isolation(coop=False, corp=False, has_app=False)
+    with pytest.raises(ValueError, match="coop"):
+        validate_app_isolation(coop=True, corp=False, has_app=False)
+
+
+def test_app_webview_default_csp(tk_root, tmp_path: Path) -> None:
+    import tkinter as tk
+
+    from tkwry import WebView
+
+    (tmp_path / "index.html").write_text("<p>ok</p>", encoding="utf-8")
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, app=tmp_path)
+    assert web.csp == DEFAULT_CSP
+    assert web.coop is False
+    assert web.corp is False
+    web.destroy()
+    frame.destroy()
+
+
+def test_app_webview_csp_false_and_isolation(tk_root, tmp_path: Path) -> None:
+    import tkinter as tk
+
+    from tkwry import WebView
+
+    (tmp_path / "index.html").write_text("<p>ok</p>", encoding="utf-8")
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, app=tmp_path, csp=False, coop=True, corp=True)
+    assert web.csp is None
+    assert web.coop is True
+    assert web.corp is True
+    web.destroy()
+    frame.destroy()
+
+
+def test_csp_requires_app(tk_root) -> None:
+    import tkinter as tk
+
+    from tkwry import WebView
+
+    frame = tk.Frame(tk_root)
+    with pytest.raises(ValueError, match="csp"):
+        WebView(frame, html="<p>x</p>", csp=True)
+    with pytest.raises(ValueError, match="coop"):
+        WebView(frame, html="<p>x</p>", coop=True)
+    frame.destroy()

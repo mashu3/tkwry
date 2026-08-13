@@ -194,14 +194,22 @@ header that does not include ``text/html`` or ``*/*`` (for example
 (default) still emits ``ETag``; conditional ``If-None-Match`` returns 304.
 ``HEAD`` and single ``Range: bytes=`` requests are supported (audio/video).
 
+**CSP:** ``app=`` responses include a default Content-Security-Policy
+(``'self'`` + inline script/style; no CDN / ``eval`` / framing). Pass
+``csp=False`` to disable, or a policy string to replace it. ``coop=True`` /
+``corp=True`` add optional ``Cross-Origin-Opener-Policy`` /
+``Cross-Origin-Resource-Policy: same-origin``. See
+[Trust boundaries](docs/trust.md#tkwry-serving).
+
 Constructor ``app=`` fixes the filesystem root at create time. Later
 ``load_url("tkwry://localhost/other.html")`` can navigate within that root
 (Windows WebView2 rewrites this to ``https://tkwry.localhost/...`` internally).
 Path confinement (percent-decode, symlink/junction checks) is in
 [Trust boundaries](docs/trust.md#tkwry-serving).
 Monaco / CDN scripts may still be loaded from the network inside that HTML when
-you choose not to vendor them yet. The Plotly demo toggles **CDN** vs **Local**
-(``app=``); Local caches ``plotly.js`` under ``examples/.vendor/``.
+you choose not to vendor them yet (set ``csp=`` accordingly, or use ``html=``).
+The Plotly demo toggles **CDN** vs **Local** (``app=``); Local caches
+``plotly.js`` under ``examples/.vendor/``.
 
 See [`examples/plotly_demo.py`](examples/plotly_demo.py).
 
@@ -381,20 +389,21 @@ web.destroy()   # release native webview; host Frame is kept
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
 | Layout | `pack`, `grid`, `place`, `sync_bounds` (delegate to host `Frame` except `sync_bounds`) |
-| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `wait_until_ready`, `bind`, `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `untrusted`, `navigation_allow`, `open_external`, `bridge_origins`, `bridge_allow` |
+| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `wait_until_ready`, `bind`, `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `untrusted`, `navigation_allow`, `open_external`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
 | Diagnostics | `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
-`app_dev`, `session` / `data_directory` / `ephemeral`, `untrusted`,
-`bridge_origins`, `bridge_allow`, `navigation_allow`, `open_external`,
-`ipc_handler`, `rpc_traceback`, `devtools`, `background_color`, `user_agent`,
-`initialization_script`, `focused`, plus the callback hooks above.
+`app_dev`, `csp` / `coop` / `corp`, `session` / `data_directory` / `ephemeral`,
+`untrusted`, `bridge_origins`, `bridge_allow`, `navigation_allow`,
+`open_external`, `ipc_handler`, `rpc_traceback`, `devtools`,
+`background_color`, `user_agent`, `initialization_script`, `focused`, plus the
+callback hooks above.
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`, `WebViewPhase`.
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
 `RpcTimeoutError`, `RpcCancelledError`, `RpcSerializationError`.
 Warning: `TkwrySecurityWarning`. Helpers: `rpc_cancelled`, `rpc_cancel_event`,
-`open_in_browser`.
+`open_in_browser`, `DEFAULT_CSP`.
 
 Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`.
 
@@ -446,7 +455,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 
 ## 🧩 Features
 
-- **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, ETag/HEAD/Range, bounded `watch_app()`; open-then-verify symlink/junction confinement)
+- **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, ETag/HEAD/Range, default CSP, optional COOP/CORP, bounded `watch_app()`; open-then-verify symlink/junction confinement)
 - **IPC / RPC / emit** — events vs request/response; worker RPC; typed TypeError; protocol `version`; JS `cancel`; Python→JS `emit`; origin/path allowlist (`bridge_origins`) + `bridge_allow` + `untrusted=` viewer mode
 - **WebSession** — shared wry `WebContext`; shared `app=` roots must match
 - **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`

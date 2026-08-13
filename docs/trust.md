@@ -80,6 +80,12 @@ identity against the canonical path (symlinks, Windows junctions, and
 reparse points that escape return 403). Internal links that stay under the
 root are allowed.
 
+Successful responses include a default Content-Security-Policy (`'self'` +
+inline script/style; no CDN / `eval` / framing). Pass `csp=False` to omit it,
+or a policy string / `DEFAULT_CSP` to replace it. `coop=True` /
+`corp=True` add `Cross-Origin-Opener-Policy` /
+`Cross-Origin-Resource-Policy: same-origin` (opt-in).
+
 See [README — Local app assets](../README.md#local-app-assets-app--tkwry)
 for SPA fallback, cache headers, and `watch_app()`.
 

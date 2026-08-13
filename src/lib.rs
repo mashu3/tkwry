@@ -1077,6 +1077,9 @@ impl WebView {
         app_root = None,
         spa_fallback = false,
         app_cache_control = None,
+        app_csp = None,
+        app_coop = false,
+        app_corp = false,
         visible = true,
         devtools = false,
         focused = true,
@@ -1103,6 +1106,9 @@ impl WebView {
         app_root: Option<String>,
         spa_fallback: bool,
         app_cache_control: Option<String>,
+        app_csp: Option<String>,
+        app_coop: bool,
+        app_corp: bool,
         visible: bool,
         devtools: bool,
         focused: bool,
@@ -1416,6 +1422,9 @@ WebViews that share a session must use the same app= root \
             let serve_options = app_protocol::AppServeOptions {
                 spa_fallback,
                 cache_control: app_cache_control,
+                csp: app_csp,
+                coop: app_coop,
+                corp: app_corp,
             };
             builder = builder.with_custom_protocol("tkwry".into(), move |_id, request| {
                 app_protocol::serve_app_request(&root_for_protocol, request, &serve_options)

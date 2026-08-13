@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   never creates a WebView from ``on_new_window``), and ``open_in_browser()``
 - ``go_back`` / ``go_forward`` / ``can_go_back`` / ``can_go_forward`` (wry
   0.56); ``examples/browser_demo.py`` Back / Forward buttons
+- ``app=`` / ``tkwry://`` default Content-Security-Policy (``csp=False`` or a
+  custom string to override); optional ``coop=True`` / ``corp=True``
 
 ### Changed
 

@@ -7,17 +7,25 @@ use std::path::{Component, Path, PathBuf};
 
 use wry::http::{
     header::{
-        ACCEPT, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, IF_NONE_MATCH,
-        ORIGIN, RANGE, REFERER,
+        HeaderName, ACCEPT, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_SECURITY_POLICY,
+        CONTENT_TYPE, ETAG, IF_NONE_MATCH, ORIGIN, RANGE, REFERER,
     },
     HeaderValue, Method, Request, Response, StatusCode,
 };
+
+const CROSS_ORIGIN_OPENER_POLICY: HeaderName =
+    HeaderName::from_static("cross-origin-opener-policy");
+const CROSS_ORIGIN_RESOURCE_POLICY: HeaderName =
+    HeaderName::from_static("cross-origin-resource-policy");
 
 /// Options for ``tkwry://`` static serving.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct AppServeOptions {
     pub spa_fallback: bool,
     pub cache_control: Option<String>,
+    pub csp: Option<String>,
+    pub coop: bool,
+    pub corp: bool,
 }
 
 /// Map a ``tkwry://`` URL to the WebView2 navigation form used with
@@ -368,7 +376,7 @@ fn parse_byte_range(header: &str, size: u64) -> Option<ByteRange> {
     Some(ByteRange { start, end })
 }
 
-fn apply_cache_headers(
+fn apply_serve_headers(
     mut builder: wry::http::response::Builder,
     options: &AppServeOptions,
     etag: &str,
@@ -382,6 +390,23 @@ fn apply_cache_headers(
         if let Ok(value) = HeaderValue::from_str(cache) {
             builder = builder.header(CACHE_CONTROL, value);
         }
+    }
+    if let Some(csp) = options.csp.as_deref() {
+        if let Ok(value) = HeaderValue::from_str(csp) {
+            builder = builder.header(CONTENT_SECURITY_POLICY, value);
+        }
+    }
+    if options.coop {
+        builder = builder.header(
+            CROSS_ORIGIN_OPENER_POLICY,
+            HeaderValue::from_static("same-origin"),
+        );
+    }
+    if options.corp {
+        builder = builder.header(
+            CROSS_ORIGIN_RESOURCE_POLICY,
+            HeaderValue::from_static("same-origin"),
+        );
     }
     builder
 }
@@ -409,7 +434,7 @@ fn file_response(
     extra: Option<(wry::http::header::HeaderName, HeaderValue)>,
 ) -> Response<Cow<'static, [u8]>> {
     let len = bytes.len() as u64;
-    let mut builder = apply_cache_headers(
+    let mut builder = apply_serve_headers(
         Response::builder()
             .status(status)
             .header(CONTENT_TYPE, mime_for_path(file_path)),
@@ -441,7 +466,7 @@ fn serve_open_file(
     let etag = etag_for_meta(&meta);
     let size = meta.len();
     if if_none_match_hits(request, &etag) {
-        let builder = apply_cache_headers(
+        let builder = apply_serve_headers(
             Response::builder().status(StatusCode::NOT_MODIFIED),
             options,
             &etag,
@@ -454,7 +479,7 @@ fn serve_open_file(
             }));
     }
     if request.method() == Method::HEAD {
-        let builder = apply_cache_headers(
+        let builder = apply_serve_headers(
             Response::builder()
                 .status(StatusCode::OK)
                 .header(CONTENT_TYPE, mime_for_path(file_path)),
@@ -470,7 +495,7 @@ fn serve_open_file(
     }
     if let Some(range_header) = header_str(request, RANGE) {
         let Some(range) = parse_byte_range(range_header, size) else {
-            let builder = apply_cache_headers(
+            let builder = apply_serve_headers(
                 Response::builder()
                     .status(StatusCode::RANGE_NOT_SATISFIABLE)
                     .header(CONTENT_RANGE, format!("bytes */{size}")),
@@ -843,6 +868,7 @@ mod tests {
         let options = AppServeOptions {
             spa_fallback: true,
             cache_control: None,
+            ..Default::default()
         };
         let missing_js = serve_app_request(&root, dummy_request("/missing.js"), &options);
         assert_eq!(missing_js.status(), StatusCode::NOT_FOUND);
@@ -874,6 +900,7 @@ mod tests {
         let options = AppServeOptions {
             spa_fallback: false,
             cache_control: Some("no-store".into()),
+            ..Default::default()
         };
 
         let head = serve_app_request(
@@ -966,6 +993,42 @@ mod tests {
 
         let top_level = serve_app_request(&root, dummy_request("/index.html"), &options);
         assert_eq!(top_level.status(), StatusCode::OK);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn serve_applies_csp_coop_corp() {
+        let tmp = make_temp_dir("csp");
+        let root = tmp.join("app");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("index.html"), b"<p>ok</p>").unwrap();
+        let options = AppServeOptions {
+            csp: Some("default-src 'self'".into()),
+            coop: true,
+            corp: true,
+            ..Default::default()
+        };
+        let resp = serve_app_request(&root, dummy_request("/index.html"), &options);
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(CONTENT_SECURITY_POLICY).unwrap(),
+            "default-src 'self'"
+        );
+        assert_eq!(
+            resp.headers().get("cross-origin-opener-policy").unwrap(),
+            "same-origin"
+        );
+        assert_eq!(
+            resp.headers().get("cross-origin-resource-policy").unwrap(),
+            "same-origin"
+        );
+
+        let plain = serve_app_request(
+            &root,
+            dummy_request("/index.html"),
+            &AppServeOptions::default(),
+        );
+        assert!(plain.headers().get(CONTENT_SECURITY_POLICY).is_none());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

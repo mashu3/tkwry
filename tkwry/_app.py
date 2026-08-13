@@ -13,6 +13,52 @@ from pathlib import Path
 APP_SCHEME = "tkwry"
 APP_HOST = "localhost"
 
+# Default Content-Security-Policy for ``tkwry://`` (``app=``). Allows inline
+# script/style for simple local UIs; blocks CDN / eval / framing. Override with
+# ``csp=`` or disable with ``csp=False``.
+DEFAULT_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob:; "
+    "font-src 'self' data:; "
+    "connect-src 'self'; "
+    "media-src 'self' blob: data:; "
+    "worker-src 'self' blob:; "
+    "frame-src 'none'; "
+    "object-src 'none'; "
+    "base-uri 'self'"
+)
+
+
+def resolve_app_csp(csp: bool | str | None, *, has_app: bool) -> str | None:
+    """Resolve constructor ``csp=`` into a header value (or ``None`` to omit)."""
+    if isinstance(csp, str):
+        text = csp.strip()
+        if not text or "\n" in text or "\r" in text:
+            raise ValueError(
+                "csp must be a non-empty single-line Content-Security-Policy"
+            )
+        if not has_app:
+            raise ValueError("WebView: csp= requires app=")
+        return text
+    if csp is True:
+        if not has_app:
+            raise ValueError("WebView: csp=True requires app=")
+        return DEFAULT_CSP
+    if csp is False:
+        return None
+    if csp is None:
+        return DEFAULT_CSP if has_app else None
+    raise TypeError("csp must be True, False, None, or a policy string")
+
+
+def validate_app_isolation(*, coop: bool, corp: bool, has_app: bool) -> None:
+    """``coop`` / ``corp`` only apply to ``tkwry://`` serving."""
+    if (coop or corp) and not has_app:
+        raise ValueError("WebView: coop= / corp= require app=")
+
+
 WATCH_DEFAULT_SUFFIXES = frozenset(
     {
         ".html",

@@ -17,7 +17,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal, TypeAlias, TypeVar, cast
 
-from tkwry._app import resolve_app
+from tkwry._app import resolve_app, resolve_app_csp, validate_app_isolation
 from tkwry._core import (
     DragDropEvent,
     NewWindowResponse,
@@ -245,7 +245,10 @@ class WebView(WebViewRpcMixin):
     uses ``tkwry://localhost/...``. The app root is fixed at create time.
     Requests are opened under the app root and the opened file's identity is
     checked against the canonical path (symlinks, Windows junctions, reparse
-    points that escape the root are forbidden).
+    points that escape the root are forbidden). ``tkwry://`` responses send a
+    default Content-Security-Policy (``csp=False`` to disable, or a custom
+    policy string). ``coop=True`` / ``corp=True`` add optional
+    Cross-Origin-Opener-Policy / Cross-Origin-Resource-Policy.
 
     **Sessions** (``session=`` / ``data_directory=`` / ``ephemeral=``): share a
     wry ``WebContext`` (cookies / cache / localStorage where the platform
@@ -356,6 +359,9 @@ class WebView(WebViewRpcMixin):
         ipc_handler: IpcHandler | None = None,
         spa_fallback: bool = False,
         app_dev: bool = False,
+        csp: bool | str | None = None,
+        coop: bool = False,
+        corp: bool = False,
         rpc_traceback: bool = False,
         devtools: bool = False,
         background_color: tuple[int, int, int, int] | None = None,
@@ -517,6 +523,11 @@ class WebView(WebViewRpcMixin):
         self._pending_url = None if html is not None else url
         self._pending_html = html
         self._lock_app_navigation = self._app_root is not None and not untrusted
+        has_app = self._app_root is not None
+        validate_app_isolation(coop=coop, corp=corp, has_app=has_app)
+        self._csp = resolve_app_csp(csp, has_app=has_app)
+        self._coop = coop
+        self._corp = corp
         self._bridge_origins = resolve_bridge_origins(
             bridge_origins,
             url=None if html is not None else url,
@@ -700,6 +711,24 @@ class WebView(WebViewRpcMixin):
         """``True`` when off-list http(s) is opened in the system browser."""
         self._require_tk_thread()
         return self._open_external
+
+    @property
+    def csp(self) -> str | None:
+        """Content-Security-Policy for ``tkwry://``, or ``None`` if omitted."""
+        self._require_tk_thread()
+        return self._csp
+
+    @property
+    def coop(self) -> bool:
+        """``True`` when ``Cross-Origin-Opener-Policy: same-origin`` is sent."""
+        self._require_tk_thread()
+        return self._coop
+
+    @property
+    def corp(self) -> bool:
+        """``True`` when ``Cross-Origin-Resource-Policy: same-origin`` is sent."""
+        self._require_tk_thread()
+        return self._corp
 
     @property
     def bridge_origins(self) -> BridgeAllowlist:
@@ -2471,6 +2500,12 @@ class WebView(WebViewRpcMixin):
             kwargs["spa_fallback"] = self._spa_fallback
             if self._app_dev:
                 kwargs["app_cache_control"] = "no-store"
+            if self._csp is not None:
+                kwargs["app_csp"] = self._csp
+            if self._coop:
+                kwargs["app_coop"] = True
+            if self._corp:
+                kwargs["app_corp"] = True
         if self._session is not None:
             kwargs["session"] = self._session.native
         if self._on_navigation is not None or self._navigation_policy_active():
