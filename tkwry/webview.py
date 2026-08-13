@@ -1487,7 +1487,7 @@ class WebView(WebViewRpcMixin):
                 continue
             try:
                 self._frame.after_cancel(after_id)
-            except (tk.TclError, ValueError):
+            except (tk.TclError, RuntimeError, ValueError):
                 pass
 
     def _run_try_create(self) -> None:
@@ -2129,10 +2129,15 @@ class WebView(WebViewRpcMixin):
             return
         if self._destroyed and self._native_teardown_pending is None:
             return
+        try:
+            if not self._frame.winfo_exists():
+                return
+        except (tk.TclError, RuntimeError):
+            return
         self._event_poll_active = True
         try:
             self._track_after(self._frame.after(1, self._poll_events))
-        except tk.TclError:
+        except (tk.TclError, RuntimeError):
             self._disarm_event_poll()
 
     def _stop_event_poll_if_idle(self) -> None:
@@ -2181,8 +2186,11 @@ class WebView(WebViewRpcMixin):
         if self._destroyed:
             if self._native_teardown_pending is not None:
                 try:
-                    self._track_after(self._frame.after(1, self._poll_events))
-                except tk.TclError:
+                    if self._frame.winfo_exists():
+                        self._track_after(self._frame.after(1, self._poll_events))
+                    else:
+                        self._disarm_event_poll()
+                except (tk.TclError, RuntimeError):
                     self._disarm_event_poll()
             else:
                 self._stop_event_poll_if_idle()

@@ -319,8 +319,7 @@ class WebViewRpcMixin:
                 return
 
     def _abort_inflight_rpc(self) -> None:
-        """Reject pending RPC Promises before the native view is released."""
-        error = rpc_error("WebViewDestroyedError", "webview destroyed")
+        """Drop inflight RPC on destroy without touching the dying native view."""
         pending = list(self._rpc_inflight.items())
         self._rpc_inflight.clear()
         self._discard_rpc_done_queue()
@@ -334,9 +333,10 @@ class WebViewRpcMixin:
             event.set()
         self._rpc_cancel_events.clear()
         self._rpc_user_cancelled.clear()
-        for req_id, fut in pending:
+        for _req_id, fut in pending:
             fut.cancel()
-            self._settle_rpc(req_id, ok=False, value=error)
+        # Do not eval_js settle: native is going away and worker threads must
+        # not race WebKit/WebView2 teardown (Tcl/native abort on destroy+pump).
 
     def _signal_rpc_cancel(self, req_id: str) -> None:
         event = self._rpc_cancel_events.pop(req_id, None)

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from support.tk import host_frame, pump, wait_until
 
-from tkwry import DragDropEvent, PageLoadEvent, WebView
+from tkwry import DragDropEvent, PageLoadEvent, WebView, rpc_cancelled
 from tkwry.exceptions import WebViewDestroyedError
 
 
@@ -854,7 +854,11 @@ def test_rpc_worker_timeout_rejects(tk_root) -> None:
 
     @web.expose(thread=True, timeout=0.2)
     def slow() -> str:
-        time.sleep(2.0)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if rpc_cancelled():
+                return "cancelled"
+            time.sleep(0.02)
         return "done"
 
     assert web.wait_until_ready(timeout=10.0)
@@ -890,7 +894,11 @@ def test_rpc_destroy_during_worker_call(tk_root) -> None:
     @web.expose(thread=True)
     def slow() -> str:
         started.set()
-        time.sleep(1.5)
+        deadline = time.monotonic() + 1.5
+        while time.monotonic() < deadline:
+            if rpc_cancelled():
+                return "cancelled"
+            time.sleep(0.02)
         return "done"
 
     assert web.wait_until_ready(timeout=10.0)
@@ -899,7 +907,6 @@ def test_rpc_destroy_during_worker_call(tk_root) -> None:
     assert wait_until(tk_root, started.is_set, steps=200)
     web.destroy()
     frame.destroy()
-    pump(tk_root, steps=20)
 
 
 def test_emit_listener_off_stops_delivery(tk_root) -> None:

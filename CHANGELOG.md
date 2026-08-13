@@ -57,7 +57,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Worker RPC completions settle on the Tk event poll instead of ``after_idle``
-  from the pool thread (avoids ``Tcl_AsyncDelete`` / abort on teardown)
+  from the pool thread; destroy aborts inflight RPC without ``eval_js`` and
+  does not reschedule poll on a dead frame (avoids Tcl/native abort)
 
 ## [0.1.2] - 2026-08-12
 
