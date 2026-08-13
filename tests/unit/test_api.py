@@ -55,6 +55,7 @@ WEBVIEW_METHODS = (
     "go_forward",
     "can_go_back",
     "can_go_forward",
+    "print",
     "eval_js",
     "eval_js_with_callback",
     "emit",

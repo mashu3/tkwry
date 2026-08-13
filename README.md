@@ -289,6 +289,7 @@ web.eval_js("bad()", on_error=lambda exc: print("eval failed:", exc))
 web.eval_js_with_callback("document.title", print)  # async; callback on Tk main thread
 web.load_url("https://example.com")
 web.reload()
+web.print()  # system print dialog
 print(web.url)
 web.focus()
 ```
@@ -399,7 +400,7 @@ web.destroy()   # release native webview; host Frame is kept
 
 | Category | Members |
 |----------|---------|
-| Content | `load_url`, `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `url` |
+| Content | `load_url`, `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `print`, `url` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback` |
 | IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_complete` |
@@ -483,6 +484,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Deferred callbacks** — IPC, RPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
 - **URL safety** — Python `load_url` normalizes/validates schemes; in-page nav denies `javascript:`/`blob:`/… (`data:` under `app=`); `app=` stays on `tkwry://`; IPC/RPC origin/path allowlist + `bridge_allow`
 - **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()` (macOS: private APIs)
+- **Print** — `web.print()` opens the system print dialog (wry)
 - **Downloads** — `on_download` / `on_download_complete` + `download_allow`; `untrusted=True` denies unless permitted
 - **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)
 - **Navigation hooks** — all handlers on the Tk thread; `on_navigation` / `on_new_window` block WebKit until they return

@@ -1417,6 +1417,10 @@ class WebView(WebViewRpcMixin):
         """Return whether history can go forward."""
         return self._require_ready("can_go_forward").can_go_forward()
 
+    def print(self) -> None:
+        """Open the platform print dialog for the current page."""
+        self._require_ready("print").print()
+
     def _run_deferred_reload(self) -> None:
         if self._destroyed or self._webview is None:
             return

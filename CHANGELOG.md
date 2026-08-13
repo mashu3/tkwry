@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Downloads: ``on_download`` / ``on_download_complete`` wrap wry start/complete;
   ``download_allow`` origin/path allowlist; ``untrusted=True`` denies downloads
   unless a handler or allowlist permits
+- ``WebView.print()`` → wry system print dialog
 
 ### Changed
 

@@ -1798,6 +1798,13 @@ WebViews that share a session must use the same app= root \
         })
     }
 
+    fn print(&self) -> PyResult<()> {
+        with_webview(self, |wv| {
+            wv.print()
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })
+    }
+
     fn eval_js(&self, script: &str) -> PyResult<()> {
         with_webview(self, |wv| {
             wv.evaluate_script(script)
