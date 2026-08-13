@@ -5,6 +5,7 @@ from __future__ import annotations
 import glob
 import os
 import sys
+import threading
 import time
 
 import pytest
@@ -49,6 +50,20 @@ def _create_tk_root():
     raise last_err
 
 
+def _join_tkwry_rpc_threads(timeout: float = 2.0) -> None:
+    """Wait for leftover ``tkwry-rpc`` pool threads before the next Tk use."""
+    deadline = time.monotonic() + timeout
+    for thread in threading.enumerate():
+        if thread is threading.current_thread():
+            continue
+        if not thread.name.startswith("tkwry-rpc"):
+            continue
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        thread.join(timeout=remaining)
+
+
 @pytest.fixture
 def tk_root():
     import tkinter as tk
@@ -60,6 +75,7 @@ def tk_root():
     try:
         yield root
     finally:
+        _join_tkwry_rpc_threads()
         try:
             root.destroy()
         except tk.TclError:

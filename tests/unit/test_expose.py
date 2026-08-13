@@ -181,7 +181,9 @@ def test_rpc_worker_done_after_destroy_skips_tk(tk_root) -> None:
     @web.expose(thread=True)
     def slow() -> str:
         started.set()
-        release.wait(timeout=5.0)
+        while not release.wait(timeout=0.05):
+            if rpc_cancelled():
+                break
         finished.set()
         return "done"
 

@@ -10,6 +10,7 @@ import os
 import queue
 import sys
 import threading
+import time
 import tkinter as tk
 import traceback
 from collections.abc import Callable, Collection
@@ -307,8 +308,19 @@ class WebViewRpcMixin:
     def _shutdown_rpc_executor(self) -> None:
         executor = self._rpc_executor
         self._rpc_executor = None
-        if executor is not None:
-            executor.shutdown(wait=False, cancel_futures=True)
+        if executor is None:
+            return
+        executor.shutdown(wait=False, cancel_futures=True)
+        # Join so pool threads do not outlive destroy and race Tcl (macOS/Win
+        # abort on the next ``update`` / ``Tk()``). Cooperative handlers exit
+        # quickly after cancel; uncooperative ones are capped.
+        threads = [t for t in getattr(executor, "_threads", ()) if t.is_alive()]
+        deadline = time.monotonic() + 2.0
+        for thread in threads:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            thread.join(timeout=remaining)
 
     def _discard_rpc_done_queue(self) -> None:
         q = self._rpc_done_queue
