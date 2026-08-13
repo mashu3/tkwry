@@ -108,12 +108,19 @@ Use `take_queue_drop_counts()` to observe overflows — it returns
 
 ```python
 web.emit("data_updated", {"n": 1})
+
+# Broadcast to every emit-eligible WebView sharing a WebSession
+session.emit_all("data_updated", {"n": 1})
 ```
 
 ```js
 window.tkwry.on("data_updated", (payload) => { ... });
 // listener errors are logged with console.error (set window.tkwry.debug = false to silence)
 ```
+
+``emit_all`` skips destroyed / not-ready / ``untrusted`` views and pages
+outside each view's ``bridge_origins``. It returns the number of views that
+received the event.
 
 See [`examples/ipc_demo.py`](../examples/ipc_demo.py).
 

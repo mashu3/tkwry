@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``download_allow`` origin/path allowlist; ``untrusted=True`` denies downloads
   unless a handler or allowlist permits
 - ``WebView.print()`` → wry system print dialog
+- ``WebSession.emit_all(event, data)`` broadcasts ``emit`` to siblings sharing
+  the session (skips untrusted / not-ready / disallowed ``bridge_origins``)
 
 ### Changed
 

@@ -545,6 +545,7 @@ class WebView(WebViewRpcMixin):
                 url = app_entry_url
         if self._session is not None:
             self._session._bind_app_root(self._app_root)
+            self._session._register_webview(self)
         if url is not None:
             url = _normalize_url(url)
             _validate_url(url)
@@ -1080,6 +1081,8 @@ class WebView(WebViewRpcMixin):
         if self._destroyed:
             return
         self._destroyed = True
+        if self._session is not None:
+            self._session._unregister_webview(self)
         self._abort_inflight_rpc()
         self._stop_app_watch()
         # Emergency path: skip Tcl ``after`` cancel / frame unbind; still clear
@@ -1107,6 +1110,8 @@ class WebView(WebViewRpcMixin):
         if self._destroyed:
             return
         self._destroyed = True
+        if self._session is not None:
+            self._session._unregister_webview(self)
         self._abort_inflight_rpc()
         self._stop_app_watch()
         self._cancel_deferred_callbacks()

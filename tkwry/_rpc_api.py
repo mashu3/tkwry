@@ -233,6 +233,22 @@ class WebViewRpcMixin:
         self._enable_rpc()
         self.eval_js(script)
 
+    def _emit_eligible(self) -> bool:
+        """Whether :meth:`emit` / session broadcast may deliver to this view."""
+        if self._destroyed or self._creation_error is not None:
+            return False
+        if self._untrusted:
+            return False
+        if not self.ready:
+            return False
+        current = None
+        if self._webview is not None:
+            try:
+                current = self._webview.url()
+            except Exception:
+                current = None
+        return self._bridge_origin_allowed(current or "about:blank")
+
     def watch_app(
         self,
         *,

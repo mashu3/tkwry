@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import weakref
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from tkwry._core import WebSession as NativeWebSession
+
+if TYPE_CHECKING:
+    from tkwry.webview import WebView
 
 
 class WebSession:
@@ -22,6 +27,11 @@ class WebSession:
     Do not share a persistent session between a trusted ``app=`` WebView and
     an untrusted external site — use ``untrusted=True`` (ephemeral) or a
     separate :class:`WebSession`.
+
+    **Broadcast:** :meth:`emit_all` sends a Python→JS event to every live
+    WebView that shares this session and is eligible for
+    :meth:`~tkwry.WebView.emit` (ready, not ``untrusted``, current page
+    allowed by that view's ``bridge_origins``).
 
     Parameters
     ----------
@@ -50,6 +60,13 @@ class WebSession:
             path = str(resolved)
         self._native = NativeWebSession(data_directory=path, ephemeral=ephemeral)
         self._app_root: str | None = None
+        self._webviews: weakref.WeakSet[WebView] = weakref.WeakSet()
+
+    def _register_webview(self, web: WebView) -> None:
+        self._webviews.add(web)
+
+    def _unregister_webview(self, web: WebView) -> None:
+        self._webviews.discard(web)
 
     def _bind_app_root(self, root: str | None) -> None:
         """Record ``app=`` root for this session; reject a conflicting root."""
@@ -65,6 +82,27 @@ class WebSession:
                 "WebViews that share a session must use the same app= root "
                 "(Linux registers tkwry:// once per WebContext)."
             )
+
+    def emit_all(self, event: str, data: Any = None) -> int:
+        """Broadcast :meth:`~tkwry.WebView.emit` to siblings sharing this session.
+
+        Must run on the Tk main thread. Skips views that are destroyed, not
+        ready, ``untrusted``, or whose current page is outside that view's
+        ``bridge_origins``. Returns how many views received the event.
+        """
+        if not event:
+            raise ValueError("emit_all: event name must be non-empty")
+        # Fail fast on non-JSON payloads before touching any WebView.
+        from tkwry.ipc import emit_script
+
+        emit_script(event, data)
+        sent = 0
+        for web in list(self._webviews):
+            if not web._emit_eligible():
+                continue
+            web.emit(event, data)
+            sent += 1
+        return sent
 
     @property
     def app_root(self) -> Path | None:

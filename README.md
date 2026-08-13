@@ -267,6 +267,7 @@ from tkwry import WebSession, WebView
 session = WebSession(data_directory="~/.myapp/webview")
 left = WebView(frame_a, html=HTML, session=session)
 right = WebView(frame_b, html=HTML, session=session)
+session.emit_all("theme", {"mode": "dark"})  # → both views (if emit-eligible)
 ```
 
 Convenience: ``WebView(..., data_directory=...)`` or ``ephemeral=True``
@@ -402,7 +403,7 @@ web.destroy()   # release native webview; host Frame is kept
 |----------|---------|
 | Content | `load_url`, `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `print`, `url` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback` |
-| IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` |
+| IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_complete` |
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
@@ -476,7 +477,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 
 - **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, ETag/HEAD/Range, default CSP, optional COOP/CORP, bounded `watch_app()`; open-then-verify symlink/junction confinement)
 - **IPC / RPC / emit** — events vs request/response; worker RPC; typed TypeError; protocol `version`; JS `cancel`; Python→JS `emit`; origin/path allowlist (`bridge_origins`) + `bridge_allow` + `untrusted=` viewer mode
-- **WebSession** — shared wry `WebContext`; shared `app=` roots must match
+- **WebSession** — shared wry `WebContext`; shared `app=` roots must match; `emit_all` broadcast
 - **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
 - **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` hide unmapped views)
