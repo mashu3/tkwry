@@ -24,7 +24,9 @@ Tkinter is still a solid GUI shell — it just had no first-class way to host mo
 
 - **True child embedding** — `build_as_child` via HWND, NSView, or X11 window ID
 - **One event loop** — Tk `mainloop` only; no separate app runtime
+- **Local apps** — `app=` serves HTML/CSS/JS via `tkwry://` (no localhost HTTP server)
 - **IPC / RPC / emit** — JS↔Python events and request/response without freezing the UI
+- **Trust boundaries** — IPC/RPC default to the initial origin; `untrusted=True` for arbitrary sites
 - **Layout-aware** — tracks `pack` / `grid` / `place`, tabs, and `PanedWindow`
 
 Pre-built **abi3** wheels ship for **Windows** and **macOS**. **Linux** is source-only (**best-effort** by design) — see [Platform notes](#-platform-notes).
@@ -122,6 +124,9 @@ Use **IPC** for fire-and-forget events and **RPC** for request/response:
 | JS → Python | IPC (event) | `set_ipc_handler` / `ipc_handler=` | `window.ipc.postMessage(str)` |
 | JS → Python | RPC (call) | `@web.expose` | `await window.tkwry.call(name, ...)` |
 | Python → JS | Emit (event) | `web.emit(event, data)` | `window.tkwry.on(event, handler)` |
+
+These APIs run with **desktop-app privileges**. By default only the initial
+page origin may use them — see [Trust boundaries](#trust-boundaries-external-pages).
 
 ```python
 def on_message(msg: str) -> None:
@@ -254,6 +259,21 @@ its own 2048-deep queue so IPC overflow cannot drop ``tkwry.call``.
 ``window.ipc`` / ``window.tkwry.call`` run with **desktop-app privileges**. A
 page that can call them can drive whatever you ``expose`` or handle over IPC —
 including after a redirect or XSS in a third-party script.
+
+```python
+# Local UI with RPC — bridge defaults to tkwry://
+web = WebView(frame, app="./web")
+
+# Arbitrary websites — no IPC/RPC, ephemeral storage
+web = WebView(frame, url="https://example.com", untrusted=True)
+
+# One trusted origin, or a path prefix (not /application)
+web = WebView(
+    frame,
+    url="https://trusted.example/app",
+    bridge_origins=["https://trusted.example/app"],
+)
+```
 
 Defaults:
 
@@ -419,6 +439,7 @@ See [`examples/dnd_demo.py`](examples/dnd_demo.py).
 ```python
 web.destroy()   # release native webview; host Frame is kept
 # or destroy the host Frame — both tear down the webview
+# in-flight RPC is cancelled cooperatively (pool join ~2s)
 ```
 
 ---
@@ -429,12 +450,12 @@ web.destroy()   # release native webview; host Frame is kept
 |----------|---------|
 | Content | `load_url`, `load_html`, `reload`, `url` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback` |
-| IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose`, `emit`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` |
+| IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler` |
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
 | Layout | `pack`, `grid`, `place`, `sync_bounds` (delegate to host `Frame` except `sync_bounds`) |
-| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `wait_until_ready`, `bind`, `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error` |
+| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `wait_until_ready`, `bind`, `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `untrusted`, `bridge_origins`, `bridge_allow` |
 | Diagnostics | `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
@@ -445,8 +466,8 @@ callback hooks above.
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`, `WebViewPhase`.
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
-`RpcTimeoutError`, `RpcSerializationError`. Warning: `TkwrySecurityWarning`.
-Helpers: `rpc_cancelled`, `rpc_cancel_event`.
+`RpcTimeoutError`, `RpcCancelledError`, `RpcSerializationError`.
+Warning: `TkwrySecurityWarning`. Helpers: `rpc_cancelled`, `rpc_cancel_event`.
 
 Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`.
 
@@ -552,7 +573,7 @@ pip install -e .
 
 | Script | Description |
 |--------|-------------|
-| [`examples/browser_demo.py`](examples/browser_demo.py) | URL bar, tabs, shared `WebSession`, open-in-new-tab |
+| [`examples/browser_demo.py`](examples/browser_demo.py) | URL bar, tabs, shared `WebSession`, open-in-new-tab (`bridge_origins="*"`; no `expose`) |
 | [`examples/ipc_demo.py`](examples/ipc_demo.py) | IPC events, RPC (`call` / kwargs / worker), and `emit` |
 | [`examples/multi_demo.py`](examples/multi_demo.py) | Multiple WebViews, tabs, panes |
 | [`examples/plotly_demo.py`](examples/plotly_demo.py) | Plotly charts — CDN or local `app=` (`pip install plotly`) |

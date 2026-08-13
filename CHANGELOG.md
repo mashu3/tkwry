@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-13
+
+Trust boundaries for IPC/RPC, typed/cancellable RPC, and hardened
+``tkwry://`` serving.
+
 ### Added
 
 - Trust boundaries: ``untrusted=True`` viewer mode (no IPC/RPC, ephemeral
@@ -47,9 +52,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- README warns against enabling RPC/IPC on untrusted pages and against sharing
-  a persistent ``WebSession`` with external sites; ``examples/browser_demo.py``
-  sets ``bridge_origins="*"`` explicitly (link interception only; warning expected)
+- README documents trust defaults (``untrusted``, origin/path allowlists,
+  ``"*"`` warning) and warns against sharing a persistent ``WebSession`` with
+  external sites; ``examples/browser_demo.py`` sets ``bridge_origins="*"``
+  explicitly (link interception only; warning expected)
 - ``untrusted=True`` cannot be combined with ``bridge_origins`` / ``bridge_allow``
 - ``set_bridge_origins("*")`` is refused unless every ``expose()`` used
   ``allow_any_origin=True``
@@ -430,6 +436,7 @@ eval, macOS IME / import-order / DevTools private APIs, Notebook `ready`≠map.
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.1.3]: https://github.com/mashu3/tkwry/releases/tag/v0.1.3
 [0.1.2]: https://github.com/mashu3/tkwry/releases/tag/v0.1.2
 [0.1.1]: https://github.com/mashu3/tkwry/releases/tag/v0.1.1
 [0.1.0]: https://github.com/mashu3/tkwry/releases/tag/v0.1.0
