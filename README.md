@@ -155,12 +155,25 @@ web = WebView(frame, app="./web")          # loads tkwry://localhost/index.html
 # watch_app() polls web suffixes (skips node_modules/.git/.vendor; max 2000 files)
 ```
 
+**SPA fallback** (``spa_fallback=True``): missing **extension-less** paths
+(and ``.html`` / ``.htm``) fall back to ``index.html``. A missing static
+asset such as ``/app.js`` / ``/style.css`` / ``/video.mp4`` stays **404** —
+it is never replaced with ``index.html``. If the request has an ``Accept``
+header that does not include ``text/html`` or ``*/*`` (for example
+``application/json``), fallback is skipped.
+
+**Cache:** ``app_dev=True`` sends ``Cache-Control: no-store``. Production
+(default) still emits ``ETag``; conditional ``If-None-Match`` returns 304.
+``HEAD`` and single ``Range: bytes=`` requests are supported (audio/video).
+
 Constructor ``app=`` fixes the filesystem root at create time. Later
 ``load_url("tkwry://localhost/other.html")`` can navigate within that root
 (Windows WebView2 rewrites this to ``https://tkwry.localhost/...`` internally).
-The ``tkwry://`` handler canonicalizes each path (following symlinks, Windows
-junctions, and reparse points) and returns 403 if the real file would leave
-the app root; internal links that stay under the root are allowed.
+The ``tkwry://`` handler percent-decodes each path segment (so ``%2e%2e``
+cannot bypass ``..``), rejects NUL / invalid UTF-8 / Windows drive and UNC
+shapes, then canonicalizes (following symlinks, Windows junctions, and
+reparse points) and returns 403 if the real file would leave the app root;
+internal links that stay under the root are allowed.
 Monaco / CDN scripts may still be loaded from the network inside that HTML when
 you choose not to vendor them yet. The Plotly demo toggles **CDN** vs **Local**
 (``app=``); Local caches ``plotly.js`` under ``examples/.vendor/``.
@@ -197,6 +210,9 @@ await window.tkwry.call("heavy_task", payload, {
   timeout: 5000,
   kwargs: { verbose: true },
 });
+const pending = window.tkwry.call("heavy_task", payload);
+// pending.id / pending.cancel() / window.tkwry.cancel(pending.id)
+pending.cancel();
 ```
 
 **Execution model:** default handlers run on the **Tk main thread** (safe for
@@ -218,6 +234,12 @@ handler). It rejects the JS Promise and sets a cooperative cancel flag;
 Long handlers should poll ``rpc_cancelled()`` (or capture
 ``rpc_cancel_event()`` for other threads). JS ``call(..., { timeout: ms })``
 is independent and only settles the Promise on the JS side.
+``window.tkwry.cancel(id)`` (or ``promise.cancel()``) cancels from JS and
+rejects with ``RpcCancelledError``. Argument mismatches reject with a
+stable ``TypeError`` payload (arity + simple annotation checks: ``int`` /
+``float`` / ``str`` / ``bool`` / ``list`` / ``dict`` / ``Optional``).
+Envelopes include ``version: 1``; unknown versions reject with
+``RpcProtocolError`` (omitted version is treated as 1).
 
 **Limits:** IPC/RPC messages cap at **10 MiB**; RPC allows at most **256**
 positional args and **256** kwargs. Oversized RPC rejects with
@@ -449,8 +471,8 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 
 ## 🧩 Features
 
-- **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, bounded `watch_app()`; symlink/junction confinement)
-- **IPC / RPC / emit** — events vs request/response; worker RPC; strict JSON; cooperative cancel; Python→JS `emit` (`console.error` on listener errors)
+- **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, ETag/HEAD/Range, bounded `watch_app()`; symlink/junction confinement)
+- **IPC / RPC / emit** — events vs request/response; worker RPC; typed TypeError; protocol `version`; JS `cancel`; Python→JS `emit`
 - **WebSession** — shared wry `WebContext`; shared `app=` roots must match
 - **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay

@@ -4,8 +4,11 @@ use std::borrow::Cow;
 use std::path::{Component, Path, PathBuf};
 
 use wry::http::{
-    header::{CACHE_CONTROL, CONTENT_TYPE},
-    HeaderValue, Request, Response, StatusCode,
+    header::{
+        ACCEPT, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, IF_NONE_MATCH,
+        RANGE,
+    },
+    HeaderValue, Method, Request, Response, StatusCode,
 };
 
 /// Options for ``tkwry://`` static serving.
@@ -36,11 +39,57 @@ pub(crate) fn navigate_url(url: &str) -> Cow<'_, str> {
     Cow::Borrowed(url)
 }
 
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Percent-decode one path segment. Rejects NUL / invalid UTF-8 / embedded slashes.
+fn decode_path_segment(raw: &str) -> Option<String> {
+    let bytes = raw.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' => {
+                if i + 2 >= bytes.len() {
+                    return None;
+                }
+                let high = hex_nibble(bytes[i + 1])?;
+                let low = hex_nibble(bytes[i + 2])?;
+                out.push((high << 4) | low);
+                i += 3;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    if out.contains(&0) {
+        return None;
+    }
+    let decoded = String::from_utf8(out).ok()?;
+    if decoded.contains('/') || decoded.contains('\\') {
+        return None;
+    }
+    Some(decoded)
+}
+
+fn looks_like_windows_drive(segment: &str) -> bool {
+    let bytes = segment.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
 /// Resolve a request path under ``root``, rejecting ``..`` and absolute escapes.
 ///
-/// This only sanitizes URL components. Callers must still
-/// [`resolve_under_root`] so symlinks / junctions / reparse points cannot
-/// escape ``root``.
+/// Percent-decodes each segment independently so ``%2e%2e`` cannot sneak past
+/// ``..`` checks. Callers must still [`resolve_under_root`] so symlinks /
+/// junctions / reparse points cannot escape ``root``.
 pub(crate) fn safe_join(root: &Path, url_path: &str) -> Option<PathBuf> {
     let trimmed = url_path.trim_start_matches('/');
     let mut out = root.to_path_buf();
@@ -48,14 +97,30 @@ pub(crate) fn safe_join(root: &Path, url_path: &str) -> Option<PathBuf> {
         out.push("index.html");
         return Some(out);
     }
-    for comp in Path::new(trimmed).components() {
-        match comp {
-            Component::Normal(c) => out.push(c),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return None;
-            }
+    let mut pushed = false;
+    for raw_seg in trimmed.split('/') {
+        if raw_seg.is_empty() {
+            continue;
         }
+        let seg = decode_path_segment(raw_seg)?;
+        if seg.is_empty() || seg == "." {
+            continue;
+        }
+        if seg == ".." || looks_like_windows_drive(&seg) || seg.starts_with("\\\\") {
+            return None;
+        }
+        // ``Path`` would treat some of these as Prefix / ParentDir.
+        if Path::new(&seg)
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_) | Component::CurDir))
+        {
+            return None;
+        }
+        out.push(seg);
+        pushed = true;
+    }
+    if !pushed {
+        out.push("index.html");
     }
     Some(out)
 }
@@ -126,18 +191,117 @@ fn mime_for_path(path: &Path) -> &'static str {
     }
 }
 
-fn looks_like_static_asset(url_path: &str) -> bool {
+pub(crate) fn looks_like_static_asset(url_path: &str) -> bool {
     let trimmed = url_path.trim_start_matches('/');
     if trimmed.is_empty() {
         return false;
     }
-    Path::new(trimmed)
+    let last = trimmed.rsplit('/').next().unwrap_or(trimmed);
+    let decoded = decode_path_segment(last).unwrap_or_else(|| last.to_string());
+    Path::new(&decoded)
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| {
             let ext = ext.to_ascii_lowercase();
             !matches!(ext.as_str(), "html" | "htm")
         })
+}
+
+fn accepts_html(request: &Request<Vec<u8>>) -> bool {
+    let Some(raw) = request.headers().get(ACCEPT).and_then(|v| v.to_str().ok()) else {
+        return true;
+    };
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains("text/html") {
+        return true;
+    }
+    lower
+        .split(',')
+        .map(str::trim)
+        .any(|part| part == "*/*" || part.starts_with("*/*;"))
+}
+
+fn etag_for_meta(meta: &std::fs::Metadata) -> String {
+    let size = meta.len();
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("\"{size:x}-{mtime:x}\"")
+}
+
+fn header_str(request: &Request<Vec<u8>>, name: wry::http::header::HeaderName) -> Option<&str> {
+    request.headers().get(name).and_then(|v| v.to_str().ok())
+}
+
+fn if_none_match_hits(request: &Request<Vec<u8>>, etag: &str) -> bool {
+    let Some(raw) = header_str(request, IF_NONE_MATCH) else {
+        return false;
+    };
+    raw.split(',')
+        .map(str::trim)
+        .any(|token| token == "*" || token == etag || token.strip_prefix("W/") == Some(etag))
+}
+
+#[derive(Clone, Copy)]
+struct ByteRange {
+    start: u64,
+    end: u64, // inclusive
+}
+
+fn parse_byte_range(header: &str, size: u64) -> Option<ByteRange> {
+    let spec = header.strip_prefix("bytes=")?;
+    if spec.contains(',') {
+        return None; // single range only
+    }
+    let (start_raw, end_raw) = spec.split_once('-')?;
+    if size == 0 {
+        return None;
+    }
+    if start_raw.is_empty() {
+        let suffix: u64 = end_raw.parse().ok()?;
+        if suffix == 0 {
+            return None;
+        }
+        let len = suffix.min(size);
+        return Some(ByteRange {
+            start: size - len,
+            end: size - 1,
+        });
+    }
+    let start: u64 = start_raw.parse().ok()?;
+    if start >= size {
+        return None;
+    }
+    let end = if end_raw.is_empty() {
+        size - 1
+    } else {
+        end_raw.parse::<u64>().ok()?.min(size - 1)
+    };
+    if end < start {
+        return None;
+    }
+    Some(ByteRange { start, end })
+}
+
+fn apply_cache_headers(
+    mut builder: wry::http::response::Builder,
+    options: &AppServeOptions,
+    etag: &str,
+    content_len: u64,
+) -> wry::http::response::Builder {
+    if let Ok(value) = HeaderValue::from_str(etag) {
+        builder = builder.header(ETAG, value);
+    }
+    builder = builder.header(CONTENT_LENGTH, content_len);
+    if let Some(cache) = options.cache_control.as_deref() {
+        if let Ok(value) = HeaderValue::from_str(cache) {
+            builder = builder.header(CACHE_CONTROL, value);
+        }
+    }
+    builder
 }
 
 fn error_response(status: StatusCode, message: impl Into<String>) -> Response<Cow<'static, [u8]>> {
@@ -158,14 +322,21 @@ fn file_response(
     file_path: &Path,
     bytes: Vec<u8>,
     options: &AppServeOptions,
+    etag: &str,
+    status: StatusCode,
+    extra: Option<(wry::http::header::HeaderName, HeaderValue)>,
 ) -> Response<Cow<'static, [u8]>> {
-    let mut builder = Response::builder()
-        .status(StatusCode::OK)
-        .header(CONTENT_TYPE, mime_for_path(file_path));
-    if let Some(cache) = options.cache_control.as_deref() {
-        if let Ok(value) = HeaderValue::from_str(cache) {
-            builder = builder.header(CACHE_CONTROL, value);
-        }
+    let len = bytes.len() as u64;
+    let mut builder = apply_cache_headers(
+        Response::builder()
+            .status(status)
+            .header(CONTENT_TYPE, mime_for_path(file_path)),
+        options,
+        etag,
+        len,
+    );
+    if let Some((name, value)) = extra {
+        builder = builder.header(name, value);
     }
     builder.body(Cow::Owned(bytes)).unwrap_or_else(|e| {
         error_response(
@@ -175,19 +346,108 @@ fn file_response(
     })
 }
 
+fn serve_resolved_file(
+    request: &Request<Vec<u8>>,
+    file_path: &Path,
+    options: &AppServeOptions,
+) -> Result<Response<Cow<'static, [u8]>>, ServeError> {
+    let meta = std::fs::metadata(file_path).map_err(|_| ServeError::NotFound)?;
+    if meta.is_dir() {
+        return Err(ServeError::NotFound);
+    }
+    let etag = etag_for_meta(&meta);
+    let size = meta.len();
+    if if_none_match_hits(request, &etag) {
+        let builder = apply_cache_headers(
+            Response::builder().status(StatusCode::NOT_MODIFIED),
+            options,
+            &etag,
+            0,
+        );
+        return Ok(builder
+            .body(Cow::Borrowed(b"" as &[u8]))
+            .unwrap_or_else(|_| {
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "304 build failed")
+            }));
+    }
+    if request.method() == Method::HEAD {
+        let builder = apply_cache_headers(
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, mime_for_path(file_path)),
+            options,
+            &etag,
+            size,
+        );
+        return Ok(builder
+            .body(Cow::Borrowed(b"" as &[u8]))
+            .unwrap_or_else(|_| {
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "HEAD build failed")
+            }));
+    }
+    if let Some(range_header) = header_str(request, RANGE) {
+        let Some(range) = parse_byte_range(range_header, size) else {
+            let builder = apply_cache_headers(
+                Response::builder()
+                    .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                    .header(CONTENT_RANGE, format!("bytes */{size}")),
+                options,
+                &etag,
+                0,
+            );
+            return Ok(builder
+                .body(Cow::Borrowed(b"" as &[u8]))
+                .unwrap_or_else(|_| {
+                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "416 build failed")
+                }));
+        };
+        let mut file = std::fs::File::open(file_path).map_err(|_| ServeError::NotFound)?;
+        use std::io::{Read, Seek, SeekFrom};
+        file.seek(SeekFrom::Start(range.start))
+            .map_err(|_| ServeError::NotFound)?;
+        let len = (range.end - range.start + 1) as usize;
+        let mut bytes = vec![0u8; len];
+        file.read_exact(&mut bytes)
+            .map_err(|_| ServeError::NotFound)?;
+        let content_range = format!("bytes {}-{}/{}", range.start, range.end, size);
+        let extra = HeaderValue::from_str(&content_range)
+            .ok()
+            .map(|value| (CONTENT_RANGE, value));
+        return Ok(file_response(
+            file_path,
+            bytes,
+            options,
+            &etag,
+            StatusCode::PARTIAL_CONTENT,
+            extra,
+        ));
+    }
+    let bytes = std::fs::read(file_path).map_err(|_| ServeError::NotFound)?;
+    Ok(file_response(
+        file_path,
+        bytes,
+        options,
+        &etag,
+        StatusCode::OK,
+        None,
+    ))
+}
+
 fn read_under_root(
     root: &Path,
     candidate: &Path,
+    request: &Request<Vec<u8>>,
     options: &AppServeOptions,
 ) -> Result<Response<Cow<'static, [u8]>>, ServeError> {
     match resolve_under_root(root, candidate) {
-        ServeResolve::Ok(file_path) => match std::fs::read(&file_path) {
-            Ok(bytes) => Ok(file_response(&file_path, bytes, options)),
-            Err(_) => Err(ServeError::NotFound),
-        },
+        ServeResolve::Ok(file_path) => serve_resolved_file(request, &file_path, options),
         ServeResolve::Forbidden => Err(ServeError::Forbidden),
         ServeResolve::NotFound => Err(ServeError::NotFound),
     }
+}
+
+fn spa_fallback_allowed(request: &Request<Vec<u8>>, options: &AppServeOptions) -> bool {
+    options.spa_fallback && !looks_like_static_asset(request.uri().path()) && accepts_html(request)
 }
 
 /// Serve a file from ``root`` for a ``tkwry://`` request.
@@ -196,17 +456,20 @@ pub(crate) fn serve_app_request(
     request: Request<Vec<u8>>,
     options: &AppServeOptions,
 ) -> Response<Cow<'static, [u8]>> {
+    if !matches!(*request.method(), Method::GET | Method::HEAD) {
+        return error_response(StatusCode::METHOD_NOT_ALLOWED, "method not allowed");
+    }
     let path = request.uri().path();
     let Some(file_path) = safe_join(root, path) else {
         return error_response(StatusCode::FORBIDDEN, "forbidden path");
     };
-    match read_under_root(root, &file_path, options) {
+    match read_under_root(root, &file_path, &request, options) {
         Ok(response) => response,
         Err(ServeError::Forbidden) => error_response(StatusCode::FORBIDDEN, "forbidden path"),
         Err(ServeError::NotFound) => {
-            if options.spa_fallback && !looks_like_static_asset(path) {
+            if spa_fallback_allowed(&request, options) {
                 let index = root.join("index.html");
-                match read_under_root(root, &index, options) {
+                match read_under_root(root, &index, &request, options) {
                     Ok(response) => return response,
                     Err(ServeError::Forbidden) => {
                         return error_response(StatusCode::FORBIDDEN, "forbidden path");
@@ -275,8 +538,41 @@ mod tests {
         assert!(!looks_like_static_asset("/"));
         assert!(!looks_like_static_asset("/app/route"));
         assert!(!looks_like_static_asset("/index.html"));
+        assert!(!looks_like_static_asset("/about.htm"));
         assert!(looks_like_static_asset("/assets/app.js"));
         assert!(looks_like_static_asset("/style.css"));
+        assert!(looks_like_static_asset("/video.mp4"));
+        assert!(looks_like_static_asset("/missing.js"));
+    }
+
+    #[test]
+    fn safe_join_rejects_percent_encoded_parent_and_nul() {
+        let root = Path::new("/tmp/app");
+        assert!(safe_join(root, "/%2e%2e/etc/passwd").is_none());
+        assert!(safe_join(root, "/foo/%2e%2e/%2e%2e/etc/passwd").is_none());
+        assert!(safe_join(root, "/foo%00.txt").is_none());
+        assert!(safe_join(root, "/C:/Windows/win.ini").is_none());
+        assert!(safe_join(root, "/C%3A/Windows/win.ini").is_none());
+        assert!(safe_join(root, r"/\\server\share/file").is_none());
+        assert!(safe_join(root, "/%ff").is_none()); // invalid UTF-8 after decode
+    }
+
+    #[test]
+    fn safe_join_decodes_ordinary_percent_segments() {
+        let root = Path::new("/tmp/app");
+        assert_eq!(
+            safe_join(root, "/assets/hello%20world.js").unwrap(),
+            PathBuf::from("/tmp/app/assets/hello world.js")
+        );
+    }
+
+    #[test]
+    fn safe_join_preserves_case() {
+        let root = Path::new("/tmp/app");
+        assert_eq!(
+            safe_join(root, "/Assets/Main.JS").unwrap(),
+            PathBuf::from("/tmp/app/Assets/Main.JS")
+        );
     }
 
     fn make_temp_dir(label: &str) -> PathBuf {
@@ -312,6 +608,16 @@ mod tests {
             .uri(format!("tkwry://localhost{path}"))
             .body(Vec::new())
             .unwrap()
+    }
+
+    fn request_with(method: Method, path: &str, headers: &[(&str, &str)]) -> Request<Vec<u8>> {
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(format!("tkwry://localhost{path}"));
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        builder.body(Vec::new()).unwrap()
     }
 
     #[test]
@@ -411,6 +717,85 @@ mod tests {
         );
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(resp.body().as_ref(), b"1");
+        assert!(resp.headers().get(ETAG).is_some());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn spa_fallback_skips_missing_static_assets() {
+        let tmp = make_temp_dir("spa-js");
+        let root = tmp.join("app");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("index.html"), b"<p>spa</p>").unwrap();
+        let options = AppServeOptions {
+            spa_fallback: true,
+            cache_control: None,
+        };
+        let missing_js = serve_app_request(&root, dummy_request("/missing.js"), &options);
+        assert_eq!(missing_js.status(), StatusCode::NOT_FOUND);
+
+        let route = serve_app_request(&root, dummy_request("/app/settings"), &options);
+        assert_eq!(route.status(), StatusCode::OK);
+        assert_eq!(route.body().as_ref(), b"<p>spa</p>");
+
+        let json_accept = serve_app_request(
+            &root,
+            request_with(
+                Method::GET,
+                "/app/settings",
+                &[("accept", "application/json")],
+            ),
+            &options,
+        );
+        assert_eq!(json_accept.status(), StatusCode::NOT_FOUND);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn serve_head_etag_and_range() {
+        let tmp = make_temp_dir("http-meta");
+        let root = tmp.join("app");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("index.html"), b"<p>ok</p>").unwrap();
+        std::fs::write(root.join("clip.bin"), b"abcdefghij").unwrap();
+        let options = AppServeOptions {
+            spa_fallback: false,
+            cache_control: Some("no-store".into()),
+        };
+
+        let head = serve_app_request(
+            &root,
+            request_with(Method::HEAD, "/clip.bin", &[]),
+            &options,
+        );
+        assert_eq!(head.status(), StatusCode::OK);
+        assert!(head.body().as_ref().is_empty());
+        assert_eq!(head.headers().get(CONTENT_LENGTH).unwrap(), "10");
+        assert_eq!(head.headers().get(CACHE_CONTROL).unwrap(), "no-store");
+        let etag = head.headers().get(ETAG).unwrap().clone();
+
+        let not_modified = serve_app_request(
+            &root,
+            request_with(
+                Method::GET,
+                "/clip.bin",
+                &[("if-none-match", etag.to_str().unwrap())],
+            ),
+            &options,
+        );
+        assert_eq!(not_modified.status(), StatusCode::NOT_MODIFIED);
+
+        let partial = serve_app_request(
+            &root,
+            request_with(Method::GET, "/clip.bin", &[("range", "bytes=2-5")]),
+            &options,
+        );
+        assert_eq!(partial.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(partial.body().as_ref(), b"cdef");
+        assert_eq!(
+            partial.headers().get(CONTENT_RANGE).unwrap(),
+            "bytes 2-5/10"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- RPC protocol ``version: 1`` (unknown versions → ``RpcProtocolError``);
+  ``window.tkwry.cancel(id)`` / ``promise.cancel()`` → ``RpcCancelledError``
+- Typed RPC bind: arity / simple annotation mismatch rejects as ``TypeError``
+- ``tkwry://`` ``HEAD``, ``ETag`` / ``If-None-Match`` (304), single byte
+  ``Range`` (206); SPA fallback skips non-HTML ``Accept`` and static assets
+- Public signature guard (``_core.pyi`` vs runtime ``__new__`` / ``WebView.__init__``)
 - ``watch_app(suffixes=..., ignore_dirs=..., max_files=...)`` — default web
   suffixes, skip ``node_modules`` / ``.git`` / ``.vendor`` / build dirs, cap
   at 2000 files (``suffixes="*"`` watches everything)

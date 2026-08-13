@@ -61,7 +61,7 @@ jobs:
           cd /tmp
           python -m mypy.stubtest \
             --mypy-config-file "$GITHUB_WORKSPACE/pyproject.toml" \
-            tkwry._core tkwry.exceptions tkwry.webview
+            tkwry._core tkwry.exceptions tkwry.webview tkwry.session
 
       - run: cargo fmt --check
 

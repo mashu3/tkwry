@@ -14,8 +14,10 @@ from tkwry.ipc import (
     MAX_RPC_KWARGS,
     MAX_RPC_MESSAGE_BYTES,
     RPC_BOOTSTRAP_JS,
+    RPC_VERSION,
     RpcRegistration,
     RpcRequest,
+    bind_rpc_arguments,
     dispatch_rpc,
     emit_script,
     format_rpc_error,
@@ -35,6 +37,39 @@ def test_parse_rpc_request_ok() -> None:
     assert req.method == "add"
     assert req.params == (1, 2)
     assert req.kwargs == {}
+    assert req.cancel is False
+
+
+def test_parse_rpc_request_version_and_cancel() -> None:
+    ok = parse_rpc_request(
+        json.dumps(
+            {
+                "__tkwry": "rpc",
+                "version": RPC_VERSION,
+                "id": "r1",
+                "method": "add",
+                "params": [1],
+            }
+        )
+    )
+    assert ok is not None
+    assert ok.method == "add"
+
+    unknown = parse_rpc_request(
+        json.dumps({"__tkwry": "rpc", "version": 99, "id": "r2", "method": "add"})
+    )
+    assert unknown is not None
+    assert unknown.reject is not None
+    assert unknown.reject["type"] == "RpcProtocolError"
+
+    cancel = parse_rpc_request(
+        json.dumps({"__tkwry": "rpc", "id": "r3", "cancel": True})
+    )
+    assert cancel is not None
+    assert cancel.cancel is True
+    ok, value = dispatch_rpc({}, cancel)
+    assert ok is False
+    assert value["type"] == "RpcCancelledError"
 
 
 def test_parse_rpc_request_kwargs() -> None:
@@ -149,9 +184,7 @@ def test_parse_rpc_request_rejects_too_many_args(
     import tkwry.ipc as ipc
 
     monkeypatch.setattr(ipc, "MAX_RPC_ARGS", 2)
-    raw = json.dumps(
-        {"__tkwry": "rpc", "id": "r1", "method": "x", "params": [1, 2, 3]}
-    )
+    raw = json.dumps({"__tkwry": "rpc", "id": "r1", "method": "x", "params": [1, 2, 3]})
     req = ipc.parse_rpc_request(raw)
     assert req is not None
     assert req.reject is not None
@@ -295,6 +328,45 @@ def test_dispatch_rpc_worker_submit() -> None:
     assert submitted
 
 
+def test_dispatch_rpc_typeerror_on_arity_and_types() -> None:
+    def add(a: int, b: int) -> int:
+        return a + b
+
+    missing = parse_rpc_request(
+        json.dumps({"__tkwry": "rpc", "id": "1", "method": "add", "params": [1]})
+    )
+    assert missing is not None
+    ok, value = dispatch_rpc({"add": add}, missing)
+    assert ok is False
+    assert value["type"] == "TypeError"
+    assert "b" in value["message"] or "argument" in value["message"].lower()
+
+    wrong = parse_rpc_request(
+        json.dumps({"__tkwry": "rpc", "id": "2", "method": "add", "params": ["x", 2]})
+    )
+    assert wrong is not None
+    ok, value = dispatch_rpc({"add": add}, wrong)
+    assert ok is False
+    assert value["type"] == "TypeError"
+
+    flag = parse_rpc_request(
+        json.dumps({"__tkwry": "rpc", "id": "3", "method": "add", "params": [True, 2]})
+    )
+    assert flag is not None
+    ok, value = dispatch_rpc({"add": add}, flag)
+    assert ok is False
+    assert value["type"] == "TypeError"
+
+
+def test_bind_rpc_arguments_coerces_integral_float() -> None:
+    def add(a: int, b: int) -> int:
+        return a + b
+
+    args, kwargs = bind_rpc_arguments(add, (2.0, 3), {})
+    assert args == (2, 3)
+    assert kwargs == {}
+
+
 def test_dispatch_rpc_kwargs() -> None:
     def greet(message: str, times: int = 1) -> str:
         return message * int(times)
@@ -350,6 +422,8 @@ def test_bootstrap_includes_on_and_timeout() -> None:
     assert "_emit" in RPC_BOOTSTRAP_JS
     assert "console.error" in RPC_BOOTSTRAP_JS
     assert "tkwry.debug" in RPC_BOOTSTRAP_JS
+    assert "window.tkwry.cancel" in RPC_BOOTSTRAP_JS
+    assert "version: 1" in RPC_BOOTSTRAP_JS
 
 
 def test_merge_initialization_script() -> None:

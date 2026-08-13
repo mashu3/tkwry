@@ -68,6 +68,7 @@ class WebViewRpcMixin:
         self._rpc_inflight: dict[str, Future[Any]] = {}
         self._rpc_timeout_after: dict[str, str] = {}
         self._rpc_cancel_events: dict[str, threading.Event] = {}
+        self._rpc_user_cancelled: set[str] = set()
         self._app_watch_after_id: str | None = None
         self._app_watch_mtime: float | None = None
         self._app_watch_suffixes: frozenset[str] | None = WATCH_DEFAULT_SUFFIXES
@@ -124,9 +125,12 @@ class WebViewRpcMixin:
         and handlers that return a ``Future``. It rejects the Promise if work
         does not finish in time. ``Future.cancel()`` cannot stop Python that
         is already running; handlers should poll :func:`tkwry.rpc_cancelled`
-        (or :func:`tkwry.rpc_cancel_event`) for cooperative cancel. Timeout on
-        a synchronous ``run_in="main"`` handler is ignored. Re-registering the
-        same name raises ``ValueError`` unless ``replace=True``.
+        (or :func:`tkwry.rpc_cancel_event`) for cooperative cancel. JS may also
+        call ``window.tkwry.cancel(id)`` (``call`` returns a Promise with
+        ``.id`` / ``.cancel()``). Timeout on a synchronous ``run_in="main"``
+        handler is ignored. Argument mismatches reject with ``TypeError``.
+        Re-registering the same name raises ``ValueError`` unless
+        ``replace=True``.
 
         The low-level ``ipc_handler`` remains available for raw
         ``window.ipc.postMessage`` traffic (IPC = events; RPC = request/response).
@@ -300,6 +304,7 @@ class WebViewRpcMixin:
         for event in self._rpc_cancel_events.values():
             event.set()
         self._rpc_cancel_events.clear()
+        self._rpc_user_cancelled.clear()
         for req_id, fut in pending:
             fut.cancel()
             self._settle_rpc(req_id, ok=False, value=error)
@@ -381,9 +386,40 @@ class WebViewRpcMixin:
             if handler is not None:
                 self._invoke_callback(handler, message)
 
+    def _handle_rpc_cancel(self, req_id: str) -> None:
+        self._rpc_user_cancelled.add(req_id)
+        self._signal_rpc_cancel(req_id)
+        after_id = self._rpc_timeout_after.pop(req_id, None)
+        if after_id is not None:
+            try:
+                self._frame.after_cancel(after_id)
+            except (tk.TclError, ValueError):
+                pass
+        pending = self._rpc_inflight.pop(req_id, None)
+        if pending is not None:
+            pending.cancel()
+        if self._destroyed:
+            return
+        self._settle_rpc(
+            req_id,
+            ok=False,
+            value=rpc_error("RpcCancelledError", "rpc cancelled"),
+        )
+
     def _handle_rpc_request(self, request: RpcRequest) -> None:
+        if request.cancel:
+            self._handle_rpc_cancel(request.id)
+            return
         if request.reject is not None:
             self._settle_rpc(request.id, ok=False, value=request.reject)
+            return
+        if request.id in self._rpc_user_cancelled:
+            self._rpc_user_cancelled.discard(request.id)
+            self._settle_rpc(
+                request.id,
+                ok=False,
+                value=rpc_error("RpcCancelledError", "rpc cancelled"),
+            )
             return
 
         reg = self._rpc_methods.get(request.method)
@@ -490,6 +526,7 @@ class WebViewRpcMixin:
             pass
 
     def _settle_rpc(self, req_id: str, *, ok: bool, value: object) -> None:
+        self._rpc_user_cancelled.discard(req_id)
         try:
             script = settle_script(req_id, ok=ok, value=value)
         except RpcSerializationError:

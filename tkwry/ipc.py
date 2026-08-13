@@ -16,6 +16,7 @@ RPC is queued separately from IPC so event floods cannot drop calls.
 
 from __future__ import annotations
 
+import inspect
 import json
 import re
 import threading
@@ -23,7 +24,7 @@ import traceback
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, TypeAlias, Union, get_args, get_origin, get_type_hints
 
 from tkwry.exceptions import RpcSerializationError
 
@@ -33,6 +34,7 @@ RpcRunIn: TypeAlias = Literal["main", "worker"]
 RPC_MARKER = "rpc"
 RPC_KEY = "__tkwry"
 RPC_REJECT_KEY = "__tkwry_reject"
+RPC_VERSION = 1
 
 # Keep in sync with ``MAX_IPC_MESSAGE_BYTES`` / ``MAX_RPC_MESSAGE_BYTES`` in src/lib.rs.
 MAX_RPC_MESSAGE_BYTES = 10 * 1024 * 1024
@@ -94,7 +96,7 @@ RPC_BOOTSTRAP_JS = """\
         options = params.pop();
       }
       var id = "r" + String(++seq);
-      return new Promise(function (resolve, reject) {
+      var promise = new Promise(function (resolve, reject) {
         var settled = false;
         var timer = null;
         function finish(ok, value) {
@@ -123,6 +125,7 @@ RPC_BOOTSTRAP_JS = """\
         }
         var payload = {
           __tkwry: "rpc",
+          version: 1,
           id: id,
           method: String(method),
           params: params
@@ -132,6 +135,27 @@ RPC_BOOTSTRAP_JS = """\
         }
         window.ipc.postMessage(JSON.stringify(payload));
       });
+      promise.id = id;
+      promise.cancel = function () { window.tkwry.cancel(id); };
+      return promise;
+    },
+    cancel: function (id) {
+      id = String(id || "");
+      if (!id) return;
+      var slot = pending[id];
+      if (slot) {
+        slot.finish(false, {
+          type: "RpcCancelledError",
+          message: "rpc cancelled"
+        });
+      }
+      if (!window.ipc || !window.ipc.postMessage) return;
+      window.ipc.postMessage(JSON.stringify({
+        __tkwry: "rpc",
+        version: 1,
+        id: id,
+        cancel: true
+      }));
     },
     on: function (event, handler) {
       var key = String(event);
@@ -208,9 +232,7 @@ def dumps_rpc_json(value: Any) -> str:
     try:
         return json.dumps(value, ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError) as exc:
-        raise RpcSerializationError(
-            "value is not JSON-serializable"
-        ) from exc
+        raise RpcSerializationError("value is not JSON-serializable") from exc
 
 
 def _extract_rpc_request_id(message: str) -> str | None:
@@ -240,6 +262,7 @@ class RpcRequest:
     params: tuple[Any, ...]
     kwargs: dict[str, Any] = field(default_factory=dict)
     reject: dict[str, str] | None = None
+    cancel: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,6 +306,31 @@ def parse_rpc_request(message: str) -> RpcRequest | None:
     req_id = data.get("id")
     if not isinstance(req_id, str) or not req_id:
         return None
+    version = data.get("version", RPC_VERSION)
+    if version is None:
+        version = RPC_VERSION
+    if not isinstance(version, int) or isinstance(version, bool):
+        return RpcRequest(
+            id=req_id,
+            method="",
+            params=(),
+            reject=rpc_error(
+                "RpcProtocolError",
+                f"invalid RPC version: {version!r}",
+            ),
+        )
+    if version != RPC_VERSION:
+        return RpcRequest(
+            id=req_id,
+            method="",
+            params=(),
+            reject=rpc_error(
+                "RpcProtocolError",
+                f"unsupported RPC version: {version} (expected {RPC_VERSION})",
+            ),
+        )
+    if data.get("cancel") is True:
+        return RpcRequest(id=req_id, method="", params=(), cancel=True)
     reject_type = data.get(RPC_REJECT_KEY)
     if isinstance(reject_type, str) and reject_type:
         message_text = data.get("message")
@@ -387,6 +435,95 @@ def _normalize_registration(
     return RpcRegistration(handler=entry)
 
 
+def _annotation_origin(hint: Any) -> Any:
+    origin = get_origin(hint)
+    return origin if origin is not None else hint
+
+
+def _coerce_rpc_value(value: Any, hint: Any) -> Any:
+    """Coerce a JSON value to a simple annotation; pass through unknown hints."""
+    if hint is Any or hint is inspect.Parameter.empty:
+        return value
+    origin = get_origin(hint)
+    args = get_args(hint)
+    if origin is Union or str(origin) == "typing.Union":
+        non_none = [item for item in args if item is not type(None)]
+        if type(None) in args and value is None:
+            return None
+        errors: list[str] = []
+        for item in non_none:
+            try:
+                return _coerce_rpc_value(value, item)
+            except TypeError as exc:
+                errors.append(str(exc))
+        raise TypeError(errors[-1] if errors else f"expected {hint!r}")
+    target = _annotation_origin(hint)
+    if target is bool:
+        if isinstance(value, bool):
+            return value
+        raise TypeError(f"expected bool, got {type(value).__name__}")
+    if target is int:
+        if isinstance(value, bool):
+            raise TypeError("expected int, got bool")
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        raise TypeError(f"expected int, got {type(value).__name__}")
+    if target is float:
+        if isinstance(value, bool):
+            raise TypeError("expected float, got bool")
+        if isinstance(value, (int, float)):
+            return float(value)
+        raise TypeError(f"expected float, got {type(value).__name__}")
+    if target is str:
+        if isinstance(value, str):
+            return value
+        raise TypeError(f"expected str, got {type(value).__name__}")
+    if target is dict:
+        if isinstance(value, dict):
+            return value
+        raise TypeError(f"expected dict, got {type(value).__name__}")
+    if target is list:
+        if isinstance(value, list):
+            return value
+        raise TypeError(f"expected list, got {type(value).__name__}")
+    return value
+
+
+def bind_rpc_arguments(
+    handler: RpcHandler,
+    params: Sequence[Any],
+    kwargs: Mapping[str, Any],
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Bind RPC args to *handler* and coerce simple annotations.
+
+    Raises ``TypeError`` (stable ``type`` name for JS) on arity / type mismatch.
+    """
+    try:
+        signature = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return tuple(params), dict(kwargs)
+    try:
+        bound = signature.bind(*params, **kwargs)
+        bound.apply_defaults()
+    except TypeError as exc:
+        raise TypeError(str(exc) or "invalid RPC arguments") from exc
+    try:
+        hints = get_type_hints(handler)
+    except Exception:
+        hints = {}
+    for name, parameter in signature.parameters.items():
+        if name not in bound.arguments:
+            continue
+        hint = hints.get(name, parameter.annotation)
+        try:
+            bound.arguments[name] = _coerce_rpc_value(bound.arguments[name], hint)
+        except TypeError as exc:
+            raise TypeError(f"{name}: {exc}") from exc
+    return bound.args, dict(bound.kwargs)
+
+
 def dispatch_rpc(
     methods: Mapping[str, RpcRegistration | RpcHandler],
     request: RpcRequest,
@@ -408,6 +545,8 @@ def dispatch_rpc(
     """
     if request.reject is not None:
         return False, request.reject
+    if request.cancel:
+        return False, rpc_error("RpcCancelledError", "rpc cancelled")
     entry = methods.get(request.method)
     if entry is None:
         return False, rpc_error(
@@ -416,7 +555,13 @@ def dispatch_rpc(
     reg = _normalize_registration(entry)
 
     def invoke() -> Any:
-        return reg.handler(*request.params, **request.kwargs)
+        try:
+            args, kwargs = bind_rpc_arguments(
+                reg.handler, request.params, request.kwargs
+            )
+        except TypeError as exc:
+            raise TypeError(str(exc) or "invalid RPC arguments") from exc
+        return reg.handler(*args, **kwargs)
 
     if reg.run_in == "worker":
         if submit_worker is None:

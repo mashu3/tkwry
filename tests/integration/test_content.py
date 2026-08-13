@@ -699,7 +699,10 @@ def test_app_custom_protocol_resolves_relative_resources(
 def test_app_spa_fallback_serves_index_for_client_routes(
     tk_root, tmp_path: Path
 ) -> None:
-    """``spa_fallback=True`` maps extension-less paths to ``index.html``."""
+    """``spa_fallback=True`` maps extension-less paths to ``index.html``.
+
+    Missing ``/missing.js`` and non-HTML ``Accept`` requests stay 404.
+    """
     (tmp_path / "index.html").write_text(
         (
             "<!doctype html><html><head><title>spa</title></head>"
@@ -725,6 +728,28 @@ def test_app_spa_fallback_serves_index_for_client_routes(
         return any("spa-ok" in str(t) for t in titles)
 
     assert wait_until(tk_root, title_ready, steps=400), f"got {titles!r}"
+
+    # Missing static assets must stay 404 (never SPA-replaced with index.html).
+    statuses: list[str] = []
+    web.eval_js(
+        """
+        Promise.all([
+          fetch('/missing.js').then(function (r) { return r.status; }),
+          fetch('/app/settings', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.status; })
+        ]).then(function (values) {
+          document.title = 'st=' + values.join(',');
+        }).catch(function (e) {
+          document.title = 'fetch-err=' + e;
+        });
+        """
+    )
+
+    def statuses_ready() -> bool:
+        web.eval_js_with_callback("document.title", statuses.append)
+        return any("st=404,404" in str(t) for t in statuses)
+
+    assert wait_until(tk_root, statuses_ready, steps=400), f"got {statuses!r}"
 
     web.destroy()
     frame.destroy()
@@ -767,3 +792,246 @@ def test_shared_session_local_storage_roundtrip(tk_root, tmp_path: Path) -> None
     web_b.destroy()
     frame_a.destroy()
     frame_b.destroy()
+
+
+def test_rpc_concurrent_calls_and_ipc_mix(tk_root) -> None:
+    received: list[str] = []
+    frame = host_frame(tk_root)
+    web = WebView(
+        frame,
+        html="<title>rpc</title><p>rpc</p>",
+        ipc_handler=received.append,
+    )
+
+    @web.expose
+    def add(a: int, b: int) -> int:
+        return int(a) + int(b)
+
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=30)
+    web.eval_js(
+        """
+        (function () {
+          if (!window.tkwry || !window.tkwry.call || !window.ipc) {
+            document.title = "no-bridge";
+            return;
+          }
+          window.ipc.postMessage("flood-1");
+          window.ipc.postMessage("flood-2");
+          Promise.all([
+            window.tkwry.call("add", 1, 2),
+            window.tkwry.call("add", 10, 20),
+            window.tkwry.call("add", 3, 4)
+          ]).then(function (values) {
+            document.title = "sums=" + values.join(",");
+          }).catch(function (e) {
+            document.title = "err=" + e;
+          });
+        })();
+        """
+    )
+    titles: list[str] = []
+
+    def title_ready() -> bool:
+        web.eval_js_with_callback("document.title", titles.append)
+        return any("sums=3,30,7" in str(t) for t in titles)
+
+    assert wait_until(tk_root, title_ready, steps=400), f"got {titles!r}"
+    assert wait_until(
+        tk_root,
+        lambda: "flood-1" in received and "flood-2" in received,
+        steps=100,
+    ), f"expected IPC floods, got {received!r}"
+    web.destroy()
+    frame.destroy()
+
+
+def test_rpc_worker_timeout_rejects(tk_root) -> None:
+    import time
+
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<title>rpc</title><p>rpc</p>")
+
+    @web.expose(thread=True, timeout=0.2)
+    def slow() -> str:
+        time.sleep(2.0)
+        return "done"
+
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=30)
+    web.eval_js(
+        """
+        window.tkwry.call("slow").then(function () {
+          document.title = "unexpected-ok";
+        }).catch(function (e) {
+          document.title = "err=" + (e && e.name ? e.name : e);
+        });
+        """
+    )
+    titles: list[str] = []
+
+    def title_ready() -> bool:
+        web.eval_js_with_callback("document.title", titles.append)
+        return any("RpcTimeoutError" in str(t) for t in titles)
+
+    assert wait_until(tk_root, title_ready, steps=400), f"got {titles!r}"
+    web.destroy()
+    frame.destroy()
+
+
+def test_rpc_destroy_during_worker_call(tk_root) -> None:
+    import threading
+    import time
+
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<title>rpc</title><p>rpc</p>")
+    started = threading.Event()
+
+    @web.expose(thread=True)
+    def slow() -> str:
+        started.set()
+        time.sleep(1.5)
+        return "done"
+
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=30)
+    web.eval_js("window.tkwry.call('slow');")
+    assert wait_until(tk_root, started.is_set, steps=200)
+    web.destroy()
+    frame.destroy()
+    pump(tk_root, steps=20)
+
+
+def test_emit_listener_off_stops_delivery(tk_root) -> None:
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<title>emit</title>")
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=30)
+    # Bootstrap is injected on first emit; register after that, like
+    # test_emit_delivers_to_js_listener.
+    web.emit("warmup", None)
+    pump(tk_root, steps=20)
+    web.eval_js(
+        """
+        window.__n = 0;
+        window.__handler = function () {
+          window.__n += 1;
+          document.title = "n=" + window.__n;
+        };
+        window.tkwry.on("tick", window.__handler);
+        """
+    )
+    pump(tk_root, steps=20)
+    web.emit("tick", None)
+    titles: list[str] = []
+
+    def saw_one() -> bool:
+        web.eval_js_with_callback("document.title", titles.append)
+        return any("n=1" in str(t) for t in titles)
+
+    assert wait_until(tk_root, saw_one, steps=300), f"got {titles!r}"
+    web.eval_js("window.tkwry.off('tick', window.__handler); document.title = 'off';")
+    pump(tk_root, steps=20)
+    titles.clear()
+    web.emit("tick", None)
+    pump(tk_root, steps=40)
+    web.eval_js_with_callback("document.title", titles.append)
+    assert wait_until(
+        tk_root,
+        lambda: any("off" in str(t) for t in titles),
+        steps=80,
+    )
+    assert not any("n=2" in str(t) for t in titles)
+    web.destroy()
+    frame.destroy()
+
+
+def test_watch_app_reloads_when_file_changes(tk_root, tmp_path: Path) -> None:
+    index = tmp_path / "index.html"
+    index.write_text(
+        "<!doctype html><html><head><title>v1</title></head>"
+        "<body><script>document.title='v1';</script></body></html>",
+        encoding="utf-8",
+    )
+    frame = host_frame(tk_root)
+    web = WebView(frame, app=tmp_path, app_dev=True)
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=40)
+    web.watch_app(interval_ms=120, suffixes=[".html"])
+    titles: list[str] = []
+
+    def saw_v1() -> bool:
+        web.eval_js_with_callback("document.title", titles.append)
+        return any("v1" in str(t) for t in titles)
+
+    assert wait_until(tk_root, saw_v1, steps=300), f"got {titles!r}"
+    index.write_text(
+        "<!doctype html><html><head><title>v2</title></head>"
+        "<body><script>document.title='v2';</script></body></html>",
+        encoding="utf-8",
+    )
+    import os
+    import time
+
+    now = time.time() + 2.0
+    os.utime(index, (now, now))
+    titles.clear()
+
+    def saw_v2() -> bool:
+        web.eval_js_with_callback("document.title", titles.append)
+        return any("v2" in str(t) for t in titles)
+
+    assert wait_until(tk_root, saw_v2, steps=500), (
+        f"expected reload to v2, got {titles!r}"
+    )
+    web.destroy()
+    frame.destroy()
+
+
+def test_rpc_js_cancel_rejects_worker(tk_root) -> None:
+    import threading
+    import time
+
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<title>rpc</title><p>rpc</p>")
+    started = threading.Event()
+    saw_cancel = threading.Event()
+
+    @web.expose(thread=True)
+    def slow() -> str:
+        started.set()
+        deadline = time.monotonic() + 4.0
+        while time.monotonic() < deadline:
+            from tkwry import rpc_cancelled
+
+            if rpc_cancelled():
+                saw_cancel.set()
+                return "cancelled"
+            time.sleep(0.03)
+        return "done"
+
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=30)
+    web.eval_js(
+        """
+        (function () {
+          var p = window.tkwry.call("slow");
+          window.__rpc_id = p.id;
+          p.then(function () { document.title = "unexpected-ok"; })
+           .catch(function (e) {
+             document.title = "err=" + (e && e.name ? e.name : e);
+           });
+          setTimeout(function () { window.tkwry.cancel(window.__rpc_id); }, 80);
+        })();
+        """
+    )
+    titles: list[str] = []
+
+    def title_ready() -> bool:
+        web.eval_js_with_callback("document.title", titles.append)
+        return any("RpcCancelledError" in str(t) for t in titles)
+
+    assert wait_until(tk_root, title_ready, steps=400), f"got {titles!r}"
+    assert wait_until(tk_root, saw_cancel.is_set, steps=200)
+    web.destroy()
+    frame.destroy()

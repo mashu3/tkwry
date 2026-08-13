@@ -27,6 +27,15 @@ class RpcTimeoutError(TimeoutError):
     """
 
 
+class RpcCancelledError(RuntimeError):
+    """Structured RPC error when a call is cancelled from JS or destroy.
+
+    ``window.tkwry.cancel(id)`` and :meth:`~tkwry.WebView.destroy` reject the
+    Promise and set the cooperative cancel flag. Running worker Python is not
+    preempted; poll :func:`tkwry.rpc_cancelled`.
+    """
+
+
 class RpcSerializationError(ValueError):
     """Raised when an RPC result or ``emit`` payload is not JSON-serializable.
 

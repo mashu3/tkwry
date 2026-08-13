@@ -665,9 +665,7 @@ fn extract_rpc_request_id(body: &str) -> Option<&str> {
             rest = &rest[at + 4..];
             continue;
         };
-        let Some(end) = after_quote.find('"') else {
-            return None;
-        };
+        let end = after_quote.find('"')?;
         let id = &after_quote[..end];
         if !id.is_empty() {
             return Some(id);
