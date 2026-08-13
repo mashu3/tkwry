@@ -29,7 +29,17 @@ Tkinter is still a solid GUI shell — it just had no first-class way to host mo
 - **Trust boundaries** — IPC/RPC default to the initial origin; `untrusted=True` for arbitrary sites
 - **Layout-aware** — tracks `pack` / `grid` / `place`, tabs, and `PanedWindow`
 
-Pre-built **abi3** wheels ship for **Windows** and **macOS**. **Linux** is source-only (**best-effort** by design) — see [Platform notes](#-platform-notes).
+Pre-built **abi3** wheels ship for **Windows** and **macOS**. **Linux** is source-only (**best-effort** by design) — see [Platform notes](docs/platforms.md).
+
+---
+
+## 🗂 Documentation
+
+| Topic | Doc |
+|-------|-----|
+| Trust boundaries (`untrusted`, `bridge_origins`, `app=` nav) | [docs/trust.md](docs/trust.md) |
+| IPC / RPC / emit (`expose`, cancel, limits) | [docs/rpc.md](docs/rpc.md) |
+| Platform notes (Windows / macOS / Linux) | [docs/platforms.md](docs/platforms.md) |
 
 ---
 
@@ -38,9 +48,9 @@ Pre-built **abi3** wheels ship for **Windows** and **macOS**. **Linux** is sourc
 - Python 3.10+
 - Tkinter (included with most Python builds)
 - **Building from source** (git clone, `pip install git+…`, or Linux) — [Rust](https://rustup.rs) toolchain (stable); `pip` uses **maturin** as the build backend
-- **Windows (x86_64, arm64)** — [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (no fallback engine; see [Platform notes](#windows))
+- **Windows (x86_64, arm64)** — [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (no fallback engine; see [Platform notes](docs/platforms.md#windows))
 - **macOS** — 11 (Big Sur)+, arm64 or x86_64; system WKWebView
-- **Linux** — WebKitGTK 4.1 + GTK 3; X11 or XWayland (`$DISPLAY`); source build only (see [Installation](#-installation) and [Platform notes](#linux))
+- **Linux** — WebKitGTK 4.1 + GTK 3; X11 or XWayland (`$DISPLAY`); source build only (see [Installation](#-installation) and [Platform notes](docs/platforms.md#linux))
 
 ---
 
@@ -74,7 +84,7 @@ This builds from source (sdist via git), **not** a pre-built wheel — needs **R
 
 ### Linux (source install)
 
-Install system dependencies, then build from source (support posture: [Platform notes](#linux)):
+Install system dependencies, then build from source (support posture: [Platform notes](docs/platforms.md#linux)):
 
 ```bash
 # Debian / Ubuntu
@@ -126,7 +136,7 @@ Use **IPC** for fire-and-forget events and **RPC** for request/response:
 | Python → JS | Emit (event) | `web.emit(event, data)` | `window.tkwry.on(event, handler)` |
 
 These APIs run with **desktop-app privileges**. By default only the initial
-page origin may use them — see [Trust boundaries](#trust-boundaries-external-pages).
+page origin may use them — see [Trust boundaries](docs/trust.md).
 
 ```python
 def on_message(msg: str) -> None:
@@ -138,6 +148,19 @@ web = WebView(
     ipc_handler=on_message,
 )
 ```
+
+```python
+@web.expose
+def greet(name: str) -> str:
+    return f"hello {name}"
+```
+
+```js
+const text = await window.tkwry.call("greet", "Ada");
+```
+
+Worker RPC, timeouts, JS `cancel`, argument limits, and `emit` are in
+[IPC / RPC / emit](docs/rpc.md). See also [`examples/ipc_demo.py`](examples/ipc_demo.py).
 
 ### Local app assets (``app=`` / ``tkwry://``)
 
@@ -174,91 +197,18 @@ header that does not include ``text/html`` or ``*/*`` (for example
 Constructor ``app=`` fixes the filesystem root at create time. Later
 ``load_url("tkwry://localhost/other.html")`` can navigate within that root
 (Windows WebView2 rewrites this to ``https://tkwry.localhost/...`` internally).
-The ``tkwry://`` handler percent-decodes each path segment (so ``%2e%2e``
-cannot bypass ``..``), rejects NUL / invalid UTF-8 / Windows drive and UNC
-shapes, then opens the file under the app root and checks the opened file's
-identity against the canonical path (symlinks, Windows junctions, and
-reparse points that escape return 403). Internal links that stay under the
-root are allowed.
+Path confinement (percent-decode, symlink/junction checks) is in
+[Trust boundaries](docs/trust.md#tkwry-serving).
 Monaco / CDN scripts may still be loaded from the network inside that HTML when
 you choose not to vendor them yet. The Plotly demo toggles **CDN** vs **Local**
 (``app=``); Local caches ``plotly.js`` under ``examples/.vendor/``.
 
 See [`examples/plotly_demo.py`](examples/plotly_demo.py).
 
-### RPC (``expose`` / ``window.tkwry.call``)
-
-Keep raw ``ipc_handler`` + ``window.ipc.postMessage`` for free-form events.
-On top, expose callables and await them from JS:
-
-```python
-web = WebView(frame, html=HTML)
-
-@web.expose
-def greet(name: str) -> str:
-    return f"hello {name}"
-
-# Heavy I/O / CPU — run off the Tk thread so the UI stays responsive
-@web.expose(thread=True, timeout=30.0)
-def heavy_task(data: dict) -> dict:
-    from tkwry import rpc_cancelled
-
-    ...
-    if rpc_cancelled():
-        return {"status": "cancelled"}
-    return result
-```
-
-```js
-const text = await window.tkwry.call("greet", "Ada");
-// optional JS-side timeout (ms) and Python kwargs:
-await window.tkwry.call("heavy_task", payload, {
-  timeout: 5000,
-  kwargs: { verbose: true },
-});
-const pending = window.tkwry.call("heavy_task", payload);
-// pending.id / pending.cancel() / window.tkwry.cancel(pending.id)
-pending.cancel();
-```
-
-**Execution model:** default handlers run on the **Tk main thread** (safe for
-Tk APIs; long work blocks the UI). Pass ``thread=True`` / ``run_in="worker"``
-to use a background pool. Handlers may also return a
-``concurrent.futures.Future``. Return values and ``emit`` payloads must be
-strict JSON (no ``datetime``, custom objects, ``NaN`` / ``Infinity``) —
-otherwise the Promise rejects / ``emit`` raises ``RpcSerializationError``.
-Errors reject the Promise with a structured payload (``error.name`` /
-``error.message``; set ``rpc_traceback=True`` or ``TKWRY_RPC_TRACEBACK=1``
-for tracebacks). Duplicate method names raise unless ``replace=True``.
-Destroy rejects in-flight RPCs. Keyword args go in ``{ kwargs: { … } }``
-(a trailing ``{ timeout: ms }`` is still call options, not a positional dict).
-
-**Timeout & cancel:** optional ``timeout`` on ``expose`` applies to worker
-handlers and returned ``Future``s (ignored for a synchronous main-thread
-handler). It rejects the JS Promise and sets a cooperative cancel flag.
-This is **specified as cooperative only**: Python cannot preempt a running
-worker thread (``Future.cancel()`` only skips work that has not started).
-Long handlers should poll ``rpc_cancelled()`` (or capture
-``rpc_cancel_event()`` for other threads). ``destroy()`` joins the pool for
-at most ~2 seconds; uncooperative handlers may briefly outlive the WebView.
-JS ``call(..., { timeout: ms })`` is independent and only settles the Promise
-on the JS side. ``window.tkwry.cancel(id)`` (or ``promise.cancel()``) cancels
-from JS and rejects with ``RpcCancelledError``. Argument mismatches reject
-with a stable ``TypeError`` payload (arity + simple annotation checks:
-``int`` / ``float`` / ``str`` / ``bool`` / ``list`` / ``dict`` / ``Optional``).
-Envelopes include ``version: 1``; unknown versions reject with
-``RpcProtocolError`` (omitted version is treated as 1).
-
-**Limits:** IPC/RPC messages cap at **10 MiB**; RPC allows at most **256**
-positional args and **256** kwargs. Oversized RPC rejects with
-``RpcMessageTooLarge``; too many args with ``RpcArgumentLimitError``. RPC has
-its own 2048-deep queue so IPC overflow cannot drop ``tkwry.call``.
-
 ### Trust boundaries (external pages)
 
-``window.ipc`` / ``window.tkwry.call`` run with **desktop-app privileges**. A
-page that can call them can drive whatever you ``expose`` or handle over IPC —
-including after a redirect or XSS in a third-party script.
+``window.ipc`` / ``window.tkwry.call`` run with **desktop-app privileges**.
+Pick a constructor that matches the page:
 
 ```python
 # Local UI with RPC — bridge defaults to tkwry://
@@ -275,45 +225,8 @@ web = WebView(
 )
 ```
 
-Defaults:
-
-- **Bridge origins** — IPC/RPC are accepted only from the initial content
-  origin (``html=`` → ``about:blank``; ``app=`` → ``tkwry://`` /
-  ``https://tkwry.localhost``; ``url=`` → that site). Foreign pages still see
-  ``window.ipc`` (engine injection) but messages are dropped / RPC rejects with
-  ``RpcOriginError``. Use ``bridge_origins=["https://trusted.example"]`` (whole
-  origin) or a **path prefix**
-  (``bridge_origins=["https://trusted.example/app"]`` — ``/app`` and
-  ``/app/...``, not ``/application``). ``bridge_allow=lambda url: ...`` can
-  further restrict by the full page URL (navigation state).
-- **``bridge_origins="*"``** — every page; emits
-  :class:`~tkwry.TkwrySecurityWarning`. ``expose()`` then requires
-  ``allow_any_origin=True``. ``devtools=True`` with ``"*"`` warns again.
-  Filter with ``PYTHONWARNINGS=ignore::tkwry.TkwrySecurityWarning`` only if
-  you accept the risk.
-- **``app=`` navigation** — in-page navigation stays on ``tkwry://``; new
-  windows are denied. Set ``on_navigation`` / ``on_new_window`` to opt into
-  external URLs (open them in another WebView or the system browser).
-- **``untrusted=True``** — viewer mode: no IPC handler, no ``expose`` /
-  ``emit``, ephemeral session, http(s) only, no ``tkwry://`` / ``file:``, new
-  windows denied. Cannot be combined with ``bridge_origins`` / ``bridge_allow``.
-  Use this for arbitrary websites.
-- **Dangerous schemes** — ``javascript:`` / ``blob:`` / ``vbscript:`` /
-  ``mailto:`` are denied at the native navigation hook even without Python
-  ``on_navigation``. ``data:`` is not blocked there (WebView2 ``html=`` /
-  ``NavigateToString``); ``app=`` still rejects it.
-- **``tkwry://``** — custom-protocol requests with a non-app ``Origin`` or
-  ``Referer`` return 403 (top-level loads with no Origin still work).
-
-Do **not** enable RPC/IPC on a WebView that shows untrusted sites. Do **not**
-share a persistent ``WebSession`` / ``data_directory`` between a local app and
-an external site. Prefer vendored JS (``app=``) over CDN scripts in pages that
-have a bridge — XSS in a CDN script is the page origin.
-
-[`examples/browser_demo.py`](examples/browser_demo.py) sets
-``bridge_origins="*"`` on purpose (link interception only; expect the
-security warning). Copy that only if every page is trusted, and do not
-``expose()`` desktop APIs without ``allow_any_origin=True``.
+Defaults, ``bridge_origins="*"``, ``app=`` navigation, dangerous schemes, and
+``tkwry://`` Origin checks: [Trust boundaries](docs/trust.md).
 
 ### Python → JS events (``emit``)
 
@@ -323,10 +236,10 @@ web.emit("data_updated", {"n": 1})
 
 ```js
 window.tkwry.on("data_updated", (payload) => { ... });
-// listener errors are logged with console.error (set window.tkwry.debug = false to silence)
 ```
 
-See [`examples/ipc_demo.py`](examples/ipc_demo.py).
+Listener errors log via ``console.error`` (``window.tkwry.debug = false`` silences).
+Details: [IPC / RPC / emit](docs/rpc.md#python-to-js-events-emit).
 
 ### Shared session (``WebSession``)
 
@@ -348,8 +261,9 @@ uses it (especially with ``app=`` on macOS).
 **Shared ``app=``:** WebViews that share a **non-ephemeral** ``WebSession``
 must use the **same** ``app=`` root. Linux can register ``tkwry://`` only once
 per WebContext; tkwry raises ``ValueError`` if a second root is used (all
-platforms). Use a separate session for unrelated local apps. See
-[`examples/browser_demo.py`](examples/browser_demo.py).
+platforms). Use a separate session for unrelated local apps. Do not share a
+persistent profile with untrusted sites — see [Trust boundaries](docs/trust.md)
+and [`examples/browser_demo.py`](examples/browser_demo.py).
 
 ### Load HTML / evaluate JavaScript
 
@@ -475,21 +389,21 @@ Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`,
 
 ## ⚠️ Known limitations
 
-Short checklist — **details live in [Platform notes](#-platform-notes)** (especially [macOS embedding](#macos-embedding)).
+Short checklist — **details live in [Platform notes](docs/platforms.md)** (especially [macOS embedding](docs/platforms.md#macos-embedding)).
 
 - **Alpha** — APIs may change; not for production yet (see banner above)
 - **Windows** — WebView2 Runtime required; missing runtime → `WebViewCreationError`
 - **Windows DevTools** — wry/WebView2 reports `is_devtools_open()` as `False` and `close_devtools()` is a no-op; `open_devtools()` still opens the inspector
 - **Linux** — no PyPI wheel (by design); best-effort source install
-- **Linux concurrent `eval_js_with_callback`** — evaluating on multiple WebViews at once can stall WebKitGTK; prefer sequential evals (see [Linux](#linux))
+- **Linux concurrent `eval_js_with_callback`** — evaluating on multiple WebViews at once can stall WebKitGTK; prefer sequential evals (see [Linux](docs/platforms.md#linux))
 - **Shared `WebSession` + `app=`** — WebViews that share a non-ephemeral session must use the same `app=` root (`ValueError` otherwise; Linux can register `tkwry://` only once per context); do not share a persistent profile with untrusted sites
-- **Trust / external content** — RPC/IPC default to the initial origin (optional path prefix / `bridge_allow`); `bridge_origins="*"` warns and needs `expose(..., allow_any_origin=True)`; `app=` locks navigation to `tkwry://`; use `untrusted=True` for arbitrary websites (see [Trust boundaries](#trust-boundaries-external-pages))
+- **Trust / external content** — RPC/IPC default to the initial origin (optional path prefix / `bridge_allow`); `bridge_origins="*"` warns and needs `expose(..., allow_any_origin=True)`; `app=` locks navigation to `tkwry://`; use `untrusted=True` for arbitrary websites (see [Trust boundaries](docs/trust.md))
 - **macOS DevTools** — create with `devtools=True`, then `open_devtools()` (flag alone does not open; `open_devtools()` without the flag is a no-op on macOS); uses private APIs — avoid in Mac App Store builds
 - **macOS IME / focus** — not Safari-parity; mid-composition focus flips can mis-route input
 - **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
 - **`url()` on macOS** — may be `None` for inline HTML until a concrete `load_url` (WKWebView has no document `NSURL`)
 - **Sync hooks / queues** — `on_navigation` / `on_new_window` may block WebKit up to ~60s; do not create a WebView from `on_new_window`; async event queues cap at 2048; IPC/RPC messages cap at 10 MiB (see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks))
-- **RPC cancel / destroy** — timeout, JS `cancel`, and `destroy()` are **cooperative only** (`rpc_cancelled()`); Python cannot preempt a running worker. `destroy()` joins the pool for ~2 seconds; leftover threads are logged to stderr
+- **RPC cancel / destroy** — timeout, JS `cancel`, and `destroy()` are **cooperative only** (`rpc_cancelled()`); Python cannot preempt a running worker. `destroy()` joins the pool for ~2 seconds; leftover threads are logged to stderr (see [IPC / RPC / emit](docs/rpc.md#timeout-and-cancel))
 - **Drag & drop** — WebView area only (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
@@ -498,41 +412,16 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## 🌐 Platform notes
 
+Pre-built wheels: **Windows** and **macOS**. **Linux** is source-only (best-effort).
+
 | OS | Arch | Parent handle | Engine |
 |----|------|---------------|--------|
 | **Windows** | x86_64, arm64 | `Frame.winfo_id()` → HWND | WebView2 |
 | **macOS** | arm64, x86_64 | Toplevel content `NSView` | WKWebView |
 | **Linux** | — | `winfo_id()` → X11 window ID | WebKitGTK |
 
-### Windows
-
-[WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) must be installed (common on Windows 10/11). Without it, creation fails with `WebViewCreationError` (install link in the message). There is **no** fallback engine.
-
-**DPI:** `set_bounds` uses **physical** pixels on Windows. After process DPI awareness (e.g. `tkface.win.enable_dpi_awareness()` before `tk.Tk()`), Tk `winfo_*` already reports physical sizes — passing them as wry `Logical` would double-scale. Prefer awareness + design-pixel→physical sizing in the host app; do not monkeypatch tkwry bounds from app code.
-
-### Linux
-
-**By design in v0.1.x:** no PyPI wheel; install from source (sdist / git). Support is **best-effort** — not a release blocker for Windows/macOS wheels. CI runs the integration suite under **Xvfb**; real-desktop / Wayland timing may still differ. GTK is pumped on a Tk timer automatically after install.
-
-For `place` layouts, pass explicit `width`/`height` so host `winfo_*` settles; native size follows those `winfo_*` values (see [Layout / resize](#layout--resize)).
-
-**Concurrent eval:** calling `eval_js_with_callback` on **multiple** WebViews at the same time can stall under WebKitGTK (especially headless / Xvfb). Prefer one eval at a time — wait for each callback (or error) before starting the next — when you have several views.
-
-### macOS embedding
-
-Tk child `Frame`s usually **do not** get their own `NSView` (Tk Aqua). tkwry attaches to the **toplevel content view**, positions with `set_bounds` on `<Configure>`, and hides with `set_visible(False)` on `<Unmap>` (e.g. another Notebook tab). Per-frame native views would need upstream Tk changes.
-
-**Keyboard focus:** clicks are hit-tested at the `NSEvent` layer; Python drains focus signals on the Tk main thread. Use `web.focus()` / `web.focus_parent()` for explicit control ([`examples/browser_demo.py`](examples/browser_demo.py)). On macOS/Windows, `focused=True` waits for `<<WebViewReady>>`, then calls `focus()` (create-time focus breaks child WKWebView / WebView2). Call `focus()` yourself after later layout changes.
-
-**IME:** composition stays with the current first responder. Switching Tk ↔ WebView mid-composition (or fighting the system candidate window) can cancel or mis-deliver input vs Safari. **Not** a v0.1 goal — finish composition before changing focus, or keep IME editing in one surface.
-
-**Import order / double titlebar:** import `tkwry` **before** anything that starts `AppKit` / `NSApplication`. On import, tkwry disables process-level automatic window tabbing on the main thread. If AppKit starts first, macOS may show a **double titlebar** strip. If per-window tabbing disable during create fails, tkwry logs and retries asynchronously (non-fatal).
-
-**`url()`:** may be `None` for inline HTML (`html=` / `load_html`) or when WKWebView has no document `NSURL`. After `load_url`, it becomes the concrete URI.
-
-**Notebook / tabs:** unmapped tabs hide the native view (`set_visible(False)`) and show again on `<Map>` — required because frames share the toplevel `NSView`. `ready` is layout-based (can stay `True` while hidden); prefer visible-tab work after the tab is selected. No extra app code for tabs/panes — [`examples/multi_demo.py`](examples/multi_demo.py).
-
-Lifecycle / IPC / page-load handlers run on the **Tk main thread**. RPC may use a worker (`thread=True`). `on_navigation` / `on_new_window` still make WebKit wait for a return value — see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks).
+DPI, WebView2, macOS embedding / IME / import order, and Linux eval caveats:
+[Platform notes](docs/platforms.md).
 
 ---
 

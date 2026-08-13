@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Split README into a landing page plus ``docs/trust.md``, ``docs/rpc.md``,
+  and ``docs/platforms.md``
+
 ## [0.1.3] - 2026-08-13
 
 Trust boundaries for IPC/RPC, typed/cancellable RPC, and hardened
