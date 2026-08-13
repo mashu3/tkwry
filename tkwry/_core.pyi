@@ -73,7 +73,9 @@ class WebView:
         ipc_listening: bool = False,
         title_listening: bool = False,
         drag_drop_listening: bool = False,
-        on_download_started: Callable[[str, str], tuple[bool, str | None]] | None = None,
+        on_download_started: (
+            Callable[[str, str], tuple[bool, str | None]] | None
+        ) = None,
         download_complete_listening: bool = False,
         with_ipc: bool = True,
         session: WebSession | None = None,

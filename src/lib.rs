@@ -1329,8 +1329,7 @@ impl WebView {
         let ipc_listening = Arc::new(AtomicBool::new(ipc_listening));
         let title_listening = Arc::new(AtomicBool::new(title_listening));
         let drag_drop_listening = Arc::new(AtomicBool::new(drag_drop_listening));
-        let download_complete_listening =
-            Arc::new(AtomicBool::new(download_complete_listening));
+        let download_complete_listening = Arc::new(AtomicBool::new(download_complete_listening));
         let ipc_overflow_dropped = Arc::new(AtomicU64::new(0));
         let rpc_overflow_dropped = Arc::new(AtomicU64::new(0));
         let page_load_overflow_dropped = Arc::new(AtomicU64::new(0));

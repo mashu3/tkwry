@@ -1704,17 +1704,14 @@ class WebView(WebViewRpcMixin):
             self._ensure_tk_wakeup_pipe()
             self._ensure_event_poll()
 
-    def set_on_download_complete(
-        self, handler: DownloadCompleteHandler | None
-    ) -> None:
+    def set_on_download_complete(self, handler: DownloadCompleteHandler | None) -> None:
         """Register a download-finished handler (Tk main thread; notify-only)."""
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
-                "WebView native creation failed; cannot call "
-                "set_on_download_complete()"
+                "WebView native creation failed; cannot call set_on_download_complete()"
             ) from self._creation_error
         self._on_download_complete = handler
         if self._webview is not None:
@@ -2187,9 +2184,7 @@ class WebView(WebViewRpcMixin):
         )
         return False, None
 
-    def _invoke_download_handler(
-        self, url: str, dest: str
-    ) -> tuple[bool, str | None]:
+    def _invoke_download_handler(self, url: str, dest: str) -> tuple[bool, str | None]:
         if self._download_scheme(url) in _DANGEROUS_DOWNLOAD_SCHEMES:
             return False, None
         if self._download_allow is not None and not origin_allowed(
@@ -2206,14 +2201,13 @@ class WebView(WebViewRpcMixin):
             return False, None
         return self._coerce_download_decision(result, dest)
 
-    def _native_download_started(
-        self, url: str, dest: str
-    ) -> tuple[bool, str | None]:
+    def _native_download_started(self, url: str, dest: str) -> tuple[bool, str | None]:
         if not self._download_policy_active():
             return True, None
+        deny: tuple[bool, str | None] = (False, None)
         return self._dispatch_sync_hook(
             lambda: self._invoke_download_handler(url, dest),
-            default=(False, None),
+            default=deny,
             kind="on_download",
             detail=url,
         )
