@@ -170,19 +170,21 @@ def test_rpc_cancel_envelope_sets_flag_and_rejects(tk_root) -> None:
 
 
 def test_rpc_worker_done_after_destroy_skips_tk(tk_root) -> None:
-    """Late worker completion must not call ``after_idle`` on a dead Tk."""
+    """Late worker completion must not hop to Tk (queue only; poll drains)."""
     frame = tk.Frame(tk_root)
-    web = WebView(frame, html="<p>rpc</p>")
+    web = WebView(frame)
+    web._cancel_deferred_callbacks()
     started = threading.Event()
     release = threading.Event()
+    finished = threading.Event()
 
     @web.expose(thread=True)
     def slow() -> str:
         started.set()
-        release.wait(timeout=2.0)
+        release.wait(timeout=5.0)
+        finished.set()
         return "done"
 
-    web._cancel_deferred_callbacks()
     native = MagicMock()
     native.drain_rpc_messages.return_value = [
         (
@@ -196,22 +198,42 @@ def test_rpc_worker_done_after_destroy_skips_tk(tk_root) -> None:
     assert started.wait(timeout=2.0)
     web.destroy()
     frame.destroy()
-
-    idle_calls: list[str] = []
-
-    def boom(_fn: object) -> None:
-        idle_calls.append("after_idle")
-        raise RuntimeError("main thread is not in main loop")
-
-    web._frame.after_idle = boom  # type: ignore[method-assign]
     release.set()
+    assert finished.wait(timeout=2.0)
+    web._drain_rpc_futures()
+
+
+def test_rpc_worker_settles_on_poll(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame)
+    web._cancel_deferred_callbacks()
+    done = threading.Event()
+
+    @web.expose(thread=True)
+    def ping() -> str:
+        done.set()
+        return "pong"
+
+    native = MagicMock()
+    native.drain_rpc_messages.return_value = [
+        (
+            "about:blank",
+            json.dumps({"__tkwry": "rpc", "id": "r1", "method": "ping", "params": []}),
+        )
+    ]
+    native.drain_ipc_messages.return_value = []
+    web._webview = native
+    web._deliver_ipc_messages()
+    assert done.wait(timeout=2.0)
     deadline = time.monotonic() + 2.0
     while time.monotonic() < deadline:
-        tk_root.update()
-        time.sleep(0.02)
-        if idle_calls:
+        web._drain_rpc_futures()
+        if native.eval_js.called:
             break
-    assert idle_calls == []
+        time.sleep(0.02)
+    assert native.eval_js.called
+    web.destroy()
+    frame.destroy()
 
 
 def test_emit_rejects_non_json(tk_root) -> None:

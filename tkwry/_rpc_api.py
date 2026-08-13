@@ -7,6 +7,7 @@ preserving the public ``WebView`` methods unchanged.
 from __future__ import annotations
 
 import os
+import queue
 import sys
 import threading
 import tkinter as tk
@@ -66,6 +67,9 @@ class WebViewRpcMixin:
         )
         self._rpc_executor: ThreadPoolExecutor | None = None
         self._rpc_inflight: dict[str, Future[Any]] = {}
+        self._rpc_done_queue: queue.SimpleQueue[tuple[str, Future[Any]]] = (
+            queue.SimpleQueue()
+        )
         self._rpc_timeout_after: dict[str, str] = {}
         self._rpc_cancel_events: dict[str, threading.Event] = {}
         self._rpc_user_cancelled: set[str] = set()
@@ -121,7 +125,8 @@ class WebViewRpcMixin:
         - Default / ``run_in="main"`` — handler runs on the **Tk main thread**
           (keeps UI APIs safe; heavy work blocks the UI).
         - ``thread=True`` or ``run_in="worker"`` — handler runs on a background
-          thread pool; settle returns to Tk via ``after_idle``.
+          thread pool; settle returns on the Tk event poll (never ``after``
+          from the worker thread).
 
         Optional *timeout* (seconds) applies to ``run_in="worker"`` handlers
         and handlers that return a ``Future``. It rejects the Promise if work
@@ -305,15 +310,24 @@ class WebViewRpcMixin:
         if executor is not None:
             executor.shutdown(wait=False, cancel_futures=True)
 
+    def _discard_rpc_done_queue(self) -> None:
+        q = self._rpc_done_queue
+        while True:
+            try:
+                q.get_nowait()
+            except queue.Empty:
+                return
+
     def _abort_inflight_rpc(self) -> None:
         """Reject pending RPC Promises before the native view is released."""
         error = rpc_error("WebViewDestroyedError", "webview destroyed")
         pending = list(self._rpc_inflight.items())
         self._rpc_inflight.clear()
+        self._discard_rpc_done_queue()
         for after_id in list(self._rpc_timeout_after.values()):
             try:
                 self._frame.after_cancel(after_id)
-            except (tk.TclError, ValueError):
+            except (tk.TclError, RuntimeError, ValueError):
                 pass
         self._rpc_timeout_after.clear()
         for event in self._rpc_cancel_events.values():
@@ -483,6 +497,44 @@ class WebViewRpcMixin:
         ok, value = outcome
         self._settle_rpc(request.id, ok=ok, value=value)
 
+    def _settle_tracked_rpc_future(self, req_id: str, done_fut: Future[Any]) -> None:
+        after_id = self._rpc_timeout_after.pop(req_id, None)
+        if after_id is not None:
+            try:
+                self._frame.after_cancel(after_id)
+            except (tk.TclError, RuntimeError, ValueError):
+                pass
+        if self._rpc_inflight.pop(req_id, None) is None:
+            return
+        if self._destroyed:
+            return
+        self._drop_rpc_cancel(req_id)
+        try:
+            value = done_fut.result()
+        except Exception as exc:
+            self._settle_rpc(
+                req_id,
+                ok=False,
+                value=format_rpc_error(exc, include_traceback=self._rpc_traceback),
+            )
+            return
+        self._settle_rpc(req_id, ok=True, value=value)
+
+    def _drain_rpc_futures(self) -> None:
+        """Settle worker RPC completions on the Tk thread (poll / idle)."""
+        if self._destroyed:
+            self._discard_rpc_done_queue()
+            return
+        while True:
+            try:
+                req_id, done_fut = self._rpc_done_queue.get_nowait()
+            except queue.Empty:
+                return
+            if self._destroyed:
+                self._discard_rpc_done_queue()
+                return
+            self._settle_tracked_rpc_future(req_id, done_fut)
+
     def _track_rpc_future(
         self,
         req_id: str,
@@ -493,39 +545,13 @@ class WebViewRpcMixin:
         self._rpc_inflight[req_id] = fut
 
         def _done(done_fut: Future[Any]) -> None:
-            # Worker threads; Tk may already be gone (destroy / pytest teardown).
+            # Worker thread: never touch Tk here (Tcl is not thread-safe).
             if self._destroyed:
                 return
-
-            def _settle() -> None:
-                after_id = self._rpc_timeout_after.pop(req_id, None)
-                if after_id is not None:
-                    try:
-                        self._frame.after_cancel(after_id)
-                    except (tk.TclError, RuntimeError, ValueError):
-                        pass
-                if self._rpc_inflight.pop(req_id, None) is None:
-                    return
-                if self._destroyed:
-                    return
-                self._drop_rpc_cancel(req_id)
-                try:
-                    value = done_fut.result()
-                except Exception as exc:
-                    self._settle_rpc(
-                        req_id,
-                        ok=False,
-                        value=format_rpc_error(
-                            exc, include_traceback=self._rpc_traceback
-                        ),
-                    )
-                    return
-                self._settle_rpc(req_id, ok=True, value=value)
-
             try:
-                self._frame.after_idle(_settle)
-            except (tk.TclError, RuntimeError):
-                pass
+                self._rpc_done_queue.put_nowait((req_id, done_fut))
+            except Exception:
+                return
 
         fut.add_done_callback(_done)
 

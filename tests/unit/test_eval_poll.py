@@ -68,6 +68,13 @@ def test_should_keep_polling_while_native_eval_wait(tk_root) -> None:
     assert web._should_keep_polling() is True
 
 
+def test_should_keep_polling_while_rpc_inflight(tk_root) -> None:
+    _frame, web = _make_web(tk_root)
+    web._rpc_inflight["r1"] = MagicMock()
+
+    assert web._should_keep_polling() is True
+
+
 def test_poll_events_keeps_polling_until_eval_delivers(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -880,9 +880,9 @@ class WebView(WebViewRpcMixin):
         """Release the native WebView when Tk teardown is impossible."""
         if self._destroyed:
             return
+        self._destroyed = True
         self._abort_inflight_rpc()
         self._stop_app_watch()
-        self._destroyed = True
         # Emergency path: skip Tcl ``after`` cancel / frame unbind; still clear
         # eval generation and ready callbacks so GC cannot revive work.
         self._begin_terminal_state(count_eval_drops=False, clear_ready=True)
@@ -903,9 +903,9 @@ class WebView(WebViewRpcMixin):
         self._require_tk_thread()
         if self._destroyed:
             return
+        self._destroyed = True
         self._abort_inflight_rpc()
         self._stop_app_watch()
-        self._destroyed = True
         self._cancel_deferred_callbacks()
         self._begin_terminal_state(count_eval_drops=True, clear_ready=True)
         self._rpc_methods.clear()
@@ -2010,6 +2010,7 @@ class WebView(WebViewRpcMixin):
         self._drain_sync_hooks()
         if self._ipc_listening_wanted():
             self._deliver_ipc_messages()
+        self._drain_rpc_futures()
         self._deliver_page_load_events()
         if self._on_title_changed is not None:
             self._deliver_title_events()
@@ -2206,6 +2207,7 @@ class WebView(WebViewRpcMixin):
 
         if self._ipc_listening_wanted():
             self._deliver_ipc_messages()
+        self._drain_rpc_futures()
 
         self._deliver_page_load_events()
 
@@ -2234,6 +2236,8 @@ class WebView(WebViewRpcMixin):
         if self._native_teardown_pending is not None:
             return True
         if self._needs_event_poll():
+            return True
+        if self._rpc_inflight:
             return True
         return self._pending_eval_callbacks > 0 or bool(self._native_eval_wait)
 

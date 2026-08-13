@@ -56,8 +56,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- Worker RPC ``done`` callbacks skip Tk after ``destroy`` (avoids Windows
-  ``Tcl_AsyncDelete`` / ``main thread is not in main loop`` on teardown)
+- Worker RPC completions settle on the Tk event poll instead of ``after_idle``
+  from the pool thread (avoids ``Tcl_AsyncDelete`` / abort on teardown)
 
 ## [0.1.2] - 2026-08-12
 
