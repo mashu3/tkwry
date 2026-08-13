@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tkwry import NewWindowResponse, WebSession, WebView
+from tkwry import NewWindowResponse, TkwrySecurityWarning, WebSession, WebView
 from tkwry._origin import APP_ORIGINS, INLINE_ORIGINS
 
 
@@ -99,6 +99,17 @@ def test_untrusted_rejects_conflicting_constructor_args(
             untrusted=True,
             session=WebSession(data_directory=tmp_path / "p"),
         )
+    with pytest.raises(ValueError, match="untrusted"):
+        WebView(frame, html="<p>x</p>", untrusted=True, bridge_origins="*")
+    with pytest.raises(ValueError, match="untrusted"):
+        WebView(
+            frame,
+            html="<p>x</p>",
+            untrusted=True,
+            bridge_origins=["https://example.com"],
+        )
+    with pytest.raises(ValueError, match="untrusted"):
+        WebView(frame, html="<p>x</p>", untrusted=True, bridge_allow=lambda _u: True)
     frame.destroy()
 
 
@@ -157,7 +168,8 @@ def test_inline_origin_rpc_is_allowed(tk_root) -> None:
 
 def test_bridge_origins_star_allows_any_page(tk_root) -> None:
     frame = tk.Frame(tk_root)
-    web = WebView(frame, url="https://example.com/", bridge_origins="*")
+    with pytest.warns(TkwrySecurityWarning, match="bridge_origins"):
+        web = WebView(frame, url="https://example.com/", bridge_origins="*")
     assert web.bridge_origins == "*"
     called: list[str] = []
     web.set_ipc_handler(called.append)
@@ -176,7 +188,77 @@ def test_set_bridge_origins_updates_allowlist(tk_root) -> None:
     web = WebView(frame, html="<p>x</p>")
     web.set_bridge_origins(["https://trusted.example"])
     assert web.bridge_origins == frozenset({"https://trusted.example"})
-    web.set_bridge_origins("*")
+    with pytest.warns(TkwrySecurityWarning, match="bridge_origins"):
+        web.set_bridge_origins("*")
     assert web.bridge_origins == "*"
+    web.destroy()
+    frame.destroy()
+
+
+def test_bridge_path_prefix_and_allow_callback(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(
+        frame,
+        url="https://trusted.example/app",
+        bridge_origins=["https://trusted.example/app"],
+        bridge_allow=lambda url: "/ok" in url,
+    )
+    assert web.bridge_origins == frozenset({"https://trusted.example/app"})
+    assert web._bridge_origin_allowed("https://trusted.example/app/ok") is True
+    assert web._bridge_origin_allowed("https://trusted.example/app/no") is False
+    assert web._bridge_origin_allowed("https://trusted.example/other/ok") is False
+    web.set_bridge_allow(None)
+    assert web._bridge_origin_allowed("https://trusted.example/app/no") is True
+    web.destroy()
+    frame.destroy()
+
+
+def test_expose_star_requires_allow_any_origin(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    with pytest.warns(TkwrySecurityWarning, match="bridge_origins"):
+        web = WebView(frame, html="<p>x</p>", bridge_origins="*")
+    with pytest.raises(ValueError, match="allow_any_origin"):
+
+        @web.expose
+        def ping() -> str:
+            return "ok"
+
+    @web.expose(allow_any_origin=True)
+    def ping() -> str:
+        return "ok"
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_set_bridge_origins_star_requires_allow_any_origin(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>x</p>")
+
+    @web.expose
+    def ping() -> str:
+        return "ok"
+
+    with pytest.raises(ValueError, match="allow_any_origin"):
+        web.set_bridge_origins("*")
+    web.unexpose("ping")
+    with pytest.warns(TkwrySecurityWarning, match="bridge_origins"):
+        web.set_bridge_origins("*")
+    web.destroy()
+    frame.destroy()
+
+
+def test_devtools_star_emits_extra_warning(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    with pytest.warns(TkwrySecurityWarning) as caught:
+        web = WebView(
+            frame,
+            url="https://example.com/",
+            bridge_origins="*",
+            devtools=True,
+        )
+    messages = [str(item.message) for item in caught]
+    assert any("bridge_origins" in msg for msg in messages)
+    assert any("devtools" in msg for msg in messages)
     web.destroy()
     frame.destroy()

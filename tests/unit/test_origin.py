@@ -10,6 +10,7 @@ from tkwry._origin import (
     app_navigation_allowed,
     origin_allowed,
     origin_of,
+    path_prefix_matches,
     resolve_bridge_origins,
     untrusted_navigation_allowed,
 )
@@ -44,7 +45,7 @@ def test_resolve_bridge_origins_infers_from_content() -> None:
         url=None,
         html=None,
         app=False,
-    ) == frozenset({"https://trusted.example"})
+    ) == frozenset({"https://trusted.example/path"})
 
 
 def test_resolve_bridge_origins_rejects_bare_string() -> None:
@@ -58,6 +59,27 @@ def test_origin_allowed_star_and_blank() -> None:
     assert origin_allowed("", INLINE_ORIGINS)
     assert not origin_allowed("https://evil.example/", INLINE_ORIGINS)
     assert not origin_allowed("https://evil.example/", APP_ORIGINS)
+
+
+def test_origin_allowed_path_prefix() -> None:
+    allow = frozenset({"https://trusted.example/app"})
+    assert origin_allowed("https://trusted.example/app", allow)
+    assert origin_allowed("https://trusted.example/app/", allow)
+    assert origin_allowed("https://trusted.example/app/page", allow)
+    assert not origin_allowed("https://trusted.example/application", allow)
+    assert not origin_allowed("https://trusted.example/other", allow)
+    assert not origin_allowed("https://other.example/app", allow)
+    assert origin_allowed(
+        "https://trusted.example/any", frozenset({"https://trusted.example"})
+    )
+
+
+def test_path_prefix_matches_boundary() -> None:
+    assert path_prefix_matches("/app", "/app")
+    assert path_prefix_matches("/app/x", "/app")
+    assert path_prefix_matches("/app/x", "/app/")
+    assert not path_prefix_matches("/application", "/app")
+    assert path_prefix_matches("/anything", "/")
 
 
 def test_app_and_untrusted_navigation_policy() -> None:

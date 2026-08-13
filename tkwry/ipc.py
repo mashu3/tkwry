@@ -203,8 +203,9 @@ def rpc_cancelled() -> bool:
     """Return whether the current RPC call has been timed out or aborted.
 
     Worker handlers should poll this during long work. Timeout and
-    :meth:`~tkwry.WebView.destroy` set the flag; they do **not** forcibly
-    stop Python already running on a worker thread.
+    :meth:`~tkwry.WebView.destroy` set the flag. Cancellation is
+    **cooperative only**: Python cannot kill a running worker thread.
+    Destroy waits up to ~2 seconds for pool threads to exit.
     """
     event = getattr(_rpc_tls, "cancel_event", None)
     return isinstance(event, threading.Event) and event.is_set()
@@ -272,6 +273,7 @@ class RpcRegistration:
     handler: RpcHandler
     run_in: RpcRunIn = "main"
     timeout: float | None = None
+    allow_any_origin: bool = False
 
 
 def is_rpc_envelope(data: object) -> bool:

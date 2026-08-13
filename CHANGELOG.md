@@ -31,6 +31,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``console.error``; set ``false`` to silence
 - ``tkwry://`` / ``app=`` serving canonicalizes paths and refuses symlinks,
   Windows junctions, and reparse points that escape the app root
+- ``bridge_allow`` callback and origin **path prefixes** on ``bridge_origins``
+  (``https://trusted.example/app`` matches ``/app`` and descendants only)
+- ``TkwrySecurityWarning`` when ``bridge_origins="*"`` (and again with
+  ``devtools=True``); ``expose(..., allow_any_origin=True)`` required for ``"*"``
 - ``RpcSerializationError`` for non-JSON RPC results and ``emit`` payloads
   (no more ``default=str`` / NaN / Infinity)
 - Structured ``RpcMessageTooLarge`` when an RPC envelope exceeds 10 MiB
@@ -39,15 +43,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   args or kwargs
 - Cooperative RPC cancel: ``rpc_cancelled()`` / ``rpc_cancel_event()``;
   timeout and destroy set the flag (``Future.cancel()`` still cannot stop
-  running Python)
+  running Python). Destroy joins workers for ~2s; leftover threads log to stderr
 
 ### Changed
 
 - README warns against enabling RPC/IPC on untrusted pages and against sharing
   a persistent ``WebSession`` with external sites; ``examples/browser_demo.py``
-  sets ``bridge_origins="*"`` explicitly (link interception only)
+  sets ``bridge_origins="*"`` explicitly (link interception only; warning expected)
+- ``untrusted=True`` cannot be combined with ``bridge_origins`` / ``bridge_allow``
+- ``set_bridge_origins("*")`` is refused unless every ``expose()`` used
+  ``allow_any_origin=True``
 - Documented that ``expose(timeout=…)`` does not preempt worker threads and
-  is ignored for synchronous ``run_in="main"`` handlers
+  is ignored for synchronous ``run_in="main"`` handlers; cancel/destroy are
+  specified as cooperative only (Python threads cannot be killed)
 - ``watch_app()`` no longer follows directory or file symlinks when scanning
   mtimes
 - Shared ``WebSession`` + ``app=`` constraint is called out on ``WebSession`` /
@@ -60,6 +68,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   from the pool thread; destroy aborts inflight RPC without ``eval_js``,
   joins pool threads, and does not reschedule poll on a dead frame
   (avoids Tcl/native abort on the next Tk update)
+- ``tkwry://`` open+inode (Unix) / file-index (Windows) check closes the
+  canonicalize-then-read TOCTOU window for escaped symlinks / reparse points
 
 ## [0.1.2] - 2026-08-12
 

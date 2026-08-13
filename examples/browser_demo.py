@@ -6,8 +6,8 @@ middle-click, and ``window.open`` also open a tab. Creating another WebView
 from ``on_new_window`` deadlocks WKWebView, so that hook only denies.
 
 IPC is only used to intercept links (no privileged Python APIs). Arbitrary
-https pages need ``bridge_origins="*"``; do not copy that into apps that
-``expose()`` desktop capabilities.
+https pages need ``bridge_origins="*"`` (emits ``TkwrySecurityWarning``);
+do not copy that into apps that ``expose()`` desktop capabilities.
 """
 
 from __future__ import annotations

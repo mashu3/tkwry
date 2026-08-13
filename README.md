@@ -171,9 +171,10 @@ Constructor ``app=`` fixes the filesystem root at create time. Later
 (Windows WebView2 rewrites this to ``https://tkwry.localhost/...`` internally).
 The ``tkwry://`` handler percent-decodes each path segment (so ``%2e%2e``
 cannot bypass ``..``), rejects NUL / invalid UTF-8 / Windows drive and UNC
-shapes, then canonicalizes (following symlinks, Windows junctions, and
-reparse points) and returns 403 if the real file would leave the app root;
-internal links that stay under the root are allowed.
+shapes, then opens the file under the app root and checks the opened file's
+identity against the canonical path (symlinks, Windows junctions, and
+reparse points that escape return 403). Internal links that stay under the
+root are allowed.
 Monaco / CDN scripts may still be loaded from the network inside that HTML when
 you choose not to vendor them yet. The Plotly demo toggles **CDN** vs **Local**
 (``app=``); Local caches ``plotly.js`` under ``examples/.vendor/``.
@@ -229,15 +230,17 @@ Destroy rejects in-flight RPCs. Keyword args go in ``{ kwargs: { … } }``
 
 **Timeout & cancel:** optional ``timeout`` on ``expose`` applies to worker
 handlers and returned ``Future``s (ignored for a synchronous main-thread
-handler). It rejects the JS Promise and sets a cooperative cancel flag;
-``Future.cancel()`` cannot stop Python that is already running on a worker.
+handler). It rejects the JS Promise and sets a cooperative cancel flag.
+This is **specified as cooperative only**: Python cannot preempt a running
+worker thread (``Future.cancel()`` only skips work that has not started).
 Long handlers should poll ``rpc_cancelled()`` (or capture
-``rpc_cancel_event()`` for other threads). JS ``call(..., { timeout: ms })``
-is independent and only settles the Promise on the JS side.
-``window.tkwry.cancel(id)`` (or ``promise.cancel()``) cancels from JS and
-rejects with ``RpcCancelledError``. Argument mismatches reject with a
-stable ``TypeError`` payload (arity + simple annotation checks: ``int`` /
-``float`` / ``str`` / ``bool`` / ``list`` / ``dict`` / ``Optional``).
+``rpc_cancel_event()`` for other threads). ``destroy()`` joins the pool for
+at most ~2 seconds; uncooperative handlers may briefly outlive the WebView.
+JS ``call(..., { timeout: ms })`` is independent and only settles the Promise
+on the JS side. ``window.tkwry.cancel(id)`` (or ``promise.cancel()``) cancels
+from JS and rejects with ``RpcCancelledError``. Argument mismatches reject
+with a stable ``TypeError`` payload (arity + simple annotation checks:
+``int`` / ``float`` / ``str`` / ``bool`` / ``list`` / ``dict`` / ``Optional``).
 Envelopes include ``version: 1``; unknown versions reject with
 ``RpcProtocolError`` (omitted version is treated as 1).
 
@@ -258,14 +261,23 @@ Defaults:
   origin (``html=`` → ``about:blank``; ``app=`` → ``tkwry://`` /
   ``https://tkwry.localhost``; ``url=`` → that site). Foreign pages still see
   ``window.ipc`` (engine injection) but messages are dropped / RPC rejects with
-  ``RpcOriginError``. Use ``bridge_origins=["https://trusted.example"]`` or
-  ``bridge_origins="*"`` (every page; dangerous with ``expose``).
+  ``RpcOriginError``. Use ``bridge_origins=["https://trusted.example"]`` (whole
+  origin) or a **path prefix**
+  (``bridge_origins=["https://trusted.example/app"]`` — ``/app`` and
+  ``/app/...``, not ``/application``). ``bridge_allow=lambda url: ...`` can
+  further restrict by the full page URL (navigation state).
+- **``bridge_origins="*"``** — every page; emits
+  :class:`~tkwry.TkwrySecurityWarning`. ``expose()`` then requires
+  ``allow_any_origin=True``. ``devtools=True`` with ``"*"`` warns again.
+  Filter with ``PYTHONWARNINGS=ignore::tkwry.TkwrySecurityWarning`` only if
+  you accept the risk.
 - **``app=`` navigation** — in-page navigation stays on ``tkwry://``; new
   windows are denied. Set ``on_navigation`` / ``on_new_window`` to opt into
   external URLs (open them in another WebView or the system browser).
 - **``untrusted=True``** — viewer mode: no IPC handler, no ``expose`` /
   ``emit``, ephemeral session, http(s) only, no ``tkwry://`` / ``file:``, new
-  windows denied. Use this for arbitrary websites.
+  windows denied. Cannot be combined with ``bridge_origins`` / ``bridge_allow``.
+  Use this for arbitrary websites.
 - **Dangerous schemes** — ``javascript:`` / ``blob:`` / ``vbscript:`` /
   ``mailto:`` are denied at the native navigation hook even without Python
   ``on_navigation``. ``data:`` is not blocked there (WebView2 ``html=`` /
@@ -279,8 +291,9 @@ an external site. Prefer vendored JS (``app=``) over CDN scripts in pages that
 have a bridge — XSS in a CDN script is the page origin.
 
 [`examples/browser_demo.py`](examples/browser_demo.py) sets
-``bridge_origins="*"`` on purpose (link interception only). Copy that only if
-every page is trusted.
+``bridge_origins="*"`` on purpose (link interception only; expect the
+security warning). Copy that only if every page is trusted, and do not
+``expose()`` desktop APIs without ``allow_any_origin=True``.
 
 ### Python → JS events (``emit``)
 
@@ -416,7 +429,7 @@ web.destroy()   # release native webview; host Frame is kept
 |----------|---------|
 | Content | `load_url`, `load_html`, `reload`, `url` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback` |
-| IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose`, `emit`, `watch_app`, `set_bridge_origins` |
+| IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose`, `emit`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler` |
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
@@ -426,14 +439,16 @@ web.destroy()   # release native webview; host Frame is kept
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
 `app_dev`, `session` / `data_directory` / `ephemeral`, `untrusted`,
-`bridge_origins`, `ipc_handler`, `rpc_traceback`, `devtools`, `background_color`,
-`user_agent`, `initialization_script`, `focused`, plus the callback hooks above.
+`bridge_origins`, `bridge_allow`, `ipc_handler`, `rpc_traceback`, `devtools`,
+`background_color`, `user_agent`, `initialization_script`, `focused`, plus the
+callback hooks above.
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`, `WebViewPhase`.
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
-`RpcTimeoutError`, `RpcSerializationError`. Helpers: `rpc_cancelled`, `rpc_cancel_event`.
+`RpcTimeoutError`, `RpcSerializationError`. Warning: `TkwrySecurityWarning`.
+Helpers: `rpc_cancelled`, `rpc_cancel_event`.
 
-Type aliases: `IpcHandler`, `BridgeOrigins`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`.
+Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`.
 
 ---
 
@@ -447,13 +462,13 @@ Short checklist — **details live in [Platform notes](#-platform-notes)** (espe
 - **Linux** — no PyPI wheel (by design); best-effort source install
 - **Linux concurrent `eval_js_with_callback`** — evaluating on multiple WebViews at once can stall WebKitGTK; prefer sequential evals (see [Linux](#linux))
 - **Shared `WebSession` + `app=`** — WebViews that share a non-ephemeral session must use the same `app=` root (`ValueError` otherwise; Linux can register `tkwry://` only once per context); do not share a persistent profile with untrusted sites
-- **Trust / external content** — RPC/IPC default to the initial origin; `app=` locks navigation to `tkwry://`; use `untrusted=True` for arbitrary websites (see [Trust boundaries](#trust-boundaries-external-pages))
+- **Trust / external content** — RPC/IPC default to the initial origin (optional path prefix / `bridge_allow`); `bridge_origins="*"` warns and needs `expose(..., allow_any_origin=True)`; `app=` locks navigation to `tkwry://`; use `untrusted=True` for arbitrary websites (see [Trust boundaries](#trust-boundaries-external-pages))
 - **macOS DevTools** — create with `devtools=True`, then `open_devtools()` (flag alone does not open; `open_devtools()` without the flag is a no-op on macOS); uses private APIs — avoid in Mac App Store builds
 - **macOS IME / focus** — not Safari-parity; mid-composition focus flips can mis-route input
 - **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
 - **`url()` on macOS** — may be `None` for inline HTML until a concrete `load_url` (WKWebView has no document `NSURL`)
 - **Sync hooks / queues** — `on_navigation` / `on_new_window` may block WebKit up to ~60s; do not create a WebView from `on_new_window`; async event queues cap at 2048; IPC/RPC messages cap at 10 MiB (see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks))
-- **RPC timeout** — rejects the Promise and sets `rpc_cancelled()`; does **not** kill an already-running Python worker (`Future.cancel()` is cooperative only)
+- **RPC cancel / destroy** — timeout, JS `cancel`, and `destroy()` are **cooperative only** (`rpc_cancelled()`); Python cannot preempt a running worker. `destroy()` joins the pool for ~2 seconds; leftover threads are logged to stderr
 - **Drag & drop** — WebView area only (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
@@ -508,14 +523,14 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 
 ## 🧩 Features
 
-- **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, ETag/HEAD/Range, bounded `watch_app()`; symlink/junction confinement)
-- **IPC / RPC / emit** — events vs request/response; worker RPC; typed TypeError; protocol `version`; JS `cancel`; Python→JS `emit`; origin allowlist (`bridge_origins`) + `untrusted=` viewer mode
+- **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, ETag/HEAD/Range, bounded `watch_app()`; open-then-verify symlink/junction confinement)
+- **IPC / RPC / emit** — events vs request/response; worker RPC; typed TypeError; protocol `version`; JS `cancel`; Python→JS `emit`; origin/path allowlist (`bridge_origins`) + `bridge_allow` + `untrusted=` viewer mode
 - **WebSession** — shared wry `WebContext`; shared `app=` roots must match
 - **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
 - **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` hide unmapped views)
 - **Deferred callbacks** — IPC, RPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
-- **URL safety** — Python `load_url` normalizes/validates schemes; in-page nav denies `javascript:`/`blob:`/… (`data:` under `app=`); `app=` stays on `tkwry://`; IPC/RPC origin allowlist
+- **URL safety** — Python `load_url` normalizes/validates schemes; in-page nav denies `javascript:`/`blob:`/… (`data:` under `app=`); `app=` stays on `tkwry://`; IPC/RPC origin/path allowlist + `bridge_allow`
 - **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()` (macOS: private APIs)
 - **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)
 - **Navigation hooks** — all handlers on the Tk thread; `on_navigation` / `on_new_window` block WebKit until they return

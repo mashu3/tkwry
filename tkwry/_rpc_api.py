@@ -49,6 +49,8 @@ from tkwry.ipc import (
     RPC_BOOTSTRAP_JS as _RPC_BOOTSTRAP_JS,
 )
 
+_RPC_EXECUTOR_JOIN_SECONDS = 2.0
+
 
 class WebViewRpcMixin:
     """JS bridge: IPC handler, ``expose`` / ``emit``, and ``watch_app``."""
@@ -113,6 +115,7 @@ class WebViewRpcMixin:
         run_in: RpcRunIn | None = None,
         timeout: float | None = None,
         replace: bool = False,
+        allow_any_origin: bool = False,
     ) -> RpcHandler | Callable[[RpcHandler], RpcHandler]:
         """Expose a Python callable to ``window.tkwry.call(name, ...)``.
 
@@ -131,18 +134,24 @@ class WebViewRpcMixin:
 
         Optional *timeout* (seconds) applies to ``run_in="worker"`` handlers
         and handlers that return a ``Future``. It rejects the Promise if work
-        does not finish in time. ``Future.cancel()`` cannot stop Python that
-        is already running; handlers should poll :func:`tkwry.rpc_cancelled`
-        (or :func:`tkwry.rpc_cancel_event`) for cooperative cancel. JS may also
-        call ``window.tkwry.cancel(id)`` (``call`` returns a Promise with
-        ``.id`` / ``.cancel()``). Timeout on a synchronous ``run_in="main"``
-        handler is ignored. Argument mismatches reject with ``TypeError``.
-        Re-registering the same name raises ``ValueError`` unless
+        does not finish in time. Cancellation is cooperative only: Python
+        cannot preempt a running worker; handlers should poll
+        :func:`tkwry.rpc_cancelled` (or :func:`tkwry.rpc_cancel_event`).
+        JS may also call ``window.tkwry.cancel(id)`` (``call`` returns a
+        Promise with ``.id`` / ``.cancel()``). Timeout on a synchronous
+        ``run_in="main"`` handler is ignored. Argument mismatches reject with
+        ``TypeError``. Re-registering the same name raises ``ValueError`` unless
         ``replace=True``.
+
+        When :attr:`~tkwry.WebView.bridge_origins` is ``"*"``, pass
+        ``allow_any_origin=True`` to acknowledge that every page in the view
+        can call this method. ``set_bridge_origins("*")`` is refused if any
+        exposed method lacks that flag.
 
         The low-level ``ipc_handler`` remains available for raw
         ``window.ipc.postMessage`` traffic (IPC = events; RPC = request/response).
-        Calls are accepted only from :attr:`~tkwry.WebView.bridge_origins`.
+        Calls are accepted only from :attr:`~tkwry.WebView.bridge_origins`
+        (and :attr:`~tkwry.WebView.bridge_allow`, if set).
         """
         self._require_tk_thread()
         if self._destroyed:
@@ -159,6 +168,11 @@ class WebViewRpcMixin:
             raise ValueError("expose: thread=True conflicts with run_in='main'")
         if timeout is not None and timeout <= 0:
             raise ValueError("expose: timeout must be positive when set")
+        if self._bridge_origins == "*" and not allow_any_origin:
+            raise ValueError(
+                "expose: bridge_origins='*' requires allow_any_origin=True "
+                "(every page can call this method)"
+            )
 
         def register(handler: RpcHandler) -> RpcHandler:
             method = name if name is not None else handler.__name__
@@ -173,6 +187,7 @@ class WebViewRpcMixin:
                 handler=handler,
                 run_in=run_in,
                 timeout=timeout,
+                allow_any_origin=allow_any_origin,
             )
             self._enable_rpc()
             return handler
@@ -313,14 +328,23 @@ class WebViewRpcMixin:
         executor.shutdown(wait=False, cancel_futures=True)
         # Join so pool threads do not outlive destroy and race Tcl (macOS/Win
         # abort on the next ``update`` / ``Tk()``). Cooperative handlers exit
-        # quickly after cancel; uncooperative ones are capped.
+        # quickly after cancel; uncooperative ones are capped (~2s). Python
+        # cannot forcibly stop a running thread.
         threads = [t for t in getattr(executor, "_threads", ()) if t.is_alive()]
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + _RPC_EXECUTOR_JOIN_SECONDS
         for thread in threads:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
             thread.join(timeout=remaining)
+        leftover = [t for t in threads if t.is_alive()]
+        if leftover:
+            print(
+                f"tkwry: destroy waited {_RPC_EXECUTOR_JOIN_SECONDS:.0f}s; "
+                f"{len(leftover)} RPC worker thread(s) still running "
+                "(poll rpc_cancelled(); Python cannot preempt them)",
+                file=sys.stderr,
+            )
 
     def _discard_rpc_done_queue(self) -> None:
         q = self._rpc_done_queue

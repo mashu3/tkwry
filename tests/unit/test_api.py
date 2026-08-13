@@ -7,6 +7,7 @@ from pathlib import Path
 
 import tkwry
 from tkwry import (
+    BridgeAllow,
     BridgeOrigins,
     DragDropEvent,
     DragDropHandler,
@@ -26,6 +27,7 @@ from tkwry import (
 from tkwry._core import WebView as NativeWebView
 
 PUBLIC_TYPE_ALIASES = (
+    BridgeAllow,
     BridgeOrigins,
     DragDropHandler,
     EvalCallback,
@@ -56,6 +58,7 @@ WEBVIEW_METHODS = (
     "is_devtools_open",
     "set_ipc_handler",
     "set_bridge_origins",
+    "set_bridge_allow",
     "expose",
     "unexpose",
     "watch_app",
@@ -79,6 +82,7 @@ WEBVIEW_PROPERTIES = (
     "destroyed",
     "untrusted",
     "bridge_origins",
+    "bridge_allow",
     "ready",
     "phase",
     "creation_failed",
@@ -115,6 +119,7 @@ def test_public_exports() -> None:
     assert tkwry.RpcTimeoutError is not None
     assert tkwry.RpcCancelledError is not None
     assert tkwry.RpcSerializationError is not None
+    assert tkwry.TkwrySecurityWarning is not None
     assert tkwry.rpc_cancelled is not None
     assert tkwry.rpc_cancel_event is not None
     for alias in PUBLIC_TYPE_ALIASES:

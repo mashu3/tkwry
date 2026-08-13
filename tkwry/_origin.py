@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Collection, Iterable
 from typing import Literal, TypeAlias
 from urllib.parse import urlparse
+
+from tkwry.exceptions import TkwrySecurityWarning
 
 BridgeAllowlist: TypeAlias = Literal["*"] | frozenset[str]
 
@@ -22,6 +25,12 @@ _DEFAULT_PORTS = {"http": 80, "https": 443}
 # allows ``data:`` (null origin, no bridge).
 _APP_NAV_DENIED_SCHEMES = frozenset(
     {"javascript", "data", "vbscript", "blob", "mailto"}
+)
+
+STAR_BRIDGE_WARNING = (
+    'bridge_origins="*" lets every page call window.ipc / window.tkwry; '
+    "prefer concrete origins or path prefixes, or untrusted=True for a viewer. "
+    "expose() also requires allow_any_origin=True when using '*'."
 )
 
 
@@ -66,16 +75,63 @@ def origin_of(url: str | None) -> str:
     return f"{scheme}://{host}"
 
 
-def normalize_bridge_origin(value: str) -> str:
+def url_path_of(url: str | None) -> str:
+    """Return the URL path (``/`` when missing) for prefix matching."""
+    if not url or not url.strip():
+        return "/"
+    path = urlparse(url.strip()).path or "/"
+    return path if path.startswith("/") else f"/{path}"
+
+
+def path_prefix_matches(path: str, prefix: str) -> bool:
+    """True when *path* is *prefix* or a descendant.
+
+    ``/app`` matches ``/app`` and ``/app/x``, not ``/application``.
+    """
+
+    if not prefix or prefix == "/":
+        return True
+    if path == prefix:
+        return True
+    if prefix.endswith("/"):
+        return path.startswith(prefix)
+    return path.startswith(prefix + "/")
+
+
+def _split_bridge_entry(entry: str) -> tuple[str, str | None]:
+    """Return ``(origin, path_prefix)``; ``None`` prefix means any path."""
+    if entry in {"null", "about:blank", "*"}:
+        return entry, None
+    origin = origin_of(entry)
+    path = urlparse(entry.strip()).path or ""
+    if not path or path == "/":
+        return origin, None
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return origin, path
+
+
+def normalize_bridge_entry(value: str) -> str:
+    """Normalize one allowlist entry: origin, or origin + path prefix."""
     text = value.strip()
     if not text or text == "*":
         raise ValueError(
-            "bridge origin must be a concrete origin; use bridge_origins='*' "
-            "to allow every page"
+            "bridge origin must be a concrete origin or origin+path; "
+            "use bridge_origins='*' to allow every page"
         )
     if text in {"null", "about:blank"}:
         return text
-    return origin_of(text)
+    origin = origin_of(text)
+    path = urlparse(text).path or ""
+    if not path or path == "/":
+        return origin
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return f"{origin}{path}"
+
+
+def warn_star_bridge_origins(*, stacklevel: int) -> None:
+    warnings.warn(STAR_BRIDGE_WARNING, TkwrySecurityWarning, stacklevel=stacklevel)
 
 
 def resolve_bridge_origins(
@@ -94,7 +150,7 @@ def resolve_bridge_origins(
             "not a single URL string"
         )
     if explicit is not None:
-        origins = frozenset(normalize_bridge_origin(item) for item in explicit)
+        origins = frozenset(normalize_bridge_entry(item) for item in explicit)
         if not origins:
             raise ValueError("bridge_origins must not be empty")
         return origins
@@ -108,15 +164,29 @@ def resolve_bridge_origins(
 
 
 def origin_allowed(url: str | None, allowlist: BridgeAllowlist) -> bool:
+    """True when *url* matches ``"*"``, an origin, or an origin+path prefix."""
     if allowlist == "*":
         return True
     origin = origin_of(url)
-    if origin in allowlist:
-        return True
-    if origin == "null" and "about:blank" in allowlist:
-        return True
-    if origin == "about:blank" and "null" in allowlist:
-        return True
+    path = url_path_of(url)
+    for entry in allowlist:
+        entry_origin, prefix = _split_bridge_entry(entry)
+        if (
+            origin == "null"
+            and entry_origin in {"null", "about:blank"}
+            and prefix is None
+        ):
+            return True
+        if (
+            origin == "about:blank"
+            and entry_origin in {"null", "about:blank"}
+            and prefix is None
+        ):
+            return True
+        if origin != entry_origin:
+            continue
+        if prefix is None or path_prefix_matches(path, prefix):
+            return True
     return False
 
 

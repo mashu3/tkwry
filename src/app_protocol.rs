@@ -1,6 +1,8 @@
 //! Local app asset serving via the ``tkwry://`` custom protocol.
 
 use std::borrow::Cow;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 
 use wry::http::{
@@ -88,7 +90,7 @@ fn looks_like_windows_drive(segment: &str) -> bool {
 /// Resolve a request path under ``root``, rejecting ``..`` and absolute escapes.
 ///
 /// Percent-decodes each segment independently so ``%2e%2e`` cannot sneak past
-/// ``..`` checks. Callers must still [`resolve_under_root`] so symlinks /
+/// ``..`` checks. Callers must still [`open_under_root`] so symlinks /
 /// junctions / reparse points cannot escape ``root``.
 pub(crate) fn safe_join(root: &Path, url_path: &str) -> Option<PathBuf> {
     let trimmed = url_path.trim_start_matches('/');
@@ -125,31 +127,66 @@ pub(crate) fn safe_join(root: &Path, url_path: &str) -> Option<PathBuf> {
     Some(out)
 }
 
-enum ServeResolve {
-    Ok(PathBuf),
-    Forbidden,
-    NotFound,
-}
-
 enum ServeError {
     Forbidden,
     NotFound,
 }
 
-/// Canonicalize *candidate* and require the real path to stay under *root*.
-///
-/// Follows symlinks, Windows junctions, and other reparse points. Internal
-/// links that remain inside *root* are allowed; anything that escapes is
-/// forbidden.
-fn resolve_under_root(root: &Path, candidate: &Path) -> ServeResolve {
-    let Ok(root) = root.canonicalize() else {
-        return ServeResolve::NotFound;
-    };
-    match candidate.canonicalize() {
-        Ok(path) if path.starts_with(&root) => ServeResolve::Ok(path),
-        Ok(_) => ServeResolve::Forbidden,
-        Err(_) => ServeResolve::NotFound,
+/// True when *opened* and *path_meta* refer to the same inode / file index.
+fn same_file_identity(opened: &std::fs::Metadata, path_meta: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        opened.dev() == path_meta.dev() && opened.ino() == path_meta.ino()
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        match (
+            opened.volume_serial_number(),
+            path_meta.volume_serial_number(),
+            opened.file_index(),
+            path_meta.file_index(),
+        ) {
+            (Some(vol_a), Some(vol_b), Some(idx_a), Some(idx_b)) => {
+                vol_a == vol_b && idx_a == idx_b
+            }
+            _ => false,
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (opened, path_meta);
+        false
+    }
+}
+
+/// Open *candidate* and require the opened file to stay under *root*.
+///
+/// Follows symlinks / junctions at open time, then re-canonicalizes and
+/// compares device+inode (Unix) or volume+file index (Windows) so a TOCTOU
+/// swap between canonicalize and read cannot serve a file outside *root*.
+/// Internal links that remain inside *root* are allowed.
+fn open_under_root(root: &Path, candidate: &Path) -> Result<(File, PathBuf), ServeError> {
+    let Ok(root) = root.canonicalize() else {
+        return Err(ServeError::NotFound);
+    };
+    let file = File::open(candidate).map_err(|_| ServeError::NotFound)?;
+    let opened_meta = file.metadata().map_err(|_| ServeError::NotFound)?;
+    if opened_meta.is_dir() {
+        return Err(ServeError::NotFound);
+    }
+    let Ok(real) = candidate.canonicalize() else {
+        return Err(ServeError::NotFound);
+    };
+    if !real.starts_with(&root) {
+        return Err(ServeError::Forbidden);
+    }
+    let path_meta = std::fs::metadata(&real).map_err(|_| ServeError::NotFound)?;
+    if !same_file_identity(&opened_meta, &path_meta) {
+        return Err(ServeError::Forbidden);
+    }
+    Ok((file, real))
 }
 
 fn mime_for_path(path: &Path) -> &'static str {
@@ -346,12 +383,13 @@ fn file_response(
     })
 }
 
-fn serve_resolved_file(
+fn serve_open_file(
     request: &Request<Vec<u8>>,
+    mut file: File,
     file_path: &Path,
     options: &AppServeOptions,
 ) -> Result<Response<Cow<'static, [u8]>>, ServeError> {
-    let meta = std::fs::metadata(file_path).map_err(|_| ServeError::NotFound)?;
+    let meta = file.metadata().map_err(|_| ServeError::NotFound)?;
     if meta.is_dir() {
         return Err(ServeError::NotFound);
     }
@@ -401,8 +439,6 @@ fn serve_resolved_file(
                     error_response(StatusCode::INTERNAL_SERVER_ERROR, "416 build failed")
                 }));
         };
-        let mut file = std::fs::File::open(file_path).map_err(|_| ServeError::NotFound)?;
-        use std::io::{Read, Seek, SeekFrom};
         file.seek(SeekFrom::Start(range.start))
             .map_err(|_| ServeError::NotFound)?;
         let len = (range.end - range.start + 1) as usize;
@@ -422,7 +458,9 @@ fn serve_resolved_file(
             extra,
         ));
     }
-    let bytes = std::fs::read(file_path).map_err(|_| ServeError::NotFound)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|_| ServeError::NotFound)?;
     Ok(file_response(
         file_path,
         bytes,
@@ -439,11 +477,8 @@ fn read_under_root(
     request: &Request<Vec<u8>>,
     options: &AppServeOptions,
 ) -> Result<Response<Cow<'static, [u8]>>, ServeError> {
-    match resolve_under_root(root, candidate) {
-        ServeResolve::Ok(file_path) => serve_resolved_file(request, &file_path, options),
-        ServeResolve::Forbidden => Err(ServeError::Forbidden),
-        ServeResolve::NotFound => Err(ServeError::NotFound),
-    }
+    let (file, file_path) = open_under_root(root, candidate)?;
+    serve_open_file(request, file, &file_path, options)
 }
 
 fn spa_fallback_allowed(request: &Request<Vec<u8>>, options: &AppServeOptions) -> bool {

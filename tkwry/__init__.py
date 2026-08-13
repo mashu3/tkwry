@@ -7,6 +7,7 @@ from tkwry.exceptions import (
     RpcCancelledError,
     RpcSerializationError,
     RpcTimeoutError,
+    TkwrySecurityWarning,
     WebViewCreationError,
     WebViewDestroyedError,
     WebViewNotReadyError,
@@ -42,6 +43,7 @@ try:
     from tkwry._core import DragDropEvent, NewWindowResponse, PageLoadEvent
     from tkwry.session import WebSession
     from tkwry.webview import (
+        BridgeAllow,
         BridgeOrigins,
         DragDropHandler,
         EvalCallback,
@@ -63,6 +65,7 @@ if sys.platform == "darwin":
     install_automatic_window_tabbing_disable()
 
 __all__ = [
+    "BridgeAllow",
     "BridgeOrigins",
     "DragDropEvent",
     "DragDropHandler",
@@ -78,6 +81,7 @@ __all__ = [
     "RpcCancelledError",
     "RpcSerializationError",
     "RpcTimeoutError",
+    "TkwrySecurityWarning",
     "rpc_cancel_event",
     "rpc_cancelled",
     "WebSession",

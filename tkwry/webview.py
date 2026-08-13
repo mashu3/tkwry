@@ -10,6 +10,7 @@ import threading
 import time
 import tkinter as tk
 import traceback
+import warnings
 import weakref
 from collections.abc import Callable, Collection
 from enum import Enum
@@ -46,6 +47,7 @@ from tkwry._origin import (
     origin_allowed,
     resolve_bridge_origins,
     untrusted_navigation_allowed,
+    warn_star_bridge_origins,
 )
 from tkwry._parent import (
     check_tk_thread_id,
@@ -56,6 +58,7 @@ from tkwry._parent import (
 from tkwry._rpc_api import WebViewRpcMixin
 from tkwry._url import _normalize_url, _validate_url
 from tkwry.exceptions import (
+    TkwrySecurityWarning,
     WebViewCreationError,
     WebViewDestroyedError,
     WebViewNotReadyError,
@@ -75,6 +78,7 @@ if sys.platform == "darwin":
 
 IpcHandler: TypeAlias = Callable[[str], None]
 BridgeOrigins: TypeAlias = Literal["*"] | Collection[str]
+BridgeAllow: TypeAlias = Callable[[str], bool]
 NavigationHandler: TypeAlias = Callable[[str], bool]
 PageLoadHandler: TypeAlias = Callable[[PageLoadEvent, str], None]
 TitleChangedHandler: TypeAlias = Callable[[str], None]
@@ -234,8 +238,9 @@ class WebView(WebViewRpcMixin):
     entry file is served through the ``tkwry://`` custom protocol — relative
     CSS/JS/assets resolve without a localhost HTTP server. Relative navigation
     uses ``tkwry://localhost/...``. The app root is fixed at create time.
-    Requests are canonicalized (symlinks, Windows junctions, reparse points);
-    paths that escape the root are forbidden.
+    Requests are opened under the app root and the opened file's identity is
+    checked against the canonical path (symlinks, Windows junctions, reparse
+    points that escape the root are forbidden).
 
     **Sessions** (``session=`` / ``data_directory=`` / ``ephemeral=``): share a
     wry ``WebContext`` (cookies / cache / localStorage where the platform
@@ -249,10 +254,14 @@ class WebView(WebViewRpcMixin):
     **Trust boundaries:** ``window.ipc`` / ``window.tkwry`` are desktop
     privileges. By default IPC/RPC are accepted only from the initial content
     origin (``html=`` → ``about:blank``; ``app=`` → ``tkwry://``;
-    ``url=`` → that origin). Pass ``bridge_origins="*"`` only when every page
-    in the view is trusted. ``untrusted=True`` is a viewer mode: no IPC/RPC,
-    ephemeral storage, http(s) only, new windows denied. ``app=`` also locks
-    in-page navigation to ``tkwry://`` unless you set ``on_navigation``.
+    ``url=`` → that origin). Entries may include a path prefix
+    (``https://trusted.example/app``). ``bridge_allow`` can further restrict
+    by full URL. ``bridge_origins="*"`` warns and requires
+    ``expose(..., allow_any_origin=True)``. ``untrusted=True`` is a viewer
+    mode: no IPC/RPC, ephemeral storage, http(s) only, new windows denied —
+    it cannot be combined with ``bridge_origins`` / ``bridge_allow``. ``app=``
+    also locks in-page navigation to ``tkwry://`` unless you set
+    ``on_navigation``.
 
     **Navigation hooks** (``on_navigation``, ``on_new_window``) run on the
     **Tk main thread**, but WebKit **blocks** until they return a value.
@@ -332,6 +341,7 @@ class WebView(WebViewRpcMixin):
         ephemeral: bool = False,
         untrusted: bool = False,
         bridge_origins: BridgeOrigins | None = None,
+        bridge_allow: BridgeAllow | None = None,
         ipc_handler: IpcHandler | None = None,
         spa_fallback: bool = False,
         app_dev: bool = False,
@@ -370,6 +380,14 @@ class WebView(WebViewRpcMixin):
             if ipc_handler is not None:
                 raise ValueError(
                     "WebView: untrusted=True cannot be combined with ipc_handler="
+                )
+            if bridge_origins is not None:
+                raise ValueError(
+                    "WebView: untrusted=True cannot be combined with bridge_origins="
+                )
+            if bridge_allow is not None:
+                raise ValueError(
+                    "WebView: untrusted=True cannot be combined with bridge_allow="
                 )
             if data_directory is not None:
                 raise ValueError("WebView: untrusted=True cannot use data_directory=")
@@ -419,6 +437,7 @@ class WebView(WebViewRpcMixin):
         self._untrusted = untrusted
         self._lock_app_navigation = False
         self._bridge_origins: BridgeAllowlist = "*"
+        self._bridge_allow: BridgeAllow | None = None
         self._spa_fallback = spa_fallback
         self._app_dev = app_dev
         self._on_navigation = on_navigation
@@ -487,6 +506,16 @@ class WebView(WebViewRpcMixin):
             html=html,
             app=self._app_root is not None and html is None,
         )
+        self._bridge_allow = bridge_allow
+        if self._bridge_origins == "*":
+            warn_star_bridge_origins(stacklevel=4)
+            if devtools:
+                warnings.warn(
+                    'devtools=True with bridge_origins="*" increases XSS '
+                    "impact on IPC/RPC",
+                    TkwrySecurityWarning,
+                    stacklevel=2,
+                )
         self._pending_load: _PendingLoad | None = None
         self._flush_load_scheduled = False
         self._post_nav_drain_scheduled = False
@@ -645,23 +674,64 @@ class WebView(WebViewRpcMixin):
 
     @property
     def bridge_origins(self) -> BridgeAllowlist:
-        """Origins allowed to use IPC/RPC (``"*"`` means every page)."""
+        """Origins (or origin+path prefixes) allowed to use IPC/RPC.
+
+        ``"*"`` means every page (warns; ``expose`` needs
+        ``allow_any_origin=True``).
+        """
         self._require_tk_thread()
         return self._bridge_origins
 
     def set_bridge_origins(self, origins: BridgeOrigins) -> None:
-        """Replace the IPC/RPC origin allowlist (``"*"`` or concrete origins)."""
+        """Replace the IPC/RPC origin allowlist (``"*"`` or concrete entries).
+
+        Entries may be origins (``https://trusted.example``) or origin+path
+        prefixes (``https://trusted.example/app``). ``"*"`` is refused if any
+        ``expose()`` registration lacks ``allow_any_origin=True``.
+        """
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
         if self._untrusted:
             raise ValueError("WebView: untrusted=True cannot change bridge_origins")
-        self._bridge_origins = resolve_bridge_origins(
+        resolved = resolve_bridge_origins(
             origins,
             url=None,
             html=None,
             app=False,
         )
+        if resolved == "*":
+            missing = [
+                name
+                for name, reg in self._rpc_methods.items()
+                if not reg.allow_any_origin
+            ]
+            if missing:
+                raise ValueError(
+                    "set_bridge_origins('*') requires allow_any_origin=True "
+                    f"on expose() for: {', '.join(sorted(missing))}"
+                )
+            warn_star_bridge_origins(stacklevel=4)
+        self._bridge_origins = resolved
+
+    @property
+    def bridge_allow(self) -> BridgeAllow | None:
+        """Optional extra IPC/RPC predicate on the page URL (after the allowlist)."""
+        self._require_tk_thread()
+        return self._bridge_allow
+
+    def set_bridge_allow(self, predicate: BridgeAllow | None) -> None:
+        """Set or clear a callback that further restricts IPC/RPC by page URL.
+
+        Called with the source URL after :attr:`bridge_origins` matches.
+        Must return ``bool``; exceptions and non-bool values deny the call.
+        """
+        self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
+        if self._untrusted:
+            raise ValueError("WebView: untrusted=True cannot set bridge_allow")
+        self._bridge_allow = predicate
 
     def bind(
         self,
@@ -899,6 +969,10 @@ class WebView(WebViewRpcMixin):
 
         The instance cannot be reused after this call; create a new ``WebView``
         if you need another embedded view.
+
+        In-flight RPC is cancelled cooperatively (``rpc_cancelled()``). Worker
+        pool threads are joined for at most ~2 seconds; Python cannot preempt
+        uncooperative handlers, so they may briefly outlive the WebView.
         """
         self._require_tk_thread()
         if self._destroyed:
@@ -1714,7 +1788,23 @@ class WebView(WebViewRpcMixin):
         return self._untrusted or self._lock_app_navigation
 
     def _bridge_origin_allowed(self, source_url: str | None) -> bool:
-        return origin_allowed(source_url, self._bridge_origins)
+        if not origin_allowed(source_url, self._bridge_origins):
+            return False
+        predicate = self._bridge_allow
+        if predicate is None:
+            return True
+        try:
+            result = predicate(source_url or "")
+        except Exception:
+            traceback.print_exc()
+            return False
+        if type(result) is not bool:
+            print(
+                f"tkwry: bridge_allow must return bool, got {type(result).__name__}",
+                file=sys.stderr,
+            )
+            return False
+        return result
 
     def _native_drag_drop(
         self, event: DragDropEvent, paths: list[str], position: tuple[int, int]

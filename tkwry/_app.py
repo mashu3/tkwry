@@ -82,9 +82,10 @@ def resolve_app(app: str | Path) -> tuple[str, str]:
 
     Returns an absolute filesystem root and a ``tkwry://localhost/...`` URL.
 
-    The native ``tkwry://`` handler canonicalizes each request (following
-    symlinks, Windows junctions, and reparse points) and refuses anything
-    outside this root. Internal links that stay under the root are allowed.
+    The native ``tkwry://`` handler opens each request under this root,
+    then verifies the opened file's identity against the canonical path
+    (symlinks, Windows junctions, and reparse points that escape are
+    refused). Internal links that stay under the root are allowed.
     """
     path = Path(app).expanduser()
     # Match file-URL policy: do not follow symlinks via resolve().
