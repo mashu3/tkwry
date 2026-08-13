@@ -54,6 +54,102 @@ def test_app_locks_navigation_and_new_window(tk_root, tmp_path: Path) -> None:
     frame.destroy()
 
 
+def test_navigation_allow_and_open_external(
+    tk_root, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "tkwry._origin.webbrowser.open",
+        lambda url, new=2: opened.append(url) or True,
+    )
+    frame = tk.Frame(tk_root)
+    web = WebView(
+        frame,
+        app=_app_dir(tmp_path),
+        navigation_allow=["https://docs.example.com/app"],
+        open_external=True,
+    )
+    assert web.navigation_allow == frozenset({"https://docs.example.com/app"})
+    assert web.open_external is True
+    assert web._invoke_navigation_handler("tkwry://localhost/index.html") is True
+    assert web._invoke_navigation_handler("https://docs.example.com/app/x") is True
+    assert web._invoke_navigation_handler("https://docs.example.com/other") is False
+    tk_root.update()
+    assert opened == ["https://docs.example.com/other"]
+    opened.clear()
+    assert (
+        web._invoke_new_window_handler("https://evil.example/")
+        is NewWindowResponse.Deny
+    )
+    tk_root.update()
+    assert opened == ["https://evil.example/"]
+    opened.clear()
+    assert web._invoke_navigation_handler("file:///tmp/secret") is False
+    tk_root.update()
+    assert opened == []
+    web.destroy()
+    frame.destroy()
+
+
+def test_open_external_only_opens_new_windows(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "tkwry._origin.webbrowser.open",
+        lambda url, new=2: opened.append(url) or True,
+    )
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>x</p>", open_external=True)
+    assert web._invoke_navigation_handler("https://anywhere.example/") is True
+    tk_root.update()
+    assert opened == []
+    assert (
+        web._invoke_new_window_handler("https://anywhere.example/")
+        is NewWindowResponse.Deny
+    )
+    tk_root.update()
+    assert opened == ["https://anywhere.example/"]
+    web.destroy()
+    frame.destroy()
+
+
+def test_custom_navigation_handler_skips_open_external(
+    tk_root, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "tkwry._origin.webbrowser.open",
+        lambda url, new=2: opened.append(url) or True,
+    )
+    frame = tk.Frame(tk_root)
+    web = WebView(
+        frame,
+        app=_app_dir(tmp_path),
+        open_external=True,
+        on_navigation=lambda _url: False,
+    )
+    assert web._invoke_navigation_handler("https://evil.example/") is False
+    tk_root.update()
+    assert opened == []
+    web.destroy()
+    frame.destroy()
+
+
+def test_navigation_allow_without_app(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(
+        frame,
+        url="https://example.com/",
+        navigation_allow=["https://example.com"],
+    )
+    assert web._invoke_navigation_handler("https://example.com/x") is True
+    assert web._invoke_navigation_handler("about:blank") is True
+    assert web._invoke_navigation_handler("https://other.example/") is False
+    web.destroy()
+    frame.destroy()
+
+
 def test_untrusted_rejects_bridge_and_forces_ephemeral(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>view</p>", untrusted=True)

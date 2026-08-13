@@ -42,9 +42,14 @@ from tkwry._host import (
 )
 from tkwry._linux import GtkPump
 from tkwry._origin import (
+    INLINE_ORIGINS,
     BridgeAllowlist,
     app_navigation_allowed,
+    is_external_http_url,
+    normalize_navigation_allow,
+    open_in_browser,
     origin_allowed,
+    origin_of,
     resolve_bridge_origins,
     untrusted_navigation_allowed,
     warn_star_bridge_origins,
@@ -261,11 +266,15 @@ class WebView(WebViewRpcMixin):
     mode: no IPC/RPC, ephemeral storage, http(s) only, new windows denied —
     it cannot be combined with ``bridge_origins`` / ``bridge_allow``. ``app=``
     also locks in-page navigation to ``tkwry://`` unless you set
-    ``on_navigation``.
+    ``on_navigation``. ``navigation_allow`` adds extra in-webview origins
+    (or path prefixes). ``open_external=True`` opens off-list http(s) in the
+    system browser and **never** creates a WebView from ``on_new_window``.
 
     **Navigation hooks** (``on_navigation``, ``on_new_window``) run on the
     **Tk main thread**, but WebKit **blocks** until they return a value.
     Keep them fast (heavy work → deny/default and defer with ``after``).
+    Custom hooks replace the built-in ``navigation_allow`` / ``open_external``
+    policy for that direction.
 
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
@@ -342,6 +351,8 @@ class WebView(WebViewRpcMixin):
         untrusted: bool = False,
         bridge_origins: BridgeOrigins | None = None,
         bridge_allow: BridgeAllow | None = None,
+        navigation_allow: Collection[str] | None = None,
+        open_external: bool = False,
         ipc_handler: IpcHandler | None = None,
         spa_fallback: bool = False,
         app_dev: bool = False,
@@ -436,6 +447,12 @@ class WebView(WebViewRpcMixin):
         )
         self._untrusted = untrusted
         self._lock_app_navigation = False
+        self._navigation_allow: frozenset[str] | None = (
+            None
+            if navigation_allow is None
+            else normalize_navigation_allow(navigation_allow)
+        )
+        self._open_external = open_external
         self._bridge_origins: BridgeAllowlist = "*"
         self._bridge_allow: BridgeAllow | None = None
         self._spa_fallback = spa_fallback
@@ -671,6 +688,18 @@ class WebView(WebViewRpcMixin):
         """``True`` when this WebView was created with ``untrusted=True``."""
         self._require_tk_thread()
         return self._untrusted
+
+    @property
+    def navigation_allow(self) -> frozenset[str] | None:
+        """Extra in-webview origins / path prefixes, or ``None`` if unset."""
+        self._require_tk_thread()
+        return self._navigation_allow
+
+    @property
+    def open_external(self) -> bool:
+        """``True`` when off-list http(s) is opened in the system browser."""
+        self._require_tk_thread()
+        return self._open_external
 
     @property
     def bridge_origins(self) -> BridgeAllowlist:
@@ -1264,6 +1293,30 @@ class WebView(WebViewRpcMixin):
             self._ensure_event_poll()
         self._finish_navigation()
 
+    def go_back(self) -> None:
+        """Go to the previous page in history."""
+        native = self._require_ready("go_back")
+        native.go_back()
+        if self._on_page_load is not None:
+            self._ensure_event_poll()
+        self._finish_navigation()
+
+    def go_forward(self) -> None:
+        """Go to the next page in history."""
+        native = self._require_ready("go_forward")
+        native.go_forward()
+        if self._on_page_load is not None:
+            self._ensure_event_poll()
+        self._finish_navigation()
+
+    def can_go_back(self) -> bool:
+        """Return whether history can go back."""
+        return self._require_ready("can_go_back").can_go_back()
+
+    def can_go_forward(self) -> bool:
+        """Return whether history can go forward."""
+        return self._require_ready("can_go_forward").can_go_forward()
+
     def _run_deferred_reload(self) -> None:
         if self._destroyed or self._webview is None:
             return
@@ -1782,10 +1835,39 @@ class WebView(WebViewRpcMixin):
         )
 
     def _navigation_policy_active(self) -> bool:
-        return self._untrusted or self._lock_app_navigation
+        return (
+            self._untrusted
+            or self._lock_app_navigation
+            or self._navigation_allow is not None
+        )
 
     def _new_window_policy_active(self) -> bool:
-        return self._untrusted or self._lock_app_navigation
+        return (
+            self._untrusted
+            or self._lock_app_navigation
+            or self._navigation_allow is not None
+            or self._open_external
+        )
+
+    def _default_navigation_allowed(self, url: str) -> bool:
+        if self._lock_app_navigation and app_navigation_allowed(url):
+            return True
+        if self._navigation_allow is not None:
+            if origin_of(url) in INLINE_ORIGINS:
+                return True
+            return origin_allowed(url, self._navigation_allow)
+        if self._lock_app_navigation:
+            return False
+        return True
+
+    def _maybe_open_external(self, url: str) -> None:
+        if not self._open_external or not is_external_http_url(url):
+            return
+        target = url
+        try:
+            self._track_after(self._frame.after(0, lambda: open_in_browser(target)))
+        except tk.TclError:
+            open_in_browser(target)
 
     def _bridge_origin_allowed(self, source_url: str | None) -> bool:
         if not origin_allowed(source_url, self._bridge_origins):
@@ -1823,9 +1905,10 @@ class WebView(WebViewRpcMixin):
             return False
         handler = self._on_navigation
         if handler is None:
-            if self._lock_app_navigation:
-                return app_navigation_allowed(url)
-            return True
+            allowed = self._default_navigation_allowed(url)
+            if not allowed:
+                self._maybe_open_external(url)
+            return allowed
         try:
             result = handler(url)
         except Exception:
@@ -1859,10 +1942,16 @@ class WebView(WebViewRpcMixin):
 
     def _invoke_new_window_handler(self, url: str) -> NewWindowResponse:
         if self._untrusted:
+            self._maybe_open_external(url)
             return NewWindowResponse.Deny
         handler = self._on_new_window
         if handler is None:
-            if self._lock_app_navigation:
+            if (
+                self._lock_app_navigation
+                or self._navigation_allow is not None
+                or self._open_external
+            ):
+                self._maybe_open_external(url)
                 return NewWindowResponse.Deny
             return NewWindowResponse.Allow
         try:

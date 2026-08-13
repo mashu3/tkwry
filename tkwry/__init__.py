@@ -2,6 +2,7 @@
 
 import sys
 
+from tkwry._origin import open_in_browser
 from tkwry._version import __version__
 from tkwry.exceptions import (
     RpcCancelledError,
@@ -82,6 +83,7 @@ __all__ = [
     "RpcSerializationError",
     "RpcTimeoutError",
     "TkwrySecurityWarning",
+    "open_in_browser",
     "rpc_cancel_event",
     "rpc_cancelled",
     "WebSession",

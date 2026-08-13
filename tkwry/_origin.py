@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+import webbrowser
 from collections.abc import Collection, Iterable
 from typing import Literal, TypeAlias
 from urllib.parse import urlparse
@@ -207,6 +208,11 @@ def untrusted_navigation_allowed(url: str) -> bool:
     origin = origin_of(url)
     if origin in INLINE_ORIGINS:
         return True
+    return is_external_http_url(url)
+
+
+def is_external_http_url(url: str) -> bool:
+    """True for http(s) that is not the WebView2 ``tkwry.localhost`` rewrite."""
     parsed = urlparse(url.strip())
     scheme = (parsed.scheme or "").lower()
     if scheme not in {"http", "https"}:
@@ -215,6 +221,31 @@ def untrusted_navigation_allowed(url: str) -> bool:
     if host == "tkwry.localhost" or host.endswith(".tkwry.localhost"):
         return False
     return True
+
+
+def normalize_navigation_allow(explicit: Collection[str]) -> frozenset[str]:
+    """Normalize ``navigation_allow`` (origins or origin+path; no ``"*"``)."""
+    if isinstance(explicit, str):
+        raise TypeError(
+            "navigation_allow must be a sequence of origin strings, "
+            "not a single URL string"
+        )
+    origins = frozenset(normalize_bridge_entry(item) for item in explicit)
+    if not origins:
+        raise ValueError("navigation_allow must not be empty")
+    return origins
+
+
+def open_in_browser(url: str) -> bool:
+    """Open *url* in the system browser.
+
+    Only http(s) (not ``tkwry.localhost``). Returns ``True`` when
+    ``webbrowser.open`` was invoked. Do **not** create a WebView from
+    ``on_new_window`` — call this instead (preferably via ``after``).
+    """
+    if not is_external_http_url(url):
+        return False
+    return bool(webbrowser.open(url, new=2))
 
 
 def format_allowlist(allowlist: BridgeAllowlist) -> str:

@@ -8,6 +8,9 @@ from tkwry._origin import (
     APP_ORIGINS,
     INLINE_ORIGINS,
     app_navigation_allowed,
+    is_external_http_url,
+    normalize_navigation_allow,
+    open_in_browser,
     origin_allowed,
     origin_of,
     path_prefix_matches,
@@ -98,3 +101,40 @@ def test_app_and_untrusted_navigation_policy() -> None:
     assert not untrusted_navigation_allowed("https://tkwry.localhost/")
     assert not untrusted_navigation_allowed("file:///tmp/x")
     assert not untrusted_navigation_allowed("javascript:alert(1)")
+
+
+def test_is_external_http_url() -> None:
+    assert is_external_http_url("https://example.com/x")
+    assert is_external_http_url("http://localhost:8080/")
+    assert not is_external_http_url("file:///tmp/x")
+    assert not is_external_http_url("javascript:alert(1)")
+    assert not is_external_http_url("https://tkwry.localhost/index.html")
+    assert not is_external_http_url("tkwry://localhost/index.html")
+
+
+def test_normalize_navigation_allow() -> None:
+    assert normalize_navigation_allow(["https://Example.com/app"]) == frozenset(
+        {"https://example.com/app"}
+    )
+    with pytest.raises(TypeError, match="sequence"):
+        normalize_navigation_allow("https://example.com")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="empty"):
+        normalize_navigation_allow([])
+    with pytest.raises(ValueError, match="concrete"):
+        normalize_navigation_allow(["*"])
+
+
+def test_open_in_browser_http_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    opened: list[str] = []
+
+    def fake_open(url: str, new: int = 2) -> bool:
+        opened.append(url)
+        assert new == 2
+        return True
+
+    monkeypatch.setattr("tkwry._origin.webbrowser.open", fake_open)
+    assert open_in_browser("https://example.com/x") is True
+    assert opened == ["https://example.com/x"]
+    assert open_in_browser("file:///tmp/x") is False
+    assert open_in_browser("https://tkwry.localhost/x") is False
+    assert opened == ["https://example.com/x"]

@@ -262,9 +262,21 @@ def main() -> None:
         if tab is not None:
             tab.web.reload()
 
+    def go_back() -> None:
+        tab = current_tab()
+        if tab is not None and tab.web.ready and tab.web.can_go_back():
+            tab.web.go_back()
+
+    def go_forward() -> None:
+        tab = current_tab()
+        if tab is not None and tab.web.ready and tab.web.can_go_forward():
+            tab.web.go_forward()
+
     ttk.Button(tab_bar, text="+", width=3, command=lambda: add_tab(HOME)).pack(
         side="left"
     )
+    ttk.Button(toolbar, text="Back", command=go_back).pack(side="left")
+    ttk.Button(toolbar, text="Forward", command=go_forward).pack(side="left")
     ttk.Button(toolbar, text="Reload", command=reload_current).pack(side="left")
     url_entry.pack(side="left", fill="x", expand=True, padx=8)
     ttk.Button(toolbar, text="Go", command=go).pack(side="left")

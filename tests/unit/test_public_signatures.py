@@ -25,6 +25,8 @@ WEBVIEW_INIT_KWONLY = (
     "untrusted",
     "bridge_origins",
     "bridge_allow",
+    "navigation_allow",
+    "open_external",
     "ipc_handler",
     "spa_fallback",
     "app_dev",

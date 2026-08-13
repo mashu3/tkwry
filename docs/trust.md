@@ -40,9 +40,12 @@ web = WebView(
   `allow_any_origin=True`. `devtools=True` with `"*"` warns again.
   Filter with `PYTHONWARNINGS=ignore::tkwry.TkwrySecurityWarning` only if
   you accept the risk.
-- **`app=` navigation** — in-page navigation stays on `tkwry://`; new
-  windows are denied. Set `on_navigation` / `on_new_window` to opt into
-  external URLs (open them in another WebView or the system browser).
+- **`app=` navigation** — in-page navigation stays on `tkwry://` (plus
+  optional `navigation_allow` origins / path prefixes). New windows are
+  denied. Pass `open_external=True` to open off-list http(s) in the system
+  browser — **never** create a WebView from `on_new_window` (WKWebView
+  deadlocks). Custom `on_navigation` / `on_new_window` replace this policy
+  for that direction; use `open_in_browser(url)` from a custom hook.
 - **`untrusted=True`** — viewer mode: no IPC handler, no `expose` /
   `emit`, ephemeral session, http(s) only, no `tkwry://` / `file:`, new
   windows denied. Cannot be combined with `bridge_origins` / `bridge_allow`.

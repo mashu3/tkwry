@@ -228,6 +228,51 @@ def test_reload_after_ready_fires_page_load(tk_root, tmp_path: Path) -> None:
     frame.destroy()
 
 
+def test_go_back_and_forward(tk_root, tmp_path: Path) -> None:
+    page_a = tmp_path / "a.html"
+    page_b = tmp_path / "b.html"
+    page_a.write_text("<title>nav-a</title><p>a</p>", encoding="utf-8")
+    page_b.write_text("<title>nav-b</title><p>b</p>", encoding="utf-8")
+    uri_a = page_a.absolute().as_uri()
+    uri_b = page_b.absolute().as_uri()
+
+    titles: list[str] = []
+    frame = host_frame(tk_root)
+    web = WebView(
+        frame,
+        url=str(page_a),
+        on_title_changed=titles.append,
+    )
+    assert wait_until(tk_root, lambda: web.ready, steps=200)
+    assert wait_until(tk_root, lambda: "nav-a" in titles, steps=200), titles
+
+    web.load_url(str(page_b))
+    assert wait_until(tk_root, lambda: "nav-b" in titles, steps=400), titles
+    assert web.can_go_back() is True
+
+    web.go_back()
+    assert wait_until(
+        tk_root,
+        lambda: (web.url or "").startswith(uri_a) or titles[-1:] == ["nav-a"],
+        steps=400,
+    ), (web.url, titles)
+    assert wait_until(tk_root, web.can_go_forward, steps=200), (
+        web.url,
+        titles,
+        web.can_go_forward(),
+    )
+
+    web.go_forward()
+    assert wait_until(
+        tk_root,
+        lambda: (web.url or "").startswith(uri_b) or titles[-1:] == ["nav-b"],
+        steps=400,
+    ), (web.url, titles)
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_page_load_discards_backlog_before_handler_attach(tk_root) -> None:
     events: list[tuple[PageLoadEvent, str]] = []
 

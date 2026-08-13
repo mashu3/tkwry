@@ -45,6 +45,10 @@ WEBVIEW_METHODS = (
     "load_url",
     "load_html",
     "reload",
+    "go_back",
+    "go_forward",
+    "can_go_back",
+    "can_go_forward",
     "eval_js",
     "eval_js_with_callback",
     "emit",
@@ -81,6 +85,8 @@ WEBVIEW_PROPERTIES = (
     "native",
     "destroyed",
     "untrusted",
+    "navigation_allow",
+    "open_external",
     "bridge_origins",
     "bridge_allow",
     "ready",
@@ -122,6 +128,7 @@ def test_public_exports() -> None:
     assert tkwry.TkwrySecurityWarning is not None
     assert tkwry.rpc_cancelled is not None
     assert tkwry.rpc_cancel_event is not None
+    assert tkwry.open_in_browser is not None
     for alias in PUBLIC_TYPE_ALIASES:
         assert alias is not None
 

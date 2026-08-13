@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Navigation helpers: ``navigation_allow`` (extra in-webview origins / path
+  prefixes), ``open_external=True`` (off-list http(s) → system browser;
+  never creates a WebView from ``on_new_window``), and ``open_in_browser()``
+- ``go_back`` / ``go_forward`` / ``can_go_back`` / ``can_go_forward`` (wry
+  0.56); ``examples/browser_demo.py`` Back / Forward buttons
+
 ### Changed
 
 - Split README into a landing page plus ``docs/trust.md``, ``docs/rpc.md``,
