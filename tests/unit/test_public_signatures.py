@@ -27,6 +27,7 @@ WEBVIEW_INIT_KWONLY = (
     "bridge_allow",
     "navigation_allow",
     "open_external",
+    "download_allow",
     "ipc_handler",
     "spa_fallback",
     "app_dev",
@@ -44,6 +45,8 @@ WEBVIEW_INIT_KWONLY = (
     "on_title_changed",
     "on_new_window",
     "drag_drop_handler",
+    "on_download",
+    "on_download_complete",
     "on_creation_failed",
 )
 
@@ -71,6 +74,8 @@ NATIVE_WEBVIEW_KWONLY = (
     "ipc_listening",
     "title_listening",
     "drag_drop_listening",
+    "on_download_started",
+    "download_complete_listening",
     "with_ipc",
     "session",
 )

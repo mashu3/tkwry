@@ -17,6 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   custom string to override); optional ``coop=True`` / ``corp=True``
 - Create-failed observability: ``<<WebViewCreateFailed>>``, ``when_failed``,
   and constructor ``on_creation_failed=`` (constructor still does not raise)
+- Downloads: ``on_download`` / ``on_download_complete`` wrap wry start/complete;
+  ``download_allow`` origin/path allowlist; ``untrusted=True`` denies downloads
+  unless a handler or allowlist permits
 
 ### Changed
 

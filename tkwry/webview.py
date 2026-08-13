@@ -46,6 +46,7 @@ from tkwry._origin import (
     BridgeAllowlist,
     app_navigation_allowed,
     is_external_http_url,
+    normalize_download_allow,
     normalize_navigation_allow,
     open_in_browser,
     origin_allowed,
@@ -92,6 +93,9 @@ DragDropHandler: TypeAlias = Callable[[DragDropEvent, list[str], tuple[int, int]
 EvalCallback: TypeAlias = Callable[[str], None]
 EvalErrorHandler: TypeAlias = Callable[[Exception], None]
 CreationFailedHandler: TypeAlias = Callable[[BaseException], None]
+DownloadHandler: TypeAlias = Callable[[str, str], str | Path | bool | None]
+DownloadCompleteHandler: TypeAlias = Callable[[str, str | None, bool], None]
+_DANGEROUS_DOWNLOAD_SCHEMES = frozenset({"javascript", "vbscript", "mailto"})
 _PendingLoad: TypeAlias = tuple[Literal["url"], str] | tuple[Literal["html"], str]
 _PendingEval: TypeAlias = tuple[float, EvalCallback, EvalErrorHandler | None]
 _NativeEvalWait: TypeAlias = tuple[int, int, EvalCallback, EvalErrorHandler | None]
@@ -270,12 +274,16 @@ class WebView(WebViewRpcMixin):
     (``https://trusted.example/app``). ``bridge_allow`` can further restrict
     by full URL. ``bridge_origins="*"`` warns and requires
     ``expose(..., allow_any_origin=True)``. ``untrusted=True`` is a viewer
-    mode: no IPC/RPC, ephemeral storage, http(s) only, new windows denied —
-    it cannot be combined with ``bridge_origins`` / ``bridge_allow``. ``app=``
-    also locks in-page navigation to ``tkwry://`` unless you set
-    ``on_navigation``. ``navigation_allow`` adds extra in-webview origins
-    (or path prefixes). ``open_external=True`` opens off-list http(s) in the
-    system browser and **never** creates a WebView from ``on_new_window``.
+    mode: no IPC/RPC, ephemeral storage, http(s) only, new windows denied,
+    downloads denied — it cannot be combined with ``bridge_origins`` /
+    ``bridge_allow``. ``app=`` also locks in-page navigation to ``tkwry://``
+    unless you set ``on_navigation``. ``navigation_allow`` adds extra
+    in-webview origins (or path prefixes). ``open_external=True`` opens
+    off-list http(s) in the system browser and **never** creates a WebView
+    from ``on_new_window``. ``download_allow`` / ``on_download`` gate file
+    downloads (``untrusted=True`` denies unless a handler or allowlist
+    permits); ``on_download`` may return an absolute save path or ``False``
+    to cancel. ``on_download_complete`` is notify-only.
 
     **Navigation hooks** (``on_navigation``, ``on_new_window``) run on the
     **Tk main thread**, but WebKit **blocks** until they return a value.
@@ -366,6 +374,7 @@ class WebView(WebViewRpcMixin):
         bridge_allow: BridgeAllow | None = None,
         navigation_allow: Collection[str] | None = None,
         open_external: bool = False,
+        download_allow: Collection[str] | None = None,
         ipc_handler: IpcHandler | None = None,
         spa_fallback: bool = False,
         app_dev: bool = False,
@@ -383,6 +392,8 @@ class WebView(WebViewRpcMixin):
         on_title_changed: TitleChangedHandler | None = None,
         on_new_window: NewWindowHandler | None = None,
         drag_drop_handler: DragDropHandler | None = None,
+        on_download: DownloadHandler | None = None,
+        on_download_complete: DownloadCompleteHandler | None = None,
         on_creation_failed: CreationFailedHandler | None = None,
     ) -> None:
         """Embed a WebView in *frame*.
@@ -475,6 +486,9 @@ class WebView(WebViewRpcMixin):
             else normalize_navigation_allow(navigation_allow)
         )
         self._open_external = open_external
+        self._download_allow: frozenset[str] | None = (
+            None if download_allow is None else normalize_download_allow(download_allow)
+        )
         self._bridge_origins: BridgeAllowlist = "*"
         self._bridge_allow: BridgeAllow | None = None
         self._spa_fallback = spa_fallback
@@ -484,6 +498,8 @@ class WebView(WebViewRpcMixin):
         self._on_title_changed = on_title_changed
         self._on_new_window = on_new_window
         self._drag_drop_handler = drag_drop_handler
+        self._on_download = on_download
+        self._on_download_complete = on_download_complete
         self._devtools = devtools
         self._background_color = background_color
         self._user_agent = user_agent
@@ -730,6 +746,12 @@ class WebView(WebViewRpcMixin):
         """``True`` when off-list http(s) is opened in the system browser."""
         self._require_tk_thread()
         return self._open_external
+
+    @property
+    def download_allow(self) -> frozenset[str] | None:
+        """Download URL origins / path prefixes, or ``None`` if unset."""
+        self._require_tk_thread()
+        return self._download_allow
 
     @property
     def csp(self) -> str | None:
@@ -1658,6 +1680,48 @@ class WebView(WebViewRpcMixin):
         if handler is not None:
             self._ensure_event_poll()
 
+    def set_on_download(self, handler: DownloadHandler | None) -> None:
+        """Register a download start hook (Tk main thread; WebKit waits).
+
+        *handler* receives ``(url, suggested_dest)`` and may return ``True``
+        (allow suggested path), ``False`` / ``None`` (cancel), or an absolute
+        ``str`` / ``Path`` save location.
+        """
+        self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
+        if handler is not None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call set_on_download()"
+            ) from self._creation_error
+        self._on_download = handler
+        if self._webview is not None:
+            if self._download_policy_active():
+                self._webview.set_on_download_started(self._native_download_started)
+            else:
+                self._webview.clear_on_download_started()
+        if self._download_policy_active():
+            self._ensure_tk_wakeup_pipe()
+            self._ensure_event_poll()
+
+    def set_on_download_complete(
+        self, handler: DownloadCompleteHandler | None
+    ) -> None:
+        """Register a download-finished handler (Tk main thread; notify-only)."""
+        self._require_tk_thread()
+        if self._destroyed:
+            raise WebViewDestroyedError("WebView.destroy() was called")
+        if handler is not None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call "
+                "set_on_download_complete()"
+            ) from self._creation_error
+        self._on_download_complete = handler
+        if self._webview is not None:
+            self._webview.set_download_complete_listening(handler is not None)
+        if handler is not None:
+            self._ensure_event_poll()
+
     def _schedule_try_create(self, *, delay_ms: int | None = None) -> None:
         if (
             self._destroyed
@@ -1940,6 +2004,8 @@ class WebView(WebViewRpcMixin):
                 self._on_page_load is not None,
                 self._on_title_changed is not None,
                 self._drag_drop_handler is not None,
+                self._download_policy_active(),
+                self._on_download_complete is not None,
             )
         )
 
@@ -1956,6 +2022,13 @@ class WebView(WebViewRpcMixin):
             or self._lock_app_navigation
             or self._navigation_allow is not None
             or self._open_external
+        )
+
+    def _download_policy_active(self) -> bool:
+        return (
+            self._untrusted
+            or self._download_allow is not None
+            or self._on_download is not None
         )
 
     def _default_navigation_allowed(self, url: str) -> bool:
@@ -2077,6 +2150,93 @@ class WebView(WebViewRpcMixin):
             return NewWindowResponse.Deny
         return result
 
+    def _download_scheme(self, url: str) -> str:
+        from urllib.parse import urlparse
+
+        return (urlparse(url.strip()).scheme or "").lower()
+
+    def _default_download_allowed(self, url: str) -> bool:
+        if self._download_scheme(url) in _DANGEROUS_DOWNLOAD_SCHEMES:
+            return False
+        if self._download_allow is not None:
+            return origin_allowed(url, self._download_allow)
+        if self._untrusted:
+            return False
+        return True
+
+    def _coerce_download_decision(
+        self, result: object, _suggested: str
+    ) -> tuple[bool, str | None]:
+        if result is None or result is False:
+            return False, None
+        if result is True:
+            return True, None
+        if isinstance(result, (str, Path)):
+            path = os.fspath(result)
+            if not os.path.isabs(path):
+                print(
+                    "tkwry: on_download dest must be an absolute path",
+                    file=sys.stderr,
+                )
+                return False, None
+            return True, path
+        print(
+            "tkwry: on_download must return bool, None, str, or Path, "
+            f"got {type(result).__name__}",
+            file=sys.stderr,
+        )
+        return False, None
+
+    def _invoke_download_handler(
+        self, url: str, dest: str
+    ) -> tuple[bool, str | None]:
+        if self._download_scheme(url) in _DANGEROUS_DOWNLOAD_SCHEMES:
+            return False, None
+        if self._download_allow is not None and not origin_allowed(
+            url, self._download_allow
+        ):
+            return False, None
+        handler = self._on_download
+        if handler is None:
+            return self._default_download_allowed(url), None
+        try:
+            result = handler(url, dest)
+        except Exception:
+            traceback.print_exc()
+            return False, None
+        return self._coerce_download_decision(result, dest)
+
+    def _native_download_started(
+        self, url: str, dest: str
+    ) -> tuple[bool, str | None]:
+        if not self._download_policy_active():
+            return True, None
+        return self._dispatch_sync_hook(
+            lambda: self._invoke_download_handler(url, dest),
+            default=(False, None),
+            kind="on_download",
+            detail=url,
+        )
+
+    def _deliver_download_complete_events(self) -> None:
+        handler = self._on_download_complete
+        native = self._webview
+        if handler is None or native is None:
+            return
+        for url, dest, success in native.drain_download_complete_events():
+            self._invoke_callback(handler, url, dest, success)
+
+    def _native_download_complete(
+        self, url: str, dest: str | None, success: bool
+    ) -> None:
+        """Inject a download-complete event (tests)."""
+        native = self._webview
+        if native is None or self._on_download_complete is None:
+            return
+        native.set_download_complete_listening(True)
+        native._enqueue_download_complete_event(url, dest, success)
+        self._ensure_event_poll()
+
     def _native_new_window(self, url: str) -> NewWindowResponse:
         if self._on_new_window is None and not self._new_window_policy_active():
             return NewWindowResponse.Allow
@@ -2103,6 +2263,7 @@ class WebView(WebViewRpcMixin):
         native.set_page_load_listening(self._on_page_load is not None)
         native.set_title_listening(self._on_title_changed is not None)
         native.set_drag_drop_listening(self._drag_drop_handler is not None)
+        native.set_download_complete_listening(self._on_download_complete is not None)
 
     def _invoke_callback(self, callback: Callable[..., object], *args: object) -> None:
         try:
@@ -2304,6 +2465,8 @@ class WebView(WebViewRpcMixin):
             self._deliver_title_events()
         if self._drag_drop_handler is not None:
             self._deliver_drag_drop_events()
+        if self._on_download_complete is not None:
+            self._deliver_download_complete_events()
 
     def _service_linux_events(self, *, gtk_rounds: int = 1, passes: int = 1) -> None:
         """Deliver async queues; pump GTK only when GtkPump is not already draining.
@@ -2513,6 +2676,9 @@ class WebView(WebViewRpcMixin):
         if self._drag_drop_handler is not None:
             self._deliver_drag_drop_events()
 
+        if self._on_download_complete is not None:
+            self._deliver_download_complete_events()
+
         self._expire_pending_evals()
         self._drain_native_eval_callbacks()
 
@@ -2602,6 +2768,9 @@ class WebView(WebViewRpcMixin):
         kwargs["ipc_listening"] = self._ipc_listening_wanted()
         kwargs["title_listening"] = self._on_title_changed is not None
         kwargs["drag_drop_listening"] = self._drag_drop_handler is not None
+        if self._download_policy_active():
+            kwargs["on_download_started"] = self._native_download_started
+        kwargs["download_complete_listening"] = self._on_download_complete is not None
         if self._untrusted:
             kwargs["with_ipc"] = False
 

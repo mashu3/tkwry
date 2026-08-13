@@ -236,6 +236,19 @@ def normalize_navigation_allow(explicit: Collection[str]) -> frozenset[str]:
     return origins
 
 
+def normalize_download_allow(explicit: Collection[str]) -> frozenset[str]:
+    """Normalize ``download_allow`` (origins or origin+path; no ``"*"``)."""
+    if isinstance(explicit, str):
+        raise TypeError(
+            "download_allow must be a sequence of origin strings, "
+            "not a single URL string"
+        )
+    origins = frozenset(normalize_bridge_entry(item) for item in explicit)
+    if not origins:
+        raise ValueError("download_allow must not be empty")
+    return origins
+
+
 def open_in_browser(url: str) -> bool:
     """Open *url* in the system browser.
 

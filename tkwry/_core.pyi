@@ -73,6 +73,8 @@ class WebView:
         ipc_listening: bool = False,
         title_listening: bool = False,
         drag_drop_listening: bool = False,
+        on_download_started: Callable[[str, str], tuple[bool, str | None]] | None = None,
+        download_complete_listening: bool = False,
         with_ipc: bool = True,
         session: WebSession | None = None,
     ) -> WebView: ...
@@ -103,6 +105,17 @@ class WebView:
     def drain_drag_drop_events(
         self,
     ) -> list[tuple[DragDropEvent, list[str], tuple[int, int]]]: ...
+    def set_on_download_started(
+        self, handler: Callable[[str, str], tuple[bool, str | None]]
+    ) -> None: ...
+    def clear_on_download_started(self) -> None: ...
+    def set_download_complete_listening(self, enabled: bool) -> None: ...
+    def drain_download_complete_events(
+        self,
+    ) -> list[tuple[str, str | None, bool]]: ...
+    def _enqueue_download_complete_event(
+        self, url: str, dest: str | None, success: bool
+    ) -> None: ...
     def _enqueue_ipc_message(
         self, message: str, source_url: str | None = None
     ) -> None: ...

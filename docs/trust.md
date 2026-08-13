@@ -48,8 +48,14 @@ web = WebView(
   for that direction; use `open_in_browser(url)` from a custom hook.
 - **`untrusted=True`** — viewer mode: no IPC handler, no `expose` /
   `emit`, ephemeral session, http(s) only, no `tkwry://` / `file:`, new
-  windows denied. Cannot be combined with `bridge_origins` / `bridge_allow`.
-  Use this for arbitrary websites.
+  windows denied, **downloads denied**. `download_allow` and/or
+  `on_download` can permit specific URLs (handler may set an absolute dest
+  or return `False` to cancel). Cannot be combined with `bridge_origins` /
+  `bridge_allow`. Use this for arbitrary websites.
+- **Downloads (trusted)** — wry default is allow-all. `download_allow`
+  restricts by origin / path prefix; `on_download(url, dest)` runs on the Tk
+  thread (WebKit waits) and may return `True`, `False`/`None`, or an absolute
+  save path. `on_download_complete(url, dest, success)` is notify-only.
 - **Dangerous schemes** — `javascript:` / `blob:` / `vbscript:` /
   `mailto:` are denied at the native navigation hook even without Python
   `on_navigation`. `data:` is not blocked there (WebView2 `html=` /

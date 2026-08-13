@@ -49,6 +49,7 @@ const MAX_IPC_PENDING: usize = 2048;
 const MAX_RPC_PENDING: usize = 2048;
 const MAX_TITLE_PENDING: usize = 2048;
 const MAX_DRAG_DROP_PENDING: usize = 2048;
+const MAX_DOWNLOAD_COMPLETE_PENDING: usize = 2048;
 const MAX_EVAL_PENDING: usize = 2048;
 const MAX_SYNC_HOOK_PENDING: usize = 256;
 
@@ -216,7 +217,7 @@ fn mark_sync_hook_started<T>(slot: &SyncHookSlot<T>) {
     }
 }
 
-fn wait_sync_hook<T: Copy>(
+fn wait_sync_hook<T>(
     slot: &SyncHookSlot<T>,
     timeout: Duration,
     handler_timeout: Duration,
@@ -296,10 +297,10 @@ fn wait_sync_hook<T: Copy>(
             guard = next;
         }
     }
-    guard.unwrap_or(default)
+    guard.take().unwrap_or(default)
 }
 
-fn resolve_sync_hook<T: Copy>(slot: &SyncHookSlot<T>, value: T) {
+fn resolve_sync_hook<T>(slot: &SyncHookSlot<T>, value: T) {
     if let Ok(mut guard) = slot.result.lock() {
         *guard = Some(value);
         slot.cvar.notify_one();
@@ -449,6 +450,105 @@ fn drain_newwin_sync_hooks(newwin_cb: &PyCallback, pending: &NewWinSyncPending) 
     }
 }
 
+fn abort_download_sync_hooks(pending: &DownloadSyncPending) {
+    let requests = match pending.lock() {
+        Ok(mut queue) => std::mem::take(&mut *queue),
+        Err(_) => {
+            eprintln!("tkwry: download sync hook queue dropped (lock poisoned)");
+            return;
+        }
+    };
+    for (_, _, slot) in requests {
+        slot.cancelled.store(true, Ordering::SeqCst);
+        resolve_sync_hook(&slot, download_deny());
+    }
+}
+
+fn enqueue_download_sync_hook(
+    pending: &DownloadSyncPending,
+    url: String,
+    dest: String,
+    slot: Arc<SyncHookSlot<DownloadStartResult>>,
+) -> bool {
+    let mut queue = match pending.lock() {
+        Ok(queue) => queue,
+        Err(_) => {
+            eprintln!("tkwry: download hook dropped (queue lock poisoned)");
+            return false;
+        }
+    };
+    if queue.len() >= MAX_SYNC_HOOK_PENDING {
+        eprintln!("tkwry: rejecting download sync hook (queue full at {MAX_SYNC_HOOK_PENDING})");
+        return false;
+    }
+    queue.push((url, dest, slot));
+    true
+}
+
+fn extract_download_start_result(
+    result: &Bound<'_, PyAny>,
+    context: &str,
+) -> Option<DownloadStartResult> {
+    match result.extract::<(bool, Option<String>)>() {
+        Ok((allow, dest)) => Some(DownloadStartResult { allow, dest }),
+        Err(err) => {
+            eprintln!("tkwry: {context}: callback must return (bool, str | None) ({err})");
+            None
+        }
+    }
+}
+
+fn drain_download_sync_hooks(download_cb: &PyCallback, pending: &DownloadSyncPending) {
+    let requests = match pending.lock() {
+        Ok(mut queue) => std::mem::take(&mut *queue),
+        Err(_) => {
+            eprintln!("tkwry: download sync hook queue dropped (lock poisoned)");
+            return;
+        }
+    };
+    for (url, dest, slot) in requests {
+        if slot.cancelled.load(Ordering::SeqCst) {
+            resolve_sync_hook(&slot, download_deny());
+            continue;
+        }
+        mark_sync_hook_started(&slot);
+        let decision = Python::attach(|py| {
+            if let Some(func) = clone_py_callback(py, download_cb) {
+                match func.call1(py, (url.as_str(), dest.as_str())) {
+                    Ok(result) => extract_download_start_result(result.bind(py), "on_download")
+                        .unwrap_or_else(download_deny),
+                    Err(err) => {
+                        report_py_error(py, err);
+                        download_deny()
+                    }
+                }
+            } else {
+                download_allow_suggested()
+            }
+        });
+        resolve_sync_hook(&slot, decision);
+    }
+}
+
+fn push_download_complete_event(
+    listening: &AtomicBool,
+    pending: &DownloadCompletePending,
+    dropped: &AtomicU64,
+    item: DownloadCompletePendingItem,
+    wakeup: Option<&Arc<AtomicI32>>,
+) -> Result<(), ()> {
+    push_if_listening(
+        listening,
+        pending,
+        dropped,
+        item,
+        MAX_DOWNLOAD_COMPLETE_PENDING,
+        "download-complete",
+        wakeup,
+        |_| false,
+    )
+}
+
 fn prune_stale_eval_callbacks(
     callbacks: &mut HashMap<u64, EvalCallbackEntry>,
     dropped: &AtomicU64,
@@ -584,6 +684,30 @@ type EvalCallbackMap = Arc<Mutex<HashMap<u64, EvalCallbackEntry>>>;
 type DrainedEvalCallback = (u64, Py<PyAny>, Option<String>);
 type NavSyncPending = Arc<Mutex<Vec<(String, Arc<SyncHookSlot<bool>>)>>>;
 type NewWinSyncPending = Arc<Mutex<Vec<(String, Arc<SyncHookSlot<NewWindowResponse>>)>>>;
+type DownloadSyncPending =
+    Arc<Mutex<Vec<(String, String, Arc<SyncHookSlot<DownloadStartResult>>)>>>;
+type DownloadCompletePendingItem = (String, Option<String>, bool);
+type DownloadCompletePending = Arc<Mutex<VecDeque<DownloadCompletePendingItem>>>;
+
+#[derive(Clone)]
+struct DownloadStartResult {
+    allow: bool,
+    dest: Option<String>,
+}
+
+fn download_deny() -> DownloadStartResult {
+    DownloadStartResult {
+        allow: false,
+        dest: None,
+    }
+}
+
+fn download_allow_suggested() -> DownloadStartResult {
+    DownloadStartResult {
+        allow: true,
+        dest: None,
+    }
+}
 
 fn try_compact_title_queue(queue: &mut VecDeque<String>) -> bool {
     for index in 0..queue.len().saturating_sub(1) {
@@ -946,6 +1070,7 @@ struct WebView {
     rpc_pending: IpcPending,
     title_pending: TitlePending,
     drag_drop_pending: DragDropPending,
+    download_complete_pending: DownloadCompletePending,
     eval_callbacks: EvalCallbackMap,
     eval_result_pending: EvalResultPending,
     eval_next_token: AtomicU64,
@@ -954,18 +1079,22 @@ struct WebView {
     ipc_listening: Arc<AtomicBool>,
     title_listening: Arc<AtomicBool>,
     drag_drop_listening: Arc<AtomicBool>,
+    download_complete_listening: Arc<AtomicBool>,
     ipc_overflow_dropped: Arc<AtomicU64>,
     rpc_overflow_dropped: Arc<AtomicU64>,
     page_load_overflow_dropped: Arc<AtomicU64>,
     title_overflow_dropped: Arc<AtomicU64>,
     drag_drop_overflow_dropped: Arc<AtomicU64>,
+    download_complete_overflow_dropped: Arc<AtomicU64>,
     eval_overflow_dropped: Arc<AtomicU64>,
     nav_sync_pending: NavSyncPending,
     newwin_sync_pending: NewWinSyncPending,
+    download_sync_pending: DownloadSyncPending,
     /// Pipe write fd registered by Python to wake the Tk event loop.
     wakeup_write_fd: Arc<AtomicI32>,
     nav_cb: PyCallback,
     newwin_cb: PyCallback,
+    download_cb: PyCallback,
     #[cfg(target_os = "macos")]
     mac: macos::MacPlatformState,
     /// Nested wry calls (e.g. sync navigation hooks during ``load_url``).
@@ -1010,6 +1139,9 @@ impl WebView {
         if let Ok(mut newwin) = self.newwin_cb.lock() {
             *newwin = None;
         }
+        if let Ok(mut download) = self.download_cb.lock() {
+            *download = None;
+        }
         if let Ok(mut eval_callbacks) = self.eval_callbacks.lock() {
             eval_callbacks.clear();
         }
@@ -1018,6 +1150,7 @@ impl WebView {
         }
         abort_nav_sync_hooks(&self.nav_sync_pending);
         abort_newwin_sync_hooks(&self.newwin_sync_pending);
+        abort_download_sync_hooks(&self.download_sync_pending);
         // Destroy teardown: log poison instead of failing destroy.
         for result in [
             set_listening_and_clear_queue(
@@ -1031,6 +1164,11 @@ impl WebView {
             set_listening_and_clear_queue(
                 &self.drag_drop_listening,
                 &self.drag_drop_pending,
+                false,
+            ),
+            set_listening_and_clear_queue(
+                &self.download_complete_listening,
+                &self.download_complete_pending,
                 false,
             ),
         ] {
@@ -1092,6 +1230,8 @@ impl WebView {
         ipc_listening = false,
         title_listening = false,
         drag_drop_listening = false,
+        on_download_started = None,
+        download_complete_listening = false,
         with_ipc = true,
         session = None,
     ))]
@@ -1121,6 +1261,8 @@ impl WebView {
         ipc_listening: bool,
         title_listening: bool,
         drag_drop_listening: bool,
+        on_download_started: Option<Py<PyAny>>,
+        download_complete_listening: bool,
         with_ipc: bool,
         session: Option<Bound<'_, session::WebSession>>,
     ) -> PyResult<Self> {
@@ -1172,11 +1314,14 @@ impl WebView {
 
         let nav_cb: PyCallback = Arc::new(Mutex::new(on_navigation));
         let newwin_cb: PyCallback = Arc::new(Mutex::new(on_new_window));
+        let download_cb: PyCallback = Arc::new(Mutex::new(on_download_started));
         let page_load_pending: PageLoadPending = Arc::new(Mutex::new(VecDeque::new()));
         let ipc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
         let rpc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
         let title_pending: TitlePending = Arc::new(Mutex::new(VecDeque::new()));
         let drag_drop_pending: DragDropPending = Arc::new(Mutex::new(VecDeque::new()));
+        let download_complete_pending: DownloadCompletePending =
+            Arc::new(Mutex::new(VecDeque::new()));
         let eval_callbacks: EvalCallbackMap = Arc::new(Mutex::new(HashMap::new()));
         let eval_result_pending: EvalResultPending = Arc::new(Mutex::new(VecDeque::new()));
         // Async queues start disabled unless Python requests them at create.
@@ -1184,14 +1329,18 @@ impl WebView {
         let ipc_listening = Arc::new(AtomicBool::new(ipc_listening));
         let title_listening = Arc::new(AtomicBool::new(title_listening));
         let drag_drop_listening = Arc::new(AtomicBool::new(drag_drop_listening));
+        let download_complete_listening =
+            Arc::new(AtomicBool::new(download_complete_listening));
         let ipc_overflow_dropped = Arc::new(AtomicU64::new(0));
         let rpc_overflow_dropped = Arc::new(AtomicU64::new(0));
         let page_load_overflow_dropped = Arc::new(AtomicU64::new(0));
         let title_overflow_dropped = Arc::new(AtomicU64::new(0));
         let drag_drop_overflow_dropped = Arc::new(AtomicU64::new(0));
+        let download_complete_overflow_dropped = Arc::new(AtomicU64::new(0));
         let eval_overflow_dropped = Arc::new(AtomicU64::new(0));
         let nav_sync_pending: NavSyncPending = Arc::new(Mutex::new(Vec::new()));
         let newwin_sync_pending: NewWinSyncPending = Arc::new(Mutex::new(Vec::new()));
+        let download_sync_pending: DownloadSyncPending = Arc::new(Mutex::new(Vec::new()));
         let wakeup_write_fd = Arc::new(AtomicI32::new(-1));
 
         let nav_cb_clone = nav_cb.clone();
@@ -1313,6 +1462,70 @@ impl WebView {
             true
         };
 
+        let download_cb_clone = download_cb.clone();
+        let download_sync_pending_clone = download_sync_pending.clone();
+        let wakeup_fd_for_download = wakeup_write_fd.clone();
+        let owner_thread_for_download = owner_thread;
+        let download_started_handler = move |url: String, dest: &mut PathBuf| -> bool {
+            let has_cb = download_cb_clone
+                .lock()
+                .map(|guard| guard.is_some())
+                .unwrap_or(false);
+            if !has_cb {
+                return true;
+            }
+            let suggested = dest.to_string_lossy().to_string();
+            let slot = Arc::new(SyncHookSlot::new());
+            if !enqueue_download_sync_hook(
+                &download_sync_pending_clone,
+                url,
+                suggested,
+                slot.clone(),
+            ) {
+                return false;
+            }
+            notify_wakeup(&wakeup_fd_for_download);
+            if Python::attach(|_py| python_thread_id().ok()) == Some(owner_thread_for_download) {
+                drain_download_sync_hooks(&download_cb_clone, &download_sync_pending_clone);
+            }
+            let decision = wait_sync_hook(
+                &slot,
+                SYNC_HOOK_TIMEOUT,
+                SYNC_HOOK_HANDLER_TIMEOUT,
+                "on_download",
+                download_deny(),
+                Some(&wakeup_fd_for_download),
+            );
+            if !decision.allow {
+                return false;
+            }
+            if let Some(path) = decision.dest {
+                let override_dest = PathBuf::from(&path);
+                if !override_dest.is_absolute() {
+                    eprintln!("tkwry: on_download dest must be an absolute path; denying");
+                    return false;
+                }
+                *dest = override_dest;
+            }
+            true
+        };
+
+        let download_complete_pending_clone = download_complete_pending.clone();
+        let download_complete_listening_clone = download_complete_listening.clone();
+        let download_complete_overflow_clone = download_complete_overflow_dropped.clone();
+        let wakeup_for_download_complete = wakeup_write_fd.clone();
+        let download_completed_handler =
+            move |url: String, path: Option<PathBuf>, success: bool| {
+                let dest = path.map(|p| p.to_string_lossy().to_string());
+                let _ = push_download_complete_event(
+                    &download_complete_listening_clone,
+                    &download_complete_pending_clone,
+                    &download_complete_overflow_clone,
+                    (url, dest, success),
+                    Some(&wakeup_for_download_complete),
+                );
+            };
+
         let session_state = session.as_ref().map(|s| s.borrow().state_arc());
         let mut session_guard = match session_state.as_ref() {
             Some(arc) => Some(arc.lock().map_err(|_| {
@@ -1378,7 +1591,9 @@ WebViews that share a session must use the same app= root \
             .with_on_page_load_handler(pageload_handler)
             .with_document_title_changed_handler(title_handler)
             .with_new_window_req_handler(newwin_handler)
-            .with_drag_drop_handler(drag_drop_handler);
+            .with_drag_drop_handler(drag_drop_handler)
+            .with_download_started_handler(download_started_handler)
+            .with_download_completed_handler(download_completed_handler);
         if with_ipc {
             let ipc_pending_for_handler = ipc_pending.clone();
             let rpc_pending_for_handler = rpc_pending.clone();
@@ -1503,6 +1718,7 @@ WebViews that share a session must use the same app= root \
             rpc_pending,
             title_pending,
             drag_drop_pending,
+            download_complete_pending,
             eval_callbacks,
             eval_result_pending,
             eval_next_token: AtomicU64::new(1),
@@ -1510,19 +1726,23 @@ WebViews that share a session must use the same app= root \
             ipc_listening,
             title_listening,
             drag_drop_listening,
+            download_complete_listening,
             ipc_overflow_dropped,
             rpc_overflow_dropped,
             page_load_overflow_dropped,
             title_overflow_dropped,
             drag_drop_overflow_dropped,
+            download_complete_overflow_dropped,
             eval_overflow_dropped,
             nav_sync_pending,
             newwin_sync_pending,
+            download_sync_pending,
             wakeup_write_fd,
             #[cfg(target_os = "macos")]
             mac,
             nav_cb,
             newwin_cb,
+            download_cb,
             wry_call_depth: Cell::new(0),
             destroy_pending: Cell::new(false),
             session: session_state,
@@ -1641,6 +1861,7 @@ WebViews that share a session must use the same app= root \
         self.require_owner_thread()?;
         drain_nav_sync_hooks(&self.nav_cb, &self.nav_sync_pending);
         drain_newwin_sync_hooks(&self.newwin_cb, &self.newwin_sync_pending);
+        drain_download_sync_hooks(&self.download_cb, &self.download_sync_pending);
         Ok(())
     }
 
@@ -1711,6 +1932,58 @@ WebViews that share a session must use the same app= root \
     fn drain_drag_drop_events(&self) -> PyResult<Vec<DragDropPendingItem>> {
         self.require_owner_thread()?;
         drain_queue(&self.drag_drop_pending)
+    }
+
+    fn set_on_download_started(&self, handler: Py<PyAny>) -> PyResult<()> {
+        self.require_owner_thread()?;
+        let mut guard = self
+            .download_cb
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+        *guard = Some(handler);
+        Ok(())
+    }
+
+    fn clear_on_download_started(&self) -> PyResult<()> {
+        self.require_owner_thread()?;
+        let mut guard = self
+            .download_cb
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("callback lock poisoned"))?;
+        *guard = None;
+        abort_download_sync_hooks(&self.download_sync_pending);
+        Ok(())
+    }
+
+    fn set_download_complete_listening(&self, enabled: bool) -> PyResult<()> {
+        self.require_owner_thread()?;
+        set_listening_and_clear_queue(
+            &self.download_complete_listening,
+            &self.download_complete_pending,
+            enabled,
+        )
+    }
+
+    fn drain_download_complete_events(&self) -> PyResult<Vec<DownloadCompletePendingItem>> {
+        self.require_owner_thread()?;
+        drain_queue(&self.download_complete_pending)
+    }
+
+    fn _enqueue_download_complete_event(
+        &self,
+        url: String,
+        dest: Option<String>,
+        success: bool,
+    ) -> PyResult<()> {
+        self.require_owner_thread()?;
+        push_download_complete_event(
+            &self.download_complete_listening,
+            &self.download_complete_pending,
+            &self.download_complete_overflow_dropped,
+            (url, dest, success),
+            None,
+        )
+        .map_err(|()| queue_lock_poisoned())
     }
 
     #[pyo3(signature = (message, source_url=None))]

@@ -340,6 +340,16 @@ web = WebView(
 )
 web.go_back()
 web.go_forward()
+
+# Downloads: untrusted=True denies unless on_download / download_allow permits.
+web = WebView(
+    frame,
+    url="https://example.com",
+    untrusted=True,
+    download_allow=["https://cdn.example.com"],
+    on_download=lambda url, dest: dest,  # True / False / absolute Path
+    on_download_complete=lambda url, dest, ok: print(ok, dest),
+)
 ```
 
 `on_page_load` fires `PageLoadEvent.Started` and `PageLoadEvent.Finished` **for every navigation** while a handler is registered (native listening follows the handler). Events are **not** replayed for navigations that happened before `set_on_page_load` / constructor `on_page_load`.
@@ -392,19 +402,20 @@ web.destroy()   # release native webview; host Frame is kept
 | Content | `load_url`, `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `url` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback` |
 | IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` |
-| Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler` |
+| Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_complete` |
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
 | Layout | `pack`, `grid`, `place`, `sync_bounds` (delegate to host `Frame` except `sync_bounds`) |
-| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `untrusted`, `navigation_allow`, `open_external`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
+| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `untrusted`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
 | Diagnostics | `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
 `app_dev`, `csp` / `coop` / `corp`, `session` / `data_directory` / `ephemeral`,
 `untrusted`, `bridge_origins`, `bridge_allow`, `navigation_allow`,
-`open_external`, `ipc_handler`, `rpc_traceback`, `devtools`,
+`open_external`, `download_allow`, `ipc_handler`, `rpc_traceback`, `devtools`,
 `background_color`, `user_agent`, `initialization_script`, `focused`,
-`on_creation_failed`, plus the callback hooks above.
+`on_download`, `on_download_complete`, `on_creation_failed`, plus the
+callback hooks above.
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`, `WebViewPhase`.
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
@@ -412,7 +423,7 @@ Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedErr
 Warning: `TkwrySecurityWarning`. Helpers: `rpc_cancelled`, `rpc_cancel_event`,
 `open_in_browser`, `DEFAULT_CSP`.
 
-Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`, `CreationFailedHandler`.
+Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`, `CreationFailedHandler`, `DownloadHandler`, `DownloadCompleteHandler`.
 
 ---
 
@@ -426,7 +437,7 @@ Short checklist — **details live in [Platform notes](docs/platforms.md)** (esp
 - **Linux** — no PyPI wheel (by design); best-effort source install
 - **Linux concurrent `eval_js_with_callback`** — evaluating on multiple WebViews at once can stall WebKitGTK; prefer sequential evals (see [Linux](docs/platforms.md#linux))
 - **Shared `WebSession` + `app=`** — WebViews that share a non-ephemeral session must use the same `app=` root (`ValueError` otherwise; Linux can register `tkwry://` only once per context); do not share a persistent profile with untrusted sites
-- **Trust / external content** — RPC/IPC default to the initial origin (optional path prefix / `bridge_allow`); `bridge_origins="*"` warns and needs `expose(..., allow_any_origin=True)`; `app=` locks navigation to `tkwry://` (`navigation_allow` / `open_external=True` for extra origins + system browser); use `untrusted=True` for arbitrary websites (see [Trust boundaries](docs/trust.md))
+- **Trust / external content** — RPC/IPC default to the initial origin (optional path prefix / `bridge_allow`); `bridge_origins="*"` warns and needs `expose(..., allow_any_origin=True)`; `app=` locks navigation to `tkwry://` (`navigation_allow` / `open_external=True` for extra origins + system browser); `untrusted=True` also **denies downloads** unless `download_allow` / `on_download` permits (see [Trust boundaries](docs/trust.md))
 - **macOS DevTools** — create with `devtools=True`, then `open_devtools()` (flag alone does not open; `open_devtools()` without the flag is a no-op on macOS); uses private APIs — avoid in Mac App Store builds
 - **macOS IME / focus** — not Safari-parity; mid-composition focus flips can mis-route input
 - **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
@@ -472,6 +483,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Deferred callbacks** — IPC, RPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
 - **URL safety** — Python `load_url` normalizes/validates schemes; in-page nav denies `javascript:`/`blob:`/… (`data:` under `app=`); `app=` stays on `tkwry://`; IPC/RPC origin/path allowlist + `bridge_allow`
 - **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()` (macOS: private APIs)
+- **Downloads** — `on_download` / `on_download_complete` + `download_allow`; `untrusted=True` denies unless permitted
 - **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)
 - **Navigation hooks** — all handlers on the Tk thread; `on_navigation` / `on_new_window` block WebKit until they return
 - **Multiple layouts** — works with `pack`, `grid`, `place`, `Notebook`, and `PanedWindow` (see examples)
