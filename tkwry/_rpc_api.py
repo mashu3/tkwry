@@ -34,6 +34,7 @@ from tkwry.ipc import (
     MAX_IPC_MESSAGE_BYTES,
     RPC_STREAM_DONE,
     RpcHandler,
+    RpcMessageTooLarge,
     RpcRegistration,
     RpcRequest,
     RpcRunIn,
@@ -671,6 +672,13 @@ class WebViewRpcMixin:
                     "RpcSerializationError",
                     "value is not JSON-serializable",
                 ),
+            )
+            return
+        except RpcMessageTooLarge as exc:
+            self._settle_rpc(
+                req_id,
+                ok=False,
+                value=format_rpc_error(exc),
             )
             return
         native = self._webview

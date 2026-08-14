@@ -13,9 +13,11 @@ from tkwry.ipc import (
     MAX_RPC_ARGS,
     MAX_RPC_KWARGS,
     MAX_RPC_MESSAGE_BYTES,
+    MAX_RPC_STREAM_CHUNK_BYTES,
     RPC_BOOTSTRAP_JS,
     RPC_STREAM_DONE,
     RPC_VERSION,
+    RpcMessageTooLarge,
     RpcRegistration,
     RpcRequest,
     bind_rpc_arguments,
@@ -217,6 +219,7 @@ def test_parse_rpc_request_rejects_too_many_kwargs(
 
 def test_rpc_limits_match_documented_defaults() -> None:
     assert MAX_RPC_MESSAGE_BYTES == 10 * 1024 * 1024
+    assert MAX_RPC_STREAM_CHUNK_BYTES == MAX_RPC_MESSAGE_BYTES
     assert MAX_RPC_ARGS == 256
     assert MAX_RPC_KWARGS == 256
 
@@ -430,6 +433,9 @@ def test_bootstrap_includes_on_and_timeout() -> None:
     assert "_chunk" in RPC_BOOTSTRAP_JS
     assert "stream: true" in RPC_BOOTSTRAP_JS
     assert "version: 1" in RPC_BOOTSTRAP_JS
+    assert "cancel: true" in RPC_BOOTSTRAP_JS
+    assert "iter[Symbol.asyncIterator]" in RPC_BOOTSTRAP_JS
+    assert '"return": function' in RPC_BOOTSTRAP_JS
 
 
 def test_merge_initialization_script() -> None:
@@ -576,3 +582,77 @@ def test_dispatch_rpc_rejects_async_generator() -> None:
     assert ok is False
     assert value["type"] == "TypeError"
     assert "async" in value["message"]
+
+
+def test_dispatch_rpc_stream_chunk_too_large(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tkwry.ipc as ipc
+
+    monkeypatch.setattr(ipc, "MAX_RPC_STREAM_CHUNK_BYTES", 16)
+
+    def ticks() -> object:
+        yield "x" * 80
+
+    chunks: list[object] = []
+    req = parse_rpc_request(
+        json.dumps(
+            {
+                "__tkwry": "rpc",
+                "id": "1",
+                "method": "ticks",
+                "params": [],
+                "stream": True,
+            }
+        )
+    )
+    assert req is not None
+    ok, value = dispatch_rpc(
+        {"ticks": ticks},
+        req,
+        on_stream_chunk=chunks.append,
+    )
+    assert ok is False
+    assert value["type"] == "RpcMessageTooLarge"
+    assert chunks == []
+
+
+def test_stream_chunk_script_rejects_oversized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tkwry.ipc as ipc
+
+    monkeypatch.setattr(ipc, "MAX_RPC_STREAM_CHUNK_BYTES", 8)
+    with pytest.raises(RpcMessageTooLarge, match="stream chunk"):
+        stream_chunk_script("r1", "x" * 80)
+
+
+def test_dispatch_rpc_stream_handler_error_rejects() -> None:
+    """Chunks already sent stay sent; the iterator/Promise then rejects."""
+
+    def ticks() -> object:
+        yield 1
+        raise RuntimeError("boom")
+
+    chunks: list[object] = []
+    req = parse_rpc_request(
+        json.dumps(
+            {
+                "__tkwry": "rpc",
+                "id": "1",
+                "method": "ticks",
+                "params": [],
+                "stream": True,
+            }
+        )
+    )
+    assert req is not None
+    ok, value = dispatch_rpc(
+        {"ticks": ticks},
+        req,
+        on_stream_chunk=chunks.append,
+    )
+    assert ok is False
+    assert value["type"] == "RuntimeError"
+    assert value["message"] == "boom"
+    assert chunks == [1]

@@ -127,6 +127,177 @@ def test_rpc_stream_chunks_then_settles(tk_root) -> None:
     frame.destroy()
 
 
+def test_rpc_stream_cancel_envelope_stops_generator(tk_root) -> None:
+    """JS cancel (same envelope as call) sets rpc_cancelled and rejects."""
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>rpc</p>")
+    started = threading.Event()
+    first = threading.Event()
+    saw_cancel = threading.Event()
+
+    @web.expose(thread=True)
+    def ticks() -> object:
+        started.set()
+        yield 1
+        first.set()
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            if rpc_cancelled():
+                saw_cancel.set()
+                return
+            time.sleep(0.02)
+        yield 2
+
+    web._cancel_deferred_callbacks()
+    native = MagicMock()
+    native.drain_rpc_messages.return_value = [
+        (
+            "about:blank",
+            json.dumps(
+                {
+                    "__tkwry": "rpc",
+                    "id": "s9",
+                    "method": "ticks",
+                    "params": [],
+                    "stream": True,
+                }
+            ),
+        )
+    ]
+    native.drain_ipc_messages.return_value = []
+    web._webview = native
+    web._deliver_ipc_messages()
+    assert started.wait(timeout=2.0)
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline and not first.is_set():
+        web._drain_rpc_futures()
+        time.sleep(0.02)
+    assert first.is_set()
+    web._drain_rpc_futures()
+
+    native.drain_rpc_messages.return_value = [
+        ("about:blank", json.dumps({"__tkwry": "rpc", "id": "s9", "cancel": True}))
+    ]
+    web._deliver_ipc_messages()
+    deadline = time.monotonic() + 2.5
+    while time.monotonic() < deadline and not saw_cancel.is_set():
+        tk_root.update()
+        web._drain_rpc_futures()
+        time.sleep(0.02)
+    assert saw_cancel.is_set()
+
+    scripts = [call.args[0] for call in native.eval_js.call_args_list]
+    chunks = [src for src in scripts if "_chunk" in src]
+    settles = [src for src in scripts if "_settle" in src]
+    assert len(chunks) == 1
+    assert any("RpcCancelledError" in src for src in settles)
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_rpc_stream_destroy_cancels_open_stream(tk_root) -> None:
+    """destroy() sets rpc_cancelled and does not eval_js-settle the stream."""
+    frame = tk.Frame(tk_root)
+    web = WebView(frame)
+    web._cancel_deferred_callbacks()
+    started = threading.Event()
+    saw_cancel = threading.Event()
+    finished = threading.Event()
+
+    @web.expose(thread=True)
+    def ticks() -> object:
+        started.set()
+        yield 1
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            if rpc_cancelled():
+                saw_cancel.set()
+                break
+            time.sleep(0.02)
+        finished.set()
+
+    native = MagicMock()
+    native.drain_rpc_messages.return_value = [
+        (
+            "about:blank",
+            json.dumps(
+                {
+                    "__tkwry": "rpc",
+                    "id": "s1",
+                    "method": "ticks",
+                    "params": [],
+                    "stream": True,
+                }
+            ),
+        )
+    ]
+    native.drain_ipc_messages.return_value = []
+    web._webview = native
+    web._deliver_ipc_messages()
+    assert started.wait(timeout=2.0)
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        web._drain_rpc_futures()
+        scripts = [call.args[0] for call in native.eval_js.call_args_list]
+        if any("_chunk" in src for src in scripts):
+            break
+        time.sleep(0.02)
+    calls_before_destroy = native.eval_js.call_count
+    web.destroy()
+    frame.destroy()
+    deadline = time.monotonic() + 2.5
+    while time.monotonic() < deadline and not finished.is_set():
+        time.sleep(0.02)
+    assert saw_cancel.is_set()
+    assert finished.is_set()
+    web._drain_rpc_futures()
+    assert native.eval_js.call_count == calls_before_destroy
+
+
+def test_rpc_stream_oversized_chunk_rejects(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkwry.ipc as ipc
+
+    monkeypatch.setattr(ipc, "MAX_RPC_STREAM_CHUNK_BYTES", 16)
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>rpc</p>")
+
+    @web.expose
+    def ticks() -> object:
+        yield "x" * 80
+
+    native = MagicMock()
+    native.drain_rpc_messages.return_value = [
+        (
+            "about:blank",
+            json.dumps(
+                {
+                    "__tkwry": "rpc",
+                    "id": "s1",
+                    "method": "ticks",
+                    "params": [],
+                    "stream": True,
+                }
+            ),
+        )
+    ]
+    native.drain_ipc_messages.return_value = []
+    web._webview = native
+    web._deliver_ipc_messages()
+
+    scripts = [call.args[0] for call in native.eval_js.call_args_list]
+    assert not any("_chunk" in src for src in scripts)
+    settles = [src for src in scripts if "_settle" in src]
+    assert len(settles) == 1
+    assert "false" in settles[0]
+    assert "RpcMessageTooLarge" in settles[0]
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_rpc_call_rejects_generator(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>rpc</p>")

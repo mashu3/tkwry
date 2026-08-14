@@ -28,7 +28,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the session (skips untrusted / not-ready / disallowed ``bridge_origins``)
 - Streaming RPC: ``window.tkwry.stream`` consumes sync generator
   ``@web.expose`` handlers as JSON chunks (protocol ``version: 1`` +
-  ``stream: true``); ``call`` on a generator rejects with ``TypeError``
+  ``stream: true``); ``call`` on a generator rejects with ``TypeError``.
+  Each chunk is capped at 10 MiB (``RpcMessageTooLarge``). JS ``cancel``
+  and ``destroy()`` cancel open streams cooperatively. Handler errors
+  reject the iterator — no second error channel
 - ``WebViewTimeoutError`` / ``WebViewNavigationError``: eval timeout and
   dropped eval results generate ``<<WebViewEvalFailed>>`` (``last_eval_error``);
   ``on_navigation`` / ``on_new_window`` hook timeouts still return the default

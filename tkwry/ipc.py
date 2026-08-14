@@ -41,6 +41,8 @@ RPC_VERSION = 1
 # Keep in sync with ``MAX_IPC_MESSAGE_BYTES`` / ``MAX_RPC_MESSAGE_BYTES`` in src/lib.rs.
 MAX_RPC_MESSAGE_BYTES = 10 * 1024 * 1024
 MAX_IPC_MESSAGE_BYTES = MAX_RPC_MESSAGE_BYTES
+# Stream chunks reuse the envelope cap (eval_js outbound, not the native inbound queue).
+MAX_RPC_STREAM_CHUNK_BYTES = MAX_RPC_MESSAGE_BYTES
 MAX_RPC_ARGS = 256
 MAX_RPC_KWARGS = 256
 _RPC_ID_SCAN_CHARS = 8192
@@ -346,12 +348,28 @@ def bind_rpc_cancel_event(event: threading.Event | None) -> None:
     _rpc_tls.cancel_event = event
 
 
+class RpcMessageTooLarge(ValueError):
+    """JSON payload exceeds :data:`MAX_RPC_MESSAGE_BYTES` (stream chunks)."""
+
+
 def dumps_rpc_json(value: Any) -> str:
     """Serialize *value* with strict JSON (no ``default=str``, no NaN/Inf)."""
     try:
         return json.dumps(value, ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise RpcSerializationError("value is not JSON-serializable") from exc
+
+
+def dumps_rpc_stream_chunk(value: Any) -> str:
+    """Serialize one stream chunk and reject payloads over the chunk cap."""
+    payload = dumps_rpc_json(value)
+    size = len(payload.encode("utf-8"))
+    if size > MAX_RPC_STREAM_CHUNK_BYTES:
+        raise RpcMessageTooLarge(
+            f"RPC stream chunk exceeds {MAX_RPC_STREAM_CHUNK_BYTES} byte limit "
+            f"({size} bytes)"
+        )
+    return payload
 
 
 def _extract_rpc_request_id(message: str) -> str | None:
@@ -548,9 +566,11 @@ def settle_script(req_id: str, *, ok: bool, value: Any) -> str:
 def stream_chunk_script(req_id: str, value: Any) -> str:
     """Build ``eval_js`` source that delivers one streaming RPC chunk.
 
-    Raises :class:`~tkwry.RpcSerializationError` if *value* is not JSON.
+    Raises :class:`~tkwry.RpcSerializationError` if *value* is not JSON, or
+    :class:`RpcMessageTooLarge` if the JSON exceeds
+    :data:`MAX_RPC_STREAM_CHUNK_BYTES`.
     """
-    payload = dumps_rpc_json(value)
+    payload = dumps_rpc_stream_chunk(value)
     return f"window.tkwry && window.tkwry._chunk({json.dumps(req_id)}, {payload});"
 
 
@@ -563,8 +583,11 @@ def finalize_rpc_result(
     """Consume a handler return value, emitting stream chunks when needed.
 
     Sync generators require ``stream=True`` (``window.tkwry.stream``).
-    Async generators are rejected. Returns :data:`RPC_STREAM_DONE` after a
-    stream has been fully emitted so the caller can settle with ``null``.
+    Async generators are rejected. Each chunk JSON is capped at
+    :data:`MAX_RPC_STREAM_CHUNK_BYTES` (same 10 MiB as the RPC envelope).
+    Returns :data:`RPC_STREAM_DONE` after a stream has been fully emitted so
+    the caller can settle with ``null``. Handler exceptions propagate so the
+    Promise / iterator rejects — there is no second error channel.
     """
     if inspect.isasyncgen(result):
         raise TypeError("async generators are not supported; use a sync generator")
@@ -579,7 +602,7 @@ def finalize_rpc_result(
             for item in result:
                 if rpc_cancelled():
                     break
-                dumps_rpc_json(item)
+                dumps_rpc_stream_chunk(item)
                 on_stream_chunk(item)
         finally:
             result.close()
@@ -587,7 +610,7 @@ def finalize_rpc_result(
     if stream:
         if on_stream_chunk is None:
             raise TypeError("stream RPC requires on_stream_chunk")
-        dumps_rpc_json(result)
+        dumps_rpc_stream_chunk(result)
         on_stream_chunk(result)
         return RPC_STREAM_DONE
     dumps_rpc_json(result)

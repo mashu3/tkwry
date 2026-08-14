@@ -120,20 +120,30 @@ for await (const n of stream) {
 }
 ```
 
-Each `yield` is one JSON chunk (`window.tkwry._chunk`). The iterator then
-completes. `call()` on a generator rejects with `TypeError` (do not collect
-into an array). A non-generator `stream()` yields the return value as a
-single chunk. Async generators and full-duplex RPC are not supported.
+Each `yield` is one JSON chunk (`window.tkwry._chunk`), capped at the
+same **10 MiB** as RPC envelopes (`RpcMessageTooLarge` if over). The
+iterator then completes. `call()` on a generator rejects with `TypeError`
+(do not collect into an array). A non-generator `stream()` yields the
+return value as a single chunk. Async generators and full-duplex RPC are
+not supported.
 Prefer `thread=True` so `cancel` / timeout can stop between yields;
 a main-thread generator blocks Tk until it finishes. Breaking a
 `for await` loop calls the iterator `return()` and sends cancel.
+`stream.cancel()` / `window.tkwry.cancel(id)` uses the same cancel
+envelope as `call` and rejects with `RpcCancelledError`. `destroy()`
+sets the cooperative cancel flag and drops open streams without
+settling (the native view is going away).
+A handler exception after some chunks already arrived **rejects** the
+iterator / Promise with the structured error payload — there is no
+second error channel.
 
 ### Limits
 
 IPC/RPC messages cap at **10 MiB**; RPC allows at most **256** positional
-args and **256** kwargs. Oversized RPC rejects with `RpcMessageTooLarge`;
-too many args with `RpcArgumentLimitError`. RPC has its own 2048-deep queue
-so IPC overflow cannot drop `tkwry.call`.
+args and **256** kwargs. Stream chunks reuse that **10 MiB** JSON cap.
+Oversized RPC / chunks reject with `RpcMessageTooLarge`; too many args
+with `RpcArgumentLimitError`. RPC has its own 2048-deep queue so IPC
+overflow cannot drop `tkwry.call`.
 
 Use `take_queue_drop_counts()` to observe overflows — it returns
 `(ipc, page_load, title, drag_drop, eval, rpc)`.
