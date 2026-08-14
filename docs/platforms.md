@@ -41,7 +41,7 @@ may still differ. GTK is pumped on a Tk timer automatically after install.
 
 For `place` layouts, pass explicit `width`/`height` so host `winfo_*`
 settles; native size follows those `winfo_*` values (see
-[README — Layout / resize](../README.md#layout--resize)).
+[Usage — Layout / resize](usage.md#layout--resize)).
 
 **Concurrent eval:** calling `eval_js_with_callback` on **multiple**
 WebViews at the same time can stall under WebKitGTK (especially headless /
@@ -95,7 +95,7 @@ visible-tab work after the tab is selected. No extra app code for tabs/panes —
 Lifecycle / IPC / page-load handlers run on the **Tk main thread**. RPC may
 use a worker (`thread=True`). `on_navigation` / `on_new_window` still make
 WebKit wait for a return value — see
-[README — Navigation / lifecycle callbacks](../README.md#navigation--lifecycle-callbacks).
+[Usage — Navigation / lifecycle callbacks](usage.md#navigation--lifecycle-callbacks).
 
 ## Print
 
@@ -110,7 +110,7 @@ iconify/zoom belong on the host **Toplevel** (`root.title(...)`,
 `root.geometry(...)`, `root.minsize(...)`, `root.attributes(...)`).
 The WebView only follows its **Frame** via `sync_bounds()` — there is no
 `web.set_size` / `web.set_title` / `web.set_icon`. See
-[README — Layout / resize](../README.md#layout--resize).
+[Usage — Layout / resize](usage.md#layout--resize).
 
 ## Screenshot
 
@@ -122,6 +122,7 @@ JS visible-region helper. When wry exposes capture, wrap it the same way as
 
 ## Related
 
+- [Usage](usage.md)
 - [Trust boundaries](trust.md)
 - [IPC / RPC / emit](rpc.md)
 - [README — Known limitations](../README.md#-known-limitations)

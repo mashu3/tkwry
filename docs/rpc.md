@@ -1,7 +1,7 @@
 # IPC / RPC / emit
 
 Use **IPC** for fire-and-forget events and **RPC** for request/response.
-Landing snippets live in [README.md](../README.md); this page is the
+Landing snippets live in [Usage](usage.md); this page is the
 execution model, cancel contract, streaming, and limits.
 
 | Direction | Role | Python | JavaScript |
@@ -171,6 +171,7 @@ See [`examples/ipc_demo.py`](../examples/ipc_demo.py).
 
 ## Related
 
+- [Usage](usage.md) — `app=`, eval, layout, navigation
 - [Trust boundaries](trust.md) — who may call the bridge
-- [README — Navigation / lifecycle callbacks](../README.md#navigation--lifecycle-callbacks)
+- [Usage — Navigation / lifecycle callbacks](usage.md#navigation--lifecycle-callbacks)
   — Tk-thread vs WebKit-blocking hooks

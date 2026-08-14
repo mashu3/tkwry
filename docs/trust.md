@@ -4,8 +4,8 @@
 page that can call them can drive whatever you `expose` or handle over IPC —
 including after a redirect or XSS in a third-party script.
 
-Landing examples and the short checklist live in [README.md](../README.md).
-This page is the contract.
+Landing examples live in [Usage](usage.md) and the short checklist in
+[README.md](../README.md). This page is the contract.
 
 ## Constructor patterns
 
@@ -71,7 +71,7 @@ it). Isolation rules:
 - ``untrusted=True`` creates an ephemeral session when you omit
   ``session=``. Keep that default.
 
-See [README — Shared session](../README.md#shared-session-websession).
+See [Usage — Shared session](usage.md#shared-session-websession).
 
 ## What errors look like
 
@@ -157,10 +157,11 @@ or a policy string / `DEFAULT_CSP` to replace it. `coop=True` /
 `corp=True` add `Cross-Origin-Opener-Policy` /
 `Cross-Origin-Resource-Policy: same-origin` (opt-in).
 
-See [README — Local app assets](../README.md#local-app-assets-app--tkwry)
+See [Usage — Local app assets](usage.md#local-app-assets-app--tkwry)
 for SPA fallback, cache headers, and `watch_app()`.
 
 ## Related
 
+- [Usage](usage.md) — `app=`, eval, layout, navigation, API table
 - [IPC / RPC / emit](rpc.md) — what the bridge can actually do
 - [Platform notes](platforms.md) — engine-specific `url()` / session caveats

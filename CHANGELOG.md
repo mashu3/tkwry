@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Release workflow publishes to PyPI with ``pypa/gh-action-pypi-publish``
   (Trusted Publishing unchanged). ``maturin upload`` is deprecated
   ([maturin#2334](https://github.com/PyO3/maturin/issues/2334))
+- Move README how-to (``app=``, eval, layout, navigation, downloads, API
+  table) to ``docs/usage.md``; README Usage is the Basic example plus links
 
 ## [0.1.4] - 2026-08-14
 
