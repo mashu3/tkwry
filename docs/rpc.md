@@ -12,7 +12,8 @@ execution model, cancel contract, streaming, and limits.
 | Python → JS | Emit (event) | `web.emit(event, data)` | `window.tkwry.on(event, handler)` |
 
 These APIs run with **desktop-app privileges**. By default only the initial
-page origin may use them — see [Trust boundaries](trust.md).
+page origin may use them — foreign RPC rejects with `RpcOriginError`;
+foreign IPC is dropped. See [Trust boundaries](trust.md).
 
 ## IPC (`window.ipc.postMessage`)
 

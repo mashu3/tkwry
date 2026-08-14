@@ -15,8 +15,13 @@ source-only (**best-effort** by design). Install steps live in
 [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
 must be installed (common on Windows 10/11). Without it, native create is
 abandoned (`creation_failed` / `<<WebViewCreateFailed>>` / `when_failed`;
-gated APIs raise `WebViewCreationError` with an install link). The constructor
-does **not** raise. There is **no** fallback engine.
+gated APIs raise `WebViewCreationError`). The constructor does **not**
+raise. There is **no** fallback engine. The typed message is
+`WEBVIEW2_MISSING_MESSAGE` in `tkwry/_win32.py` (also `creation_error`):
+
+> Microsoft Edge WebView2 Runtime is not installed. tkwry requires
+> WebView2 on Windows — there is no fallback engine. Install from
+> https://developer.microsoft.com/en-us/microsoft-edge/webview2/
 
 **DPI:** `set_bounds` uses **physical** pixels on Windows. After process DPI
 awareness (e.g. `tkface.win.enable_dpi_awareness()` before `tk.Tk()`), Tk
@@ -91,6 +96,21 @@ Lifecycle / IPC / page-load handlers run on the **Tk main thread**. RPC may
 use a worker (`thread=True`). `on_navigation` / `on_new_window` still make
 WebKit wait for a return value — see
 [README — Navigation / lifecycle callbacks](../README.md#navigation--lifecycle-callbacks).
+
+## Print
+
+`web.print()` opens the **system** print dialog (wry `WebView::print`).
+There is no PDF, no headless print, and no success / fail / cancel
+callback — the call is fire-and-forget. Do not add fake kwargs.
+
+## Window chrome (Tk, not the WebView)
+
+Title, icon, geometry, min/max size, fullscreen, `-topmost`, and
+iconify/zoom belong on the host **Toplevel** (`root.title(...)`,
+`root.geometry(...)`, `root.minsize(...)`, `root.attributes(...)`).
+The WebView only follows its **Frame** via `sync_bounds()` — there is no
+`web.set_size` / `web.set_title` / `web.set_icon`. See
+[README — Layout / resize](../README.md#layout--resize).
 
 ## Screenshot
 

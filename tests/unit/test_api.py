@@ -213,6 +213,19 @@ def test_py_typed_marker_exists() -> None:
     assert marker.is_file()
 
 
+def test_installed_package_ships_typing_and_rpc_bootstrap() -> None:
+    """Wheel / editable install must include PEP 561 marker, stubs, JS bridge."""
+    import tkwry
+    from tkwry.ipc import RPC_BOOTSTRAP_JS
+
+    root = Path(tkwry.__file__).resolve().parent
+    assert (root / "py.typed").is_file()
+    assert (root / "_core.pyi").is_file()
+    assert "window.tkwry.call" in RPC_BOOTSTRAP_JS
+    assert "window.tkwry.stream" in RPC_BOOTSTRAP_JS
+    assert "window.tkwry.on" in RPC_BOOTSTRAP_JS
+
+
 def test_page_load_event_members() -> None:
     assert PageLoadEvent.Started != PageLoadEvent.Finished
     assert PageLoadEvent.Started == PageLoadEvent.Started

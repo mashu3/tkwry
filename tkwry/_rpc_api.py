@@ -473,7 +473,8 @@ class WebViewRpcMixin:
                             ok=False,
                             value=rpc_error(
                                 "RpcOriginError",
-                                f"RPC from disallowed origin {source_url!r}",
+                                f"RPC from disallowed origin {source_url!r}; "
+                                "add it to bridge_origins (or a path prefix)",
                             ),
                         )
                     continue

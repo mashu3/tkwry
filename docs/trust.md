@@ -24,6 +24,67 @@ web = WebView(
 )
 ```
 
+## Recipes
+
+**Local app (trusted).** Serve files and expose Python:
+
+```python
+web = WebView(frame, app="./web")
+
+@web.expose
+def save(payload: dict) -> dict:
+    ...
+```
+
+**Arbitrary websites (viewer).** No bridge, ephemeral profile, downloads
+denied unless you opt in:
+
+```python
+web = WebView(frame, url="https://example.com", untrusted=True)
+# optional: download_allow=["https://cdn.example.com"] and/or on_download
+```
+
+**Mixed UI + external site.** Two WebViews, **two sessions**. Never pass
+the app profile into the viewer:
+
+```python
+from tkwry import WebSession, WebView
+
+app_session = WebSession(data_directory="~/.myapp/webview")
+ui = WebView(frame_ui, app="./web", session=app_session)
+viewer = WebView(frame_web, url="https://example.com", untrusted=True)
+# viewer owns an ephemeral session — do not pass app_session
+```
+
+## Session isolation
+
+A persistent ``WebSession`` / ``data_directory`` is a shared
+browser profile (cookies, cache, ``localStorage`` where the engine allows
+it). Isolation rules:
+
+- One profile per trust domain. Local ``app=`` UI and an untrusted site
+  must **not** share a persistent session.
+- WebViews that share a **non-ephemeral** session must use the **same**
+  ``app=`` root (``ValueError`` otherwise). Linux can register
+  ``tkwry://`` only once per WebContext; tkwry enforces that everywhere.
+- Unrelated local apps → separate ``WebSession`` instances.
+- ``untrusted=True`` creates an ephemeral session when you omit
+  ``session=``. Keep that default.
+
+See [README — Shared session](../README.md#shared-session-websession).
+
+## What errors look like
+
+| Situation | What you see |
+|-----------|----------------|
+| RPC from a page outside ``bridge_origins`` | JS Promise rejects ``RpcOriginError`` (URL + hint to extend ``bridge_origins``) |
+| IPC from a disallowed origin | Dropped — no Python handler, no error |
+| ``emit`` while the current page is outside ``bridge_origins`` | ``ValueError`` |
+| Download URL outside ``download_allow`` (or untrusted with no permit) | Download cancelled; **no** Python exception |
+| ``download_allow="https://cdn.example.com"`` (a string) | ``TypeError`` — pass a sequence |
+| ``download_allow=["*"]`` | ``ValueError`` — ``*`` is not a download allowlist |
+| ``tkwry://`` request with a foreign ``Origin`` / ``Referer`` | HTTP **403** |
+
 ## Defaults
 
 - **Bridge origins** — IPC/RPC are accepted only from the initial content

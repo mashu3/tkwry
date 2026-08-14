@@ -1452,7 +1452,13 @@ class WebView(WebViewRpcMixin):
         return self._require_ready("can_go_forward").can_go_forward()
 
     def print(self) -> None:
-        """Open the platform print dialog for the current page."""
+        """Open the platform print dialog for the current page.
+
+        Fire-and-forget: wry shows the system dialog and does not report
+        success, cancel, or a PDF. There is no return value and no
+        ``print_to_pdf``. Window title / icon / geometry belong on the host
+        :class:`tkinter.Toplevel`, not this method.
+        """
         self._require_ready("print").print()
 
     def _run_deferred_reload(self) -> None:

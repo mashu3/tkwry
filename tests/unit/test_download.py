@@ -131,6 +131,11 @@ def test_download_allow_rejects_star_string() -> None:
         normalize_download_allow("https://cdn.example.com")
 
 
+def test_download_allow_rejects_star_entry() -> None:
+    with pytest.raises(ValueError, match=r"download_allow.*\*"):
+        normalize_download_allow(["*"])
+
+
 def test_set_on_download_toggles_poll(tk_root) -> None:
     web = _make_web(tk_root)
     try:

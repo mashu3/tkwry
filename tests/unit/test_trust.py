@@ -233,6 +233,7 @@ def test_foreign_origin_rpc_is_rejected(tk_root) -> None:
     native.eval_js.assert_called()
     script = native.eval_js.call_args[0][0]
     assert "RpcOriginError" in script
+    assert "bridge_origins" in script
     web.destroy()
     frame.destroy()
 

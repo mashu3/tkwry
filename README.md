@@ -37,9 +37,9 @@ Pre-built **abi3** wheels ship for **Windows** and **macOS**. **Linux** is sourc
 
 | Topic | Doc |
 |-------|-----|
-| Trust boundaries (`untrusted`, `bridge_origins`, `app=` nav) | [docs/trust.md](docs/trust.md) |
+| Trust boundaries (`untrusted`, `bridge_origins`, `app=` nav, recipes) | [docs/trust.md](docs/trust.md) |
 | IPC / RPC / emit (`expose`, cancel, limits) | [docs/rpc.md](docs/rpc.md) |
-| Platform notes (Windows / macOS / Linux) | [docs/platforms.md](docs/platforms.md) |
+| Platform notes (Windows / macOS / Linux, print, window chrome) | [docs/platforms.md](docs/platforms.md) |
 
 ---
 
@@ -291,7 +291,7 @@ web.eval_js("bad()", on_error=lambda exc: print("eval failed:", exc))
 web.eval_js_with_callback("document.title", print)  # async; callback on Tk main thread
 web.load_url("https://example.com")
 web.reload()
-web.print()  # system print dialog
+web.print()  # system print dialog (no PDF, no success/fail result)
 print(web.url)
 web.focus()
 ```
@@ -316,6 +316,8 @@ web.sync_bounds()
 ```
 
 **Size contract:** once the host is laid out, the mapped `Frame.winfo_width()` / `winfo_height()` are the sole source of truth for native bounds. Constructor `width`/`height` and explicit `place(..., width=, height=)` are only used **before** Tk reports a real size (`winfo_* <= 1`). Prefer passing `width`/`height` to `place()` so the host gets a definite allocation (especially on Linux / Xvfb).
+
+**Window chrome is the host Toplevel**, not the WebView: `root.title(...)`, `root.iconphoto(...)` / `iconbitmap`, `root.geometry(...)`, `root.minsize` / `maxsize`, `root.attributes("-fullscreen", True)`, `-topmost`, iconify/zoom. The WebView only follows its Frame (`sync_bounds`). There is no `web.set_size` / `web.set_title` / `web.set_icon`.
 
 Unmapped hosts (inactive `Notebook` tabs) call `set_visible(False)`. `ready` stays layout-based (`True` while hidden); use `phase is WebViewPhase.HIDDEN` when you need visibility.
 
@@ -444,7 +446,9 @@ Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`,
 Short checklist — **details live in [Platform notes](docs/platforms.md)** (especially [macOS embedding](docs/platforms.md#macos-embedding)).
 
 - **Alpha** — APIs may change; not for production yet (see banner above)
-- **Windows** — WebView2 Runtime required; missing runtime → `creation_failed` / `<<WebViewCreateFailed>>` (gated APIs raise `WebViewCreationError`)
+- **Windows** — WebView2 Runtime required; missing runtime → `creation_failed` / `<<WebViewCreateFailed>>` (gated APIs raise `WebViewCreationError` with [install text](docs/platforms.md#windows))
+- **Print** — `web.print()` opens the system dialog; no PDF, no return value, no success/fail/cancel (wry has none). See [Platform notes — Print](docs/platforms.md#print)
+- **Window chrome** — title / icon / geometry / fullscreen / min/max / `-topmost` are the host **Toplevel**; WebView size follows the Frame (`sync_bounds`). See [Layout / resize](#layout--resize)
 - **Windows DevTools** — wry/WebView2 reports `is_devtools_open()` as `False` and `close_devtools()` is a no-op; `open_devtools()` still opens the inspector
 - **Linux** — no PyPI wheel (by design); best-effort source install
 - **Linux concurrent `eval_js_with_callback`** — evaluating on multiple WebViews at once can stall WebKitGTK; prefer sequential evals (see [Linux](docs/platforms.md#linux))
@@ -497,7 +501,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Deferred callbacks** — IPC, RPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
 - **URL safety** — Python `load_url` normalizes/validates schemes; in-page nav denies `javascript:`/`blob:`/… (`data:` under `app=`); `app=` stays on `tkwry://`; IPC/RPC origin/path allowlist + `bridge_allow`
 - **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()` (macOS: private APIs)
-- **Print** — `web.print()` opens the system print dialog (wry)
+- **Print** — `web.print()` opens the system print dialog (no PDF / no result)
 - **Downloads** — `on_download` / `on_download_complete` + `download_allow`; `untrusted=True` denies unless permitted; `last_download` + `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`; `unique_download_path` for same-name files (absolute dest only; no overwrite policy)
 - **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)
 - **Navigation hooks** — all handlers on the Tk thread; `on_navigation` / `on_new_window` block WebKit until they return

@@ -40,7 +40,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - Split README into a landing page plus ``docs/trust.md``, ``docs/rpc.md``,
-  and ``docs/platforms.md``
+  and ``docs/platforms.md``. Trust recipes (local / untrusted / mixed
+  sessions), Origin / ``download_allow`` error table, ``print()`` honesty
+  (system dialog, no PDF / no result), and window chrome = host Toplevel
+  (WebView follows the Frame)
 - Bump wry ``0.55.1`` → ``0.56.1`` (IPC no longer panics on invalid document
   URIs; Windows minimized-focus / teardown crash fixes). macOS ``url()`` still
   uses the WKWebView workaround — wry's wrapper can still panic on inline HTML
@@ -60,6 +63,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   idempotent; snapshot properties and ``take_queue_drop_counts()`` remain
   readable. A ``wait_until_ready`` that observes destroy mid-wait still
   returns ``False``
+- ``download_allow=["*"]`` raises a download-specific ``ValueError``;
+  ``RpcOriginError`` names the page URL and hints to extend
+  ``bridge_origins``
 
 ## [0.1.3] - 2026-08-13
 

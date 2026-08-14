@@ -241,8 +241,15 @@ def normalize_download_allow(explicit: Collection[str]) -> frozenset[str]:
     """Normalize ``download_allow`` (origins or origin+path; no ``"*"``)."""
     if isinstance(explicit, str):
         raise TypeError(
-            "download_allow must be a sequence of origin strings, "
-            "not a single URL string"
+            "download_allow must be a sequence of origin or origin+path "
+            "strings (for example ['https://cdn.example.com']), "
+            "not a single URL string; '*' is not allowed"
+        )
+    if any(str(item).strip() == "*" for item in explicit):
+        raise ValueError(
+            "download_allow does not accept '*'; list concrete origins or "
+            "origin+path prefixes. untrusted=True denies all downloads "
+            "unless an entry or on_download permits them"
         )
     origins = frozenset(normalize_bridge_entry(item) for item in explicit)
     if not origins:
