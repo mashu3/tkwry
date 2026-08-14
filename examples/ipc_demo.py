@@ -71,6 +71,7 @@ HTML = """\
     button.secondary { background: #4b5563; }
     button.accent { background: #a855f7; }
     button.rpc { background: #5b9cff; color: #061018; font-weight: 600; }
+    button.warn { background: #b45309; }
     button:active { transform: translateY(1px); }
     #log {
       margin-top: 20px;
@@ -88,7 +89,8 @@ HTML = """\
 <body>
   <div class="card">
     <h1>JavaScript side</h1>
-    <p>IPC posts events; RPC awaits a result; Python pushes with emit.</p>
+    <p>IPC posts events; RPC awaits a result; stream yields chunks;
+       Python pushes with emit.</p>
     <div class="count" id="count">0</div>
     <div class="label">IPC — postMessage</div>
     <div class="row">
@@ -105,6 +107,7 @@ HTML = """\
       <button class="rpc" id="greet" type="button">greet kwargs</button>
       <button class="rpc" id="heavy" type="button">heavy (worker)</button>
       <button class="rpc" id="ticks" type="button">stream ticks</button>
+      <button class="warn" id="cancel-ticks" type="button">cancel stream</button>
     </div>
     <div id="log">Waiting for messages…</div>
   </div>
@@ -157,18 +160,30 @@ HTML = """\
         show(e.name + ": " + e.message);
       }
     };
+    var ticksStream = null;
     document.getElementById("ticks").onclick = async function () {
+      if (ticksStream) return;
       try {
         show("RPC stream…");
         var parts = [];
-        for await (var n of window.tkwry.stream("ticks", 5)) {
+        ticksStream = window.tkwry.stream("ticks", 8);
+        for await (var n of ticksStream) {
           parts.push(n);
           show("RPC stream " + parts.join(", "));
         }
         show("RPC stream done: " + parts.join(", "));
       } catch (e) {
         show(e.name + ": " + e.message);
+      } finally {
+        ticksStream = null;
       }
+    };
+    document.getElementById("cancel-ticks").onclick = function () {
+      if (!ticksStream) {
+        show("No open stream");
+        return;
+      }
+      ticksStream.cancel();
     };
   </script>
 </body>
@@ -193,6 +208,7 @@ def main() -> None:
     ttk.Label(
         panel,
         text="IPC events update this panel.\nRPC returns values to JS.\n"
+        "Stream ticks can be cancelled from JS.\n"
         "Emit pushes count / log / flash.",
         wraplength=200,
     ).pack(anchor="w", pady=(4, 16))
@@ -284,11 +300,11 @@ def main() -> None:
         return threading.get_ident()
 
     @web.expose(thread=True)
-    def ticks(count: int = 5) -> object:
+    def ticks(count: int = 8) -> object:
         for i in range(int(count)):
             if rpc_cancelled():
                 return
-            time.sleep(0.2)
+            time.sleep(0.35)
             yield i + 1
 
     def tk_increment(delta: int) -> None:

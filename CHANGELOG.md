@@ -49,7 +49,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   uses the WKWebView workaround — wry's wrapper can still panic on inline HTML
 - Examples: ``browser_demo`` print / downloads / create-failed / ``emit_all``
   toasts; ``multi_demo`` shared session + flash-all; ``ipc_demo``
-  ``on_creation_failed``
+  ``on_creation_failed`` and stream ticks + cancel
 - Document that screenshot is unavailable until wry exposes capture
   (``WebView`` has no API in 0.56.1; [wry#1674](https://github.com/tauri-apps/wry/pull/1674))
 

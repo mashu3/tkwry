@@ -25,7 +25,7 @@ Tkinter is still a solid GUI shell — it just had no first-class way to host mo
 - **True child embedding** — `build_as_child` via HWND, NSView, or X11 window ID
 - **One event loop** — Tk `mainloop` only; no separate app runtime
 - **Local apps** — `app=` serves HTML/CSS/JS via `tkwry://` (no localhost HTTP server)
-- **IPC / RPC / emit** — JS↔Python events and request/response without freezing the UI
+- **IPC / RPC / emit** — JS↔Python events, request/response, and streams without freezing the UI
 - **Trust boundaries** — IPC/RPC default to the initial origin; `untrusted=True` for arbitrary sites
 - **Layout-aware** — tracks `pack` / `grid` / `place`, tabs, and `PanedWindow`
 
@@ -38,7 +38,7 @@ Pre-built **abi3** wheels ship for **Windows** and **macOS**. **Linux** is sourc
 | Topic | Doc |
 |-------|-----|
 | Trust boundaries (`untrusted`, `bridge_origins`, `app=` nav, recipes) | [docs/trust.md](docs/trust.md) |
-| IPC / RPC / emit (`expose`, cancel, limits) | [docs/rpc.md](docs/rpc.md) |
+| IPC / RPC / emit (`expose`, `call` / `stream`, cancel, limits) | [docs/rpc.md](docs/rpc.md) |
 | Platform notes (Windows / macOS / Linux, print, window chrome) | [docs/platforms.md](docs/platforms.md) |
 
 ---
@@ -134,12 +134,14 @@ The constructor **does not raise** if the native view cannot be created
 
 ### IPC and RPC (JavaScript ↔ Python)
 
-Use **IPC** for fire-and-forget events and **RPC** for request/response:
+Use **IPC** for fire-and-forget events and **RPC** for request/response
+(or a **stream** of chunks):
 
 | Direction | Role | Python | JavaScript |
 |-----------|------|--------|------------|
 | JS → Python | IPC (event) | `set_ipc_handler` / `ipc_handler=` | `window.ipc.postMessage(str)` |
 | JS → Python | RPC (call) | `@web.expose` | `await window.tkwry.call(name, ...)` |
+| JS → Python | RPC (stream) | sync generator `@web.expose` | `for await (const x of window.tkwry.stream(name, ...))` |
 | Python → JS | Emit (event) | `web.emit(event, data)` | `window.tkwry.on(event, handler)` |
 
 These APIs run with **desktop-app privileges**. By default only the initial
@@ -164,6 +166,17 @@ def greet(name: str) -> str:
 
 ```js
 const text = await window.tkwry.call("greet", "Ada");
+```
+
+```python
+@web.expose(thread=True)
+def ticks(count: int = 5):
+    for i in range(count):
+        yield i + 1
+```
+
+```js
+for await (const n of window.tkwry.stream("ticks", 5)) { ... }
 ```
 
 Worker RPC, timeouts, JS `cancel`, streaming (`window.tkwry.stream`),
@@ -403,7 +416,7 @@ web.destroy()   # release native webview; host Frame is kept
 # further commands raise WebViewDestroyedError (`destroy()` is idempotent;
 # snapshot properties and take_queue_drop_counts() stay readable)
 # or destroy the host Frame — both tear down the webview
-# in-flight RPC is cancelled cooperatively (pool join ~2s)
+# in-flight RPC / streams are cancelled cooperatively (pool join ~2s)
 ```
 
 ---
@@ -414,7 +427,7 @@ web.destroy()   # release native webview; host Frame is kept
 |----------|---------|
 | Content | `load_url`, `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `print`, `url` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `last_eval_error`, `<<WebViewEvalFailed>>` |
-| IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` |
+| IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `stream` / `cancel`) |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_complete` |
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
@@ -459,7 +472,7 @@ Short checklist — **details live in [Platform notes](docs/platforms.md)** (esp
 - **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
 - **`url()` on macOS** — may be `None` for inline HTML until a concrete `load_url` (WKWebView has no document `NSURL`)
 - **Sync hooks / queues** — `on_navigation` / `on_new_window` may block WebKit up to ~60s; do not create a WebView from `on_new_window` (use `open_external=True` / `open_in_browser`); async event queues cap at 2048; IPC/RPC messages cap at 10 MiB (see [Navigation / lifecycle callbacks](#navigation--lifecycle-callbacks))
-- **RPC cancel / destroy** — timeout, JS `cancel`, and `destroy()` are **cooperative only** (`rpc_cancelled()`); Python cannot preempt a running worker. `destroy()` joins the pool for ~2 seconds; leftover threads are logged to stderr (see [IPC / RPC / emit](docs/rpc.md#timeout-and-cancel))
+- **RPC cancel / destroy** — timeout, JS `cancel`, and `destroy()` are **cooperative only** (`rpc_cancelled()`), including open streams; Python cannot preempt a running worker. `destroy()` joins the pool for ~2 seconds; leftover threads are logged to stderr (see [IPC / RPC / emit](docs/rpc.md#timeout-and-cancel))
 - **Eval / navigation timeout** — `eval_js_with_callback` timeout (30s) is `WebViewTimeoutError` (`on_error`, `<<WebViewEvalFailed>>`, `last_eval_error`); `on_navigation` / `on_new_window` timeout still returns the default deny and signals `WebViewNavigationError` (`<<WebViewNavigationFailed>>`, `last_navigation_error`) — not raised on the WebKit thread
 - **Drag & drop** — WebView area only (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
 - **Screenshot** — no `WebView` capture API; wry 0.56.1 does not expose one yet ([wry#1674](https://github.com/tauri-apps/wry/pull/1674)). tkwry will wrap it when upstream ships; no JS fallback (see [Platform notes](docs/platforms.md#screenshot))
@@ -492,7 +505,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 ## 🧩 Features
 
 - **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, ETag/HEAD/Range, default CSP, optional COOP/CORP, bounded `watch_app()`; open-then-verify symlink/junction confinement)
-- **IPC / RPC / emit** — events vs request/response; worker RPC; typed TypeError; protocol `version`; JS `cancel`; Python→JS `emit`; origin/path allowlist (`bridge_origins`) + `bridge_allow` + `untrusted=` viewer mode
+- **IPC / RPC / emit** — events vs request/response; sync-generator `stream`; worker RPC; typed TypeError; protocol `version`; JS `cancel`; Python→JS `emit`; origin/path allowlist (`bridge_origins`) + `bridge_allow` + `untrusted=` viewer mode
 - **WebSession** — shared wry `WebContext`; shared `app=` roots must match; `emit_all` broadcast
 - **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
@@ -524,7 +537,7 @@ pip install -e .
 | Script | Description |
 |--------|-------------|
 | [`examples/browser_demo.py`](examples/browser_demo.py) | URL bar, tabs, shared `WebSession`, print / downloads / `emit_all` (`bridge_origins="*"`; no `expose`) |
-| [`examples/ipc_demo.py`](examples/ipc_demo.py) | IPC events, RPC (`call` / kwargs / worker), and `emit` |
+| [`examples/ipc_demo.py`](examples/ipc_demo.py) | IPC events, RPC (`call` / kwargs / worker), stream (`ticks` + cancel), and `emit` |
 | [`examples/multi_demo.py`](examples/multi_demo.py) | Multiple WebViews, tabs, panes; `emit_all` flash |
 | [`examples/plotly_demo.py`](examples/plotly_demo.py) | Plotly charts — CDN or local `app=` (`pip install plotly`) |
 | [`examples/folium_demo.py`](examples/folium_demo.py) | Folium maps (`pip install folium`; tiles need the network) |
