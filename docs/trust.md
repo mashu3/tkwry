@@ -56,6 +56,8 @@ web = WebView(
   restricts by origin / path prefix; `on_download(url, dest)` runs on the Tk
   thread (WebKit waits) and may return `True`, `False`/`None`, or an absolute
   save path. `on_download_complete(url, dest, success)` is notify-only.
+  Completions also set `last_download` and generate
+  `<<WebViewDownloadComplete>>` or `<<WebViewDownloadFailed>>`.
 - **Dangerous schemes** — `javascript:` / `blob:` / `vbscript:` /
   `mailto:` are denied at the native navigation hook even without Python
   `on_navigation`. `data:` is not blocked there (WebView2 `html=` /

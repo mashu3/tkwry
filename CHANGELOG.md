@@ -19,7 +19,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and constructor ``on_creation_failed=`` (constructor still does not raise)
 - Downloads: ``on_download`` / ``on_download_complete`` wrap wry start/complete;
   ``download_allow`` origin/path allowlist; ``untrusted=True`` denies downloads
-  unless a handler or allowlist permits
+  unless a handler or allowlist permits. Completions set ``last_download`` and
+  generate ``<<WebViewDownloadComplete>>`` / ``<<WebViewDownloadFailed>>``
 - ``WebView.print()`` → wry system print dialog
 - ``WebSession.emit_all(event, data)`` broadcasts ``emit`` to siblings sharing
   the session (skips untrusted / not-ready / disallowed ``bridge_origins``)
@@ -43,6 +44,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``on_creation_failed``
 - Document that screenshot is unavailable until wry exposes capture
   (``WebView`` has no API in 0.56.1; [wry#1674](https://github.com/tauri-apps/wry/pull/1674))
+
+### Fixed
+
+- ``__version__`` reads ``Cargo.toml`` in a source checkout, so a bump is
+  visible before the next ``maturin develop`` / ``pip install`` (wheels still
+  use distribution metadata)
 
 ## [0.1.3] - 2026-08-13
 

@@ -353,6 +353,7 @@ web = WebView(
     on_download=lambda url, dest: dest,  # True / False / absolute Path
     on_download_complete=lambda url, dest, ok: print(ok, dest),
 )
+# also: last_download, <<WebViewDownloadComplete>> / <<WebViewDownloadFailed>>
 ```
 
 `on_page_load` fires `PageLoadEvent.Started` and `PageLoadEvent.Finished` **for every navigation** while a handler is registered (native listening follows the handler). Events are **not** replayed for navigations that happened before `set_on_page_load` / constructor `on_page_load`.
@@ -412,7 +413,7 @@ web.destroy()   # release native webview; host Frame is kept
 | Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
 | Layout | `pack`, `grid`, `place`, `sync_bounds` (delegate to host `Frame` except `sync_bounds`) |
-| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `untrusted`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
+| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `untrusted`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
 | Diagnostics | `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
@@ -488,12 +489,12 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
 - **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` hide unmapped views)
-- **Typed failure signals** — create: `<<WebViewCreateFailed>>` / `when_failed`; eval: `<<WebViewEvalFailed>>` / `WebViewTimeoutError`; nav hook timeout: `<<WebViewNavigationFailed>>` / `WebViewNavigationError` (native still returns the default deny)
+- **Typed failure signals** — create: `<<WebViewCreateFailed>>` / `when_failed`; eval: `<<WebViewEvalFailed>>` / `WebViewTimeoutError`; nav hook timeout: `<<WebViewNavigationFailed>>` / `WebViewNavigationError` (native still returns the default deny); downloads: `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>` / `last_download`
 - **Deferred callbacks** — IPC, RPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
 - **URL safety** — Python `load_url` normalizes/validates schemes; in-page nav denies `javascript:`/`blob:`/… (`data:` under `app=`); `app=` stays on `tkwry://`; IPC/RPC origin/path allowlist + `bridge_allow`
 - **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()` (macOS: private APIs)
 - **Print** — `web.print()` opens the system print dialog (wry)
-- **Downloads** — `on_download` / `on_download_complete` + `download_allow`; `untrusted=True` denies unless permitted
+- **Downloads** — `on_download` / `on_download_complete` + `download_allow`; `untrusted=True` denies unless permitted; `last_download` + `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`
 - **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)
 - **Navigation hooks** — all handlers on the Tk thread; `on_navigation` / `on_new_window` block WebKit until they return
 - **Multiple layouts** — works with `pack`, `grid`, `place`, `Notebook`, and `PanedWindow` (see examples)

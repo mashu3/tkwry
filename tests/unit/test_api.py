@@ -109,6 +109,7 @@ WEBVIEW_PROPERTIES = (
     "creation_error",
     "last_eval_error",
     "last_navigation_error",
+    "last_download",
 )
 
 

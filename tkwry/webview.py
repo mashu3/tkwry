@@ -285,7 +285,9 @@ class WebView(WebViewRpcMixin):
     from ``on_new_window``. ``download_allow`` / ``on_download`` gate file
     downloads (``untrusted=True`` denies unless a handler or allowlist
     permits); ``on_download`` may return an absolute save path or ``False``
-    to cancel. ``on_download_complete`` is notify-only.
+    to cancel. ``on_download_complete`` is notify-only. Finished downloads
+    also set ``last_download`` and generate ``<<WebViewDownloadComplete>>``
+    or ``<<WebViewDownloadFailed>>`` (same ``(url, dest, success)`` tuple).
 
     **Navigation hooks** (``on_navigation``, ``on_new_window``) run on the
     **Tk main thread**, but WebKit **blocks** until they return a value.
@@ -587,6 +589,7 @@ class WebView(WebViewRpcMixin):
         self._eval_js_scheduled = False
         self._last_eval_error: BaseException | None = None
         self._last_navigation_error: BaseException | None = None
+        self._last_download: tuple[str, str | None, bool] | None = None
         self._navigation_error_queue: queue.SimpleQueue[BaseException] = (
             queue.SimpleQueue()
         )
@@ -734,6 +737,16 @@ class WebView(WebViewRpcMixin):
         """Most recent ``on_navigation`` / ``on_new_window`` hook timeout."""
         self._require_tk_thread()
         return self._last_navigation_error
+
+    @property
+    def last_download(self) -> tuple[str, str | None, bool] | None:
+        """Most recent download completion ``(url, dest, success)``.
+
+        Also delivered as ``<<WebViewDownloadComplete>>`` or
+        ``<<WebViewDownloadFailed>>``. *dest* may be ``None``.
+        """
+        self._require_tk_thread()
+        return self._last_download
 
     @property
     def native(self) -> NativeWebView | None:
@@ -1734,7 +1747,12 @@ class WebView(WebViewRpcMixin):
             self._ensure_event_poll()
 
     def set_on_download_complete(self, handler: DownloadCompleteHandler | None) -> None:
-        """Register a download-finished handler (Tk main thread; notify-only)."""
+        """Register a download-finished handler (Tk main thread; notify-only).
+
+        Completions also set :attr:`last_download` and generate
+        ``<<WebViewDownloadComplete>>`` / ``<<WebViewDownloadFailed>>``
+        whether or not a handler is registered.
+        """
         self._require_tk_thread()
         if self._destroyed:
             raise WebViewDestroyedError("WebView.destroy() was called")
@@ -1744,9 +1762,8 @@ class WebView(WebViewRpcMixin):
             ) from self._creation_error
         self._on_download_complete = handler
         if self._webview is not None:
-            self._webview.set_download_complete_listening(handler is not None)
-        if handler is not None:
-            self._ensure_event_poll()
+            self._webview.set_download_complete_listening(True)
+        self._ensure_event_poll()
 
     def _schedule_try_create(self, *, delay_ms: int | None = None) -> None:
         if (
@@ -2031,7 +2048,7 @@ class WebView(WebViewRpcMixin):
                 self._on_title_changed is not None,
                 self._drag_drop_handler is not None,
                 self._download_policy_active(),
-                self._on_download_complete is not None,
+                self._webview is not None,
             )
         )
 
@@ -2242,19 +2259,31 @@ class WebView(WebViewRpcMixin):
         )
 
     def _deliver_download_complete_events(self) -> None:
-        handler = self._on_download_complete
         native = self._webview
-        if handler is None or native is None:
+        if native is None:
             return
+        handler = self._on_download_complete
         for url, dest, success in native.drain_download_complete_events():
-            self._invoke_callback(handler, url, dest, success)
+            self._last_download = (url, dest, success)
+            sequence = (
+                "<<WebViewDownloadComplete>>"
+                if success
+                else "<<WebViewDownloadFailed>>"
+            )
+            if not self._destroyed:
+                try:
+                    self._frame.event_generate(sequence)
+                except (tk.TclError, RuntimeError):
+                    pass
+            if handler is not None:
+                self._invoke_callback(handler, url, dest, success)
 
     def _native_download_complete(
         self, url: str, dest: str | None, success: bool
     ) -> None:
         """Inject a download-complete event (tests)."""
         native = self._webview
-        if native is None or self._on_download_complete is None:
+        if native is None:
             return
         native.set_download_complete_listening(True)
         native._enqueue_download_complete_event(url, dest, success)
@@ -2286,7 +2315,7 @@ class WebView(WebViewRpcMixin):
         native.set_page_load_listening(self._on_page_load is not None)
         native.set_title_listening(self._on_title_changed is not None)
         native.set_drag_drop_listening(self._drag_drop_handler is not None)
-        native.set_download_complete_listening(self._on_download_complete is not None)
+        native.set_download_complete_listening(True)
 
     def _invoke_callback(self, callback: Callable[..., object], *args: object) -> None:
         try:
@@ -2547,8 +2576,7 @@ class WebView(WebViewRpcMixin):
             self._deliver_title_events()
         if self._drag_drop_handler is not None:
             self._deliver_drag_drop_events()
-        if self._on_download_complete is not None:
-            self._deliver_download_complete_events()
+        self._deliver_download_complete_events()
 
     def _service_linux_events(self, *, gtk_rounds: int = 1, passes: int = 1) -> None:
         """Deliver async queues; pump GTK only when GtkPump is not already draining.
@@ -2758,8 +2786,7 @@ class WebView(WebViewRpcMixin):
         if self._drag_drop_handler is not None:
             self._deliver_drag_drop_events()
 
-        if self._on_download_complete is not None:
-            self._deliver_download_complete_events()
+        self._deliver_download_complete_events()
 
         self._expire_pending_evals()
         self._drain_native_eval_callbacks()
@@ -2857,7 +2884,7 @@ class WebView(WebViewRpcMixin):
         kwargs["drag_drop_listening"] = self._drag_drop_handler is not None
         if self._download_policy_active():
             kwargs["on_download_started"] = self._native_download_started
-        kwargs["download_complete_listening"] = self._on_download_complete is not None
+        kwargs["download_complete_listening"] = True
         if self._untrusted:
             kwargs["with_ipc"] = False
 
