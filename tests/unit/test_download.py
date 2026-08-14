@@ -143,11 +143,15 @@ def test_set_on_download_toggles_poll(tk_root) -> None:
         web.destroy()
 
 
-def test_native_webview_keeps_download_complete_poll(tk_root) -> None:
+def test_download_complete_handler_keeps_poll(tk_root) -> None:
     web = _make_web(tk_root)
     web._webview = MagicMock()
     try:
+        assert web._needs_event_poll() is False
+        web.set_on_download_complete(lambda *_args: None)
         assert web._needs_event_poll() is True
+        web.set_on_download_complete(None)
+        assert web._needs_event_poll() is False
     finally:
         web._webview = None
         web.destroy()

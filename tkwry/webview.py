@@ -2048,7 +2048,7 @@ class WebView(WebViewRpcMixin):
                 self._on_title_changed is not None,
                 self._drag_drop_handler is not None,
                 self._download_policy_active(),
-                self._webview is not None,
+                self._on_download_complete is not None,
             )
         )
 
