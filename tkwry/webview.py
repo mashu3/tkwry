@@ -702,9 +702,7 @@ class WebView(WebViewRpcMixin):
         inline HTML is pending. After creation: the engine URL (may be
         ``None`` for inline HTML on some platforms — see README).
         """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("url")
         if self._webview is None:
             if self._pending_url is not None:
                 return self._pending_url
@@ -753,9 +751,7 @@ class WebView(WebViewRpcMixin):
     @property
     def native(self) -> NativeWebView | None:
         """Underlying :class:`tkwry._core.WebView`, or ``None`` if not created."""
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("native")
         return self._webview
 
     @property
@@ -823,9 +819,7 @@ class WebView(WebViewRpcMixin):
         prefixes (``https://trusted.example/app``). ``"*"`` is refused if any
         ``expose()`` registration lacks ``allow_any_origin=True``.
         """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("set_bridge_origins")
         if self._untrusted:
             raise ValueError("WebView: untrusted=True cannot change bridge_origins")
         resolved = resolve_bridge_origins(
@@ -860,9 +854,7 @@ class WebView(WebViewRpcMixin):
         Called with the source URL after :attr:`bridge_origins` matches.
         Must return ``bool``; exceptions and non-bool values deny the call.
         """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("set_bridge_allow")
         if self._untrusted:
             raise ValueError("WebView: untrusted=True cannot set bridge_allow")
         self._bridge_allow = predicate
@@ -912,9 +904,7 @@ class WebView(WebViewRpcMixin):
 
     def when_ready(self, callback: Callable[[], None]) -> None:
         """Schedule *callback* once the native view exists and the host is laid out."""
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("when_ready")
         if self._ready_delivered:
 
             def _deliver() -> None:
@@ -933,9 +923,7 @@ class WebView(WebViewRpcMixin):
         Prefer this or ``bind(\"<<WebViewCreateFailed>>\")`` over only checking
         after a gated API raises :exc:`~tkwry.WebViewCreationError`.
         """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("when_failed")
         err = self._creation_error
         if err is not None and self._failed_delivered:
 
@@ -961,10 +949,13 @@ class WebView(WebViewRpcMixin):
 
         *timeout* must be a finite number of seconds ``> 0`` so unmapped or
         never-laid-out hosts cannot spin forever. Returns ``True`` if ready,
-        ``False`` on timeout, destroy, or :attr:`creation_failed`.
+        ``False`` on timeout or :attr:`creation_failed`. Calling after
+        :meth:`destroy` raises :exc:`~tkwry.WebViewDestroyedError`. If the
+        view is destroyed while waiting, returns ``False``.
 
         Raises:
             ValueError: if *timeout* is missing, non-positive, or non-finite.
+            WebViewDestroyedError: if :meth:`destroy` was already called.
             RuntimeError: if called while another ``wait_until_ready`` is nested
                 on this instance.
         """
@@ -975,11 +966,13 @@ class WebView(WebViewRpcMixin):
         if not math.isfinite(timeout_s) or timeout_s <= 0:
             raise ValueError("timeout must be a finite number of seconds > 0")
 
+        if self._destroyed:
+            raise WebViewDestroyedError(
+                "WebView.destroy() was called; cannot call wait_until_ready()"
+            )
         if self.ready:
             return True
         if self._creation_error is not None:
-            return False
-        if self._destroyed:
             return False
         if self._wait_until_ready_active:
             raise RuntimeError(
@@ -1135,7 +1128,12 @@ class WebView(WebViewRpcMixin):
         """Hide and release the native webview without destroying the host frame.
 
         The instance cannot be reused after this call; create a new ``WebView``
-        if you need another embedded view.
+        if you need another embedded view. Further APIs raise
+        :exc:`~tkwry.WebViewDestroyedError` except snapshot properties
+        (``destroyed``, ``phase``, ``last_*``, …),
+        :meth:`take_queue_drop_counts`, and a second ``destroy()``
+        (idempotent). :meth:`wait_until_ready` after destroy raises; if
+        destroy happens during a wait, that wait returns ``False``.
 
         In-flight RPC is cancelled cooperatively (``rpc_cancelled()``). Worker
         pool threads are joined for at most ~2 seconds; Python cannot preempt
@@ -1352,9 +1350,7 @@ class WebView(WebViewRpcMixin):
         is loaded. Before the native view exists, the URL is stored and applied
         at creation (unless superseded by :meth:`load_html`).
         """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("load_url")
         normalized = _normalize_url(url)
         _validate_url(normalized)
         if normalized.startswith("tkwry:") and self._app_root is None:
@@ -1381,9 +1377,7 @@ class WebView(WebViewRpcMixin):
         Like :meth:`load_url`, rapid calls are coalesced (**last-wins**).
         ``load_html`` supersedes any pending :meth:`load_url` call.
         """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("load_html")
         if self._webview is None and self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call load_html()"
@@ -1556,9 +1550,7 @@ class WebView(WebViewRpcMixin):
 
     def set_user_agent(self, user_agent: str | None) -> None:
         """Set the user agent applied when the native view is first created."""
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("set_user_agent")
         if self._webview is not None:
             raise ValueError(
                 "user_agent cannot be changed after the native WebView is created"
@@ -1567,9 +1559,7 @@ class WebView(WebViewRpcMixin):
 
     def set_initialization_script(self, script: str | None) -> None:
         """Set the initialization script applied when the native view is created."""
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("set_initialization_script")
         if self._webview is not None:
             raise ValueError(
                 "initialization_script cannot be changed after the native "
@@ -1591,9 +1581,7 @@ class WebView(WebViewRpcMixin):
 
     def set_on_navigation(self, handler: NavigationHandler | None) -> None:
         """Register a navigation allow/deny hook (Tk main thread; WebKit waits)."""
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("set_on_navigation")
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call set_on_navigation()"
@@ -1614,9 +1602,7 @@ class WebView(WebViewRpcMixin):
         Navigations that occurred with no handler are not replayed. Clearing
         with ``None`` stops native page-load collection.
         """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("set_on_page_load")
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call set_on_page_load()"
@@ -1640,9 +1626,7 @@ class WebView(WebViewRpcMixin):
         ``winfo_height`` (when ``> 1``). Constructor or ``place`` dimensions
         are only used before Tk reports a real size.
         """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("sync_bounds")
         if self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call sync_bounds()"
@@ -1656,6 +1640,8 @@ class WebView(WebViewRpcMixin):
         queue caps at 2048 pending items; additional events are compacted or
         discarded and counted here so applications can detect handler backlogs.
         RPC uses a dedicated queue so IPC overflow cannot drop ``tkwry.call``.
+        Readable after :meth:`destroy` so local drops counted during teardown
+        (for example pending evals) are not lost.
         """
         self._require_tk_thread()
         local = self._take_local_queue_drop_counts()
@@ -1673,9 +1659,7 @@ class WebView(WebViewRpcMixin):
 
     def set_on_title_changed(self, handler: TitleChangedHandler | None) -> None:
         """Register a document-title handler (Tk main thread)."""
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("set_on_title_changed")
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call set_on_title_changed()"
@@ -1688,9 +1672,7 @@ class WebView(WebViewRpcMixin):
 
     def set_on_new_window(self, handler: NewWindowHandler | None) -> None:
         """Register a new-window hook (Tk main thread; WebKit waits for a response)."""
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("set_on_new_window")
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call set_on_new_window()"
@@ -1711,9 +1693,7 @@ class WebView(WebViewRpcMixin):
         Events are queued from the WebKit thread; the handler cannot accept or
         deny the OS drop. Clearing with ``None`` stops native collection.
         """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("set_drag_drop_handler")
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call set_drag_drop_handler()"
@@ -1733,9 +1713,7 @@ class WebView(WebViewRpcMixin):
         :func:`~tkwry.unique_download_path` when the suggested name already
         exists; tkwry does not pick an overwrite policy.
         """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("set_on_download")
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call set_on_download()"
@@ -1757,9 +1735,7 @@ class WebView(WebViewRpcMixin):
         ``<<WebViewDownloadComplete>>`` / ``<<WebViewDownloadFailed>>``
         whether or not a handler is registered.
         """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("set_on_download_complete")
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call set_on_download_complete()"

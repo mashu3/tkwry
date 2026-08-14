@@ -28,7 +28,6 @@ from tkwry.exceptions import (
     RpcSerializationError,
     RpcTimeoutError,
     WebViewCreationError,
-    WebViewDestroyedError,
 )
 from tkwry.ipc import (
     MAX_IPC_MESSAGE_BYTES,
@@ -96,9 +95,7 @@ class WebViewRpcMixin:
         ``window.ipc.postMessage``). For request/response, use
         :meth:`expose` / ``window.tkwry.call`` instead.
         """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("set_ipc_handler")
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call set_ipc_handler()"
@@ -163,9 +160,7 @@ class WebViewRpcMixin:
         Calls are accepted only from :attr:`~tkwry.WebView.bridge_origins`
         (and :attr:`~tkwry.WebView.bridge_allow`, if set).
         """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("expose")
         if self._untrusted:
             raise ValueError("WebView: untrusted=True cannot expose() RPC methods")
         if self._creation_error is not None:
@@ -208,9 +203,7 @@ class WebViewRpcMixin:
 
     def unexpose(self, name: str) -> bool:
         """Remove an exposed RPC method. Returns whether it was registered."""
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("unexpose")
         existed = self._rpc_methods.pop(name, None) is not None
         if self._webview is not None:
             self._webview.set_ipc_listening(self._ipc_listening_wanted())
@@ -224,7 +217,7 @@ class WebViewRpcMixin:
         (``datetime``, NaN/Inf, and custom objects raise
         :class:`~tkwry.RpcSerializationError`).
         """
-        self._require_tk_thread()
+        self._require_not_destroyed("emit")
         if not event:
             raise ValueError("emit: event name must be non-empty")
         if self._untrusted:
@@ -279,9 +272,7 @@ class WebViewRpcMixin:
         ``suffixes="*"`` to watch every file, *ignore_dirs* to override skipped
         directory names, or raise *max_files* for large trees.
         """
-        self._require_tk_thread()
-        if self._destroyed:
-            raise WebViewDestroyedError("WebView.destroy() was called")
+        self._require_not_destroyed("watch_app")
         if self._app_root is None:
             raise ValueError("watch_app() requires app= at construction")
         if interval_ms < 100:

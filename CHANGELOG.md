@@ -55,6 +55,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ``__version__`` reads ``Cargo.toml`` in a source checkout, so a bump is
   visible before the next ``maturin develop`` / ``pip install`` (wheels still
   use distribution metadata)
+- Post-``destroy()`` WebView commands raise ``WebViewDestroyedError``
+  (including ``wait_until_ready`` and ``emit``). ``destroy()`` stays
+  idempotent; snapshot properties and ``take_queue_drop_counts()`` remain
+  readable. A ``wait_until_ready`` that observes destroy mid-wait still
+  returns ``False``
 
 ## [0.1.3] - 2026-08-13
 

@@ -398,6 +398,8 @@ See [`examples/dnd_demo.py`](examples/dnd_demo.py).
 
 ```python
 web.destroy()   # release native webview; host Frame is kept
+# further commands raise WebViewDestroyedError (`destroy()` is idempotent;
+# snapshot properties and take_queue_drop_counts() stay readable)
 # or destroy the host Frame — both tear down the webview
 # in-flight RPC is cancelled cooperatively (pool join ~2s)
 ```
