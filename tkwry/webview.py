@@ -284,10 +284,12 @@ class WebView(WebViewRpcMixin):
     off-list http(s) in the system browser and **never** creates a WebView
     from ``on_new_window``. ``download_allow`` / ``on_download`` gate file
     downloads (``untrusted=True`` denies unless a handler or allowlist
-    permits); ``on_download`` may return an absolute save path or ``False``
-    to cancel. ``on_download_complete`` is notify-only. Finished downloads
-    also set ``last_download`` and generate ``<<WebViewDownloadComplete>>``
-    or ``<<WebViewDownloadFailed>>`` (same ``(url, dest, success)`` tuple).
+    permits); ``on_download`` may return an **absolute** save path or ``False``
+    to cancel (relative dests are denied). Use
+    :func:`~tkwry.unique_download_path` to avoid overwriting an existing file.
+    ``on_download_complete`` is notify-only. Finished downloads also set
+    ``last_download`` and generate ``<<WebViewDownloadComplete>>`` or
+    ``<<WebViewDownloadFailed>>`` (same ``(url, dest, success)`` tuple).
 
     **Navigation hooks** (``on_navigation``, ``on_new_window``) run on the
     **Tk main thread**, but WebKit **blocks** until they return a value.
@@ -1726,8 +1728,10 @@ class WebView(WebViewRpcMixin):
         """Register a download start hook (Tk main thread; WebKit waits).
 
         *handler* receives ``(url, suggested_dest)`` and may return ``True``
-        (allow suggested path), ``False`` / ``None`` (cancel), or an absolute
-        ``str`` / ``Path`` save location.
+        (allow suggested path), ``False`` / ``None`` (cancel), or an **absolute**
+        ``str`` / ``Path`` save location. Relative dests are denied. Use
+        :func:`~tkwry.unique_download_path` when the suggested name already
+        exists; tkwry does not pick an overwrite policy.
         """
         self._require_tk_thread()
         if self._destroyed:

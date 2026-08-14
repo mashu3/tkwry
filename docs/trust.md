@@ -54,8 +54,10 @@ web = WebView(
   `bridge_allow`. Use this for arbitrary websites.
 - **Downloads (trusted)** — wry default is allow-all. `download_allow`
   restricts by origin / path prefix; `on_download(url, dest)` runs on the Tk
-  thread (WebKit waits) and may return `True`, `False`/`None`, or an absolute
-  save path. `on_download_complete(url, dest, success)` is notify-only.
+  thread (WebKit waits) and may return `True`, `False`/`None`, or an **absolute**
+  save path (relative dests are denied). Use `unique_download_path(dest)` to
+  pick a free name (`report.pdf` → `report (1).pdf`); tkwry does not overwrite.
+  `on_download_complete(url, dest, success)` is notify-only.
   Completions also set `last_download` and generate
   `<<WebViewDownloadComplete>>` or `<<WebViewDownloadFailed>>`.
 - **Dangerous schemes** — `javascript:` / `blob:` / `vbscript:` /

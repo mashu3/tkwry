@@ -3,7 +3,7 @@
 import sys
 
 from tkwry._app import DEFAULT_CSP
-from tkwry._origin import open_in_browser
+from tkwry._origin import open_in_browser, unique_download_path
 from tkwry._version import __version__
 from tkwry.exceptions import (
     RpcCancelledError,
@@ -94,6 +94,7 @@ __all__ = [
     "RpcTimeoutError",
     "TkwrySecurityWarning",
     "open_in_browser",
+    "unique_download_path",
     "rpc_cancel_event",
     "rpc_cancelled",
     "WebSession",

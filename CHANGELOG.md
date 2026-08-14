@@ -20,7 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Downloads: ``on_download`` / ``on_download_complete`` wrap wry start/complete;
   ``download_allow`` origin/path allowlist; ``untrusted=True`` denies downloads
   unless a handler or allowlist permits. Completions set ``last_download`` and
-  generate ``<<WebViewDownloadComplete>>`` / ``<<WebViewDownloadFailed>>``
+  generate ``<<WebViewDownloadComplete>>`` / ``<<WebViewDownloadFailed>>``.
+  ``unique_download_path(dest)`` returns a free absolute path for same-name
+  files (``on_download`` dests must be absolute; tkwry does not overwrite)
 - ``WebView.print()`` → wry system print dialog
 - ``WebSession.emit_all(event, data)`` broadcasts ``emit`` to siblings sharing
   the session (skips untrusted / not-ready / disallowed ``bridge_origins``)

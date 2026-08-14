@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from support.linux import noop_linux_runtime
 
-from tkwry import WebView
+from tkwry import WebView, unique_download_path
 from tkwry._origin import normalize_download_allow
 
 
@@ -212,4 +212,45 @@ def test_download_failed_virtual_event(tk_root) -> None:
         assert web.last_download == ("https://example.com/a.zip", None, False)
     finally:
         web._webview = None
+        web.destroy()
+
+
+def test_unique_download_path_returns_unused(tmp_path: Path) -> None:
+    dest = tmp_path / "report.pdf"
+    assert unique_download_path(dest) == dest
+
+
+def test_unique_download_path_inserts_number(tmp_path: Path) -> None:
+    dest = tmp_path / "report.pdf"
+    dest.write_bytes(b"x")
+    assert unique_download_path(dest) == tmp_path / "report (1).pdf"
+    (tmp_path / "report (1).pdf").write_bytes(b"x")
+    assert unique_download_path(dest) == tmp_path / "report (2).pdf"
+
+
+def test_unique_download_path_no_suffix(tmp_path: Path) -> None:
+    dest = tmp_path / "README"
+    dest.write_text("x")
+    assert unique_download_path(dest) == tmp_path / "README (1)"
+
+
+def test_unique_download_path_rejects_relative() -> None:
+    with pytest.raises(ValueError, match="absolute"):
+        unique_download_path("report.pdf")
+
+
+def test_on_download_can_use_unique_download_path(tk_root, tmp_path: Path) -> None:
+    dest = tmp_path / "a.zip"
+    dest.write_bytes(b"x")
+    web = _make_web(
+        tk_root,
+        on_download=lambda _url, suggested: unique_download_path(suggested),
+    )
+    try:
+        allowed, path = web._invoke_download_handler(
+            "https://example.com/a.zip", str(dest)
+        )
+        assert allowed is True
+        assert path == str(tmp_path / "a (1).zip")
+    finally:
         web.destroy()

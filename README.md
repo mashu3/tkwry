@@ -322,7 +322,7 @@ Unmapped hosts (inactive `Notebook` tabs) call `set_visible(False)`. `ready` sta
 ### Navigation / lifecycle callbacks
 
 ```python
-from tkwry import NewWindowResponse, PageLoadEvent
+from tkwry import NewWindowResponse, PageLoadEvent, unique_download_path
 
 web = WebView(
     frame,
@@ -345,12 +345,14 @@ web.go_back()
 web.go_forward()
 
 # Downloads: untrusted=True denies unless on_download / download_allow permits.
+# on_download must return an absolute path (or True / False). Same-name files:
+# unique_download_path(dest) — tkwry does not overwrite or prompt.
 web = WebView(
     frame,
     url="https://example.com",
     untrusted=True,
     download_allow=["https://cdn.example.com"],
-    on_download=lambda url, dest: dest,  # True / False / absolute Path
+    on_download=lambda url, dest: unique_download_path(dest),
     on_download_complete=lambda url, dest, ok: print(ok, dest),
 )
 # also: last_download, <<WebViewDownloadComplete>> / <<WebViewDownloadFailed>>
@@ -429,7 +431,7 @@ Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedErr
 `WebViewTimeoutError`, `WebViewNavigationError`,
 `RpcTimeoutError`, `RpcCancelledError`, `RpcSerializationError`.
 Warning: `TkwrySecurityWarning`. Helpers: `rpc_cancelled`, `rpc_cancel_event`,
-`open_in_browser`, `DEFAULT_CSP`.
+`open_in_browser`, `unique_download_path`, `DEFAULT_CSP`.
 
 Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`, `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`, `EvalCallback`, `EvalErrorHandler`, `CreationFailedHandler`, `DownloadHandler`, `DownloadCompleteHandler`.
 
@@ -494,7 +496,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **URL safety** — Python `load_url` normalizes/validates schemes; in-page nav denies `javascript:`/`blob:`/… (`data:` under `app=`); `app=` stays on `tkwry://`; IPC/RPC origin/path allowlist + `bridge_allow`
 - **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()` (macOS: private APIs)
 - **Print** — `web.print()` opens the system print dialog (wry)
-- **Downloads** — `on_download` / `on_download_complete` + `download_allow`; `untrusted=True` denies unless permitted; `last_download` + `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`
+- **Downloads** — `on_download` / `on_download_complete` + `download_allow`; `untrusted=True` denies unless permitted; `last_download` + `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`; `unique_download_path` for same-name files (absolute dest only; no overwrite policy)
 - **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)
 - **Navigation hooks** — all handlers on the Tk thread; `on_navigation` / `on_new_window` block WebKit until they return
 - **Multiple layouts** — works with `pack`, `grid`, `place`, `Notebook`, and `PanedWindow` (see examples)

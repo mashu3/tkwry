@@ -5,6 +5,7 @@ from __future__ import annotations
 import warnings
 import webbrowser
 from collections.abc import Collection, Iterable
+from pathlib import Path
 from typing import Literal, TypeAlias
 from urllib.parse import urlparse
 
@@ -247,6 +248,39 @@ def normalize_download_allow(explicit: Collection[str]) -> frozenset[str]:
     if not origins:
         raise ValueError("download_allow must not be empty")
     return origins
+
+
+_MAX_UNIQUE_DOWNLOAD_N = 9999
+
+
+def unique_download_path(dest: str | Path) -> Path:
+    """Return an absolute path that does not yet exist on disk.
+
+    If *dest* is free, return it as an absolute :class:`~pathlib.Path`.
+    Otherwise insert `` (1)``, `` (2)``, … before the suffix
+    (``report.pdf`` → ``report (1).pdf``). Does not create the file and
+    does not overwrite — use this from ``on_download`` when you want a
+    free name. *dest* must already be absolute (``on_download`` also
+    rejects relative paths). ``~`` is expanded.
+    """
+    path = Path(dest).expanduser()
+    if not path.is_absolute():
+        raise ValueError(
+            "unique_download_path: dest must be an absolute path "
+            "(on_download also rejects relative dest)"
+        )
+    if not path.exists():
+        return path
+    stem = path.stem
+    suffix = path.suffix
+    parent = path.parent
+    for n in range(1, _MAX_UNIQUE_DOWNLOAD_N + 1):
+        candidate = parent / f"{stem} ({n}){suffix}"
+        if not candidate.exists():
+            return candidate
+    raise ValueError(
+        f"unique_download_path: no free name under {parent} for {path.name}"
+    )
 
 
 def open_in_browser(url: str) -> bool:
