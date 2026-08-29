@@ -157,9 +157,8 @@ impl Cookie {
         }
         if let Some(ts) = self.expires {
             let secs = ts.round() as i64;
-            let dt = cookie::time::OffsetDateTime::from_unix_timestamp(secs).map_err(|e| {
-                PyValueError::new_err(format!("Cookie.expires out of range: {e}"))
-            })?;
+            let dt = cookie::time::OffsetDateTime::from_unix_timestamp(secs)
+                .map_err(|e| PyValueError::new_err(format!("Cookie.expires out of range: {e}")))?;
             builder = builder.expires(dt);
         }
         Ok(builder.build())
