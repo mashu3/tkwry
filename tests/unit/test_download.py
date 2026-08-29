@@ -188,6 +188,75 @@ def test_download_complete_wakeup_without_handler(tk_root) -> None:
         web.destroy()
 
 
+def test_download_complete_after_poll_without_createfilehandler(tk_root) -> None:
+    """T7 / D23: no createfilehandler — after-poll + pipe wake still delivers."""
+    import os
+    import time
+
+    import tkwry._host as host
+
+    web = _make_web(tk_root)
+    native = MagicMock()
+    pending = [[("https://example.com/a.zip", "/tmp/a.zip", True)]]
+
+    def drain_complete() -> list[tuple[str, str | None, bool]]:
+        return pending.pop(0) if pending else []
+
+    native.drain_download_complete_events.side_effect = drain_complete
+    web._webview = native
+    fired: list[str] = []
+    web.bind("<<WebViewDownloadComplete>>", lambda _evt: fired.append("ok"))
+
+    read_fd, write_fd = os.pipe()
+    setattr(tk_root, "_tkwry_wake_read_fd", read_fd)
+    setattr(tk_root, "_tkwry_wake_write_fd", write_fd)
+    setattr(tk_root, "_tkwry_wake_pipe_users", 1)
+    host._register_sync_hook_webview(tk_root, web)
+    # Exercise the Windows fallback directly (mac early-returns fileevent setup).
+    host._ensure_wakeup_after_poll(tk_root)
+    assert getattr(tk_root, "_tkwry_wake_after_poll", False) is True
+    assert web._needs_event_poll() is False
+    assert web._event_poll_active is False
+
+    try:
+        os.write(write_fd, b"\x01")
+        deadline = time.monotonic() + 2.0
+        while not fired and time.monotonic() < deadline:
+            tk_root.update()
+            time.sleep(0.01)
+        assert fired == ["ok"]
+        assert web.last_download == ("https://example.com/a.zip", "/tmp/a.zip", True)
+        assert web._needs_event_poll() is False
+        assert web._event_poll_active is False
+    finally:
+        web._webview = None
+        web.destroy()
+        host._release_tk_wakeup_pipe(tk_root)
+
+
+def test_ensure_tk_wakeup_fileevent_falls_back_without_createfilehandler(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D23: missing createfilehandler arms after-poll instead of no-op."""
+    import os
+
+    import tkwry._host as host
+
+    monkeypatch.setattr(host.sys, "platform", "linux")
+    monkeypatch.setattr(tk_root, "createfilehandler", None)
+
+    read_fd, write_fd = os.pipe()
+    try:
+        setattr(tk_root, "_tkwry_wake_read_fd", read_fd)
+        setattr(tk_root, "_tkwry_wake_write_fd", write_fd)
+        setattr(tk_root, "_tkwry_wake_pipe_users", 1)
+        host._ensure_tk_wakeup_fileevent(tk_root)
+        assert getattr(tk_root, "_tkwry_wake_after_poll", False) is True
+        assert getattr(tk_root, "_tkwry_wake_fileevent", False) is True
+    finally:
+        host._release_tk_wakeup_pipe(tk_root)
+
+
 def test_download_complete_poll_path_without_handler(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

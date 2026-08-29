@@ -65,6 +65,11 @@ def _toplevel_wakeup_write_fd(toplevel: tk.Misc) -> int | None:
     return getattr(toplevel, "_tkwry_wake_write_fd", None)
 
 
+# When Tk has no createfilehandler (typical Windows), poll the shared wakeup
+# pipe on an after timer — same role as macOS idle pump for D21 delivery.
+_WAKE_AFTER_POLL_MS = 16
+
+
 def _pump_toplevel_wakeup_pipe(toplevel: tk.Misc) -> None:
     read_fd = _toplevel_wakeup_read_fd(toplevel)
     if read_fd is None:
@@ -77,6 +82,39 @@ def _pump_toplevel_wakeup_pipe(toplevel: tk.Misc) -> None:
                 break
     except (OSError, ValueError):
         pass
+
+
+def _pump_shared_wake_read_fd(toplevel: tk.Misc) -> None:
+    """Pump the Win/Linux shared wakeup pipe (``_tkwry_wake_read_fd`` only)."""
+    read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
+    if read_fd is None:
+        return
+    try:
+        import select
+
+        while select.select([read_fd], [], [], 0)[0]:
+            if not os.read(read_fd, 64):
+                break
+    except (OSError, ValueError):
+        pass
+
+
+def _wakeup_pipe_readable(toplevel: tk.Misc) -> bool:
+    read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
+    if read_fd is None:
+        return False
+    try:
+        import select
+
+        return bool(select.select([read_fd], [], [], 0)[0])
+    except (OSError, ValueError):
+        return False
+
+
+def _service_toplevel_wakeup(toplevel: tk.Misc) -> None:
+    """Pump the shared pipe and drain sync hooks / wakeup-backed async queues."""
+    _pump_shared_wake_read_fd(toplevel)
+    _drain_toplevel_sync_hooks(toplevel)
 
 
 def _run_pending_webview_destroy(web: WebView) -> None:
@@ -199,8 +237,56 @@ def _atexit_drain_pending_destroys() -> None:
     _atexit_destroy_toplevels[:] = live
 
 
+def _stop_wakeup_after_poll(toplevel: tk.Misc) -> None:
+    setattr(toplevel, "_tkwry_wake_after_poll", False)
+    if hasattr(toplevel, "_tkwry_wake_fileevent"):
+        delattr(toplevel, "_tkwry_wake_fileevent")
+
+
+def _wakeup_after_poll_tick(toplevel: tk.Misc) -> None:
+    """``after`` fallback when ``createfilehandler`` is unavailable (Windows)."""
+    if getattr(toplevel, "_tkwry_wake_read_fd", None) is None:
+        _stop_wakeup_after_poll(toplevel)
+        return
+    if not getattr(toplevel, "_tkwry_wake_pipe_users", 0):
+        _stop_wakeup_after_poll(toplevel)
+        return
+    try:
+        if not toplevel.winfo_exists():
+            _stop_wakeup_after_poll(toplevel)
+            return
+    except tk.TclError:
+        _stop_wakeup_after_poll(toplevel)
+        return
+
+    if _wakeup_pipe_readable(toplevel):
+        _service_toplevel_wakeup(toplevel)
+
+    try:
+        toplevel.after(_WAKE_AFTER_POLL_MS, _wakeup_after_poll_tick, toplevel)
+    except tk.TclError:
+        _stop_wakeup_after_poll(toplevel)
+
+
+def _ensure_wakeup_after_poll(toplevel: tk.Misc) -> None:
+    """Arm a light ``after`` poll for the shared wakeup pipe (D23)."""
+    if getattr(toplevel, "_tkwry_wake_after_poll", False):
+        return
+    setattr(toplevel, "_tkwry_wake_after_poll", True)
+    setattr(toplevel, "_tkwry_wake_fileevent", True)
+    try:
+        toplevel.after(0, _wakeup_after_poll_tick, toplevel)
+    except tk.TclError:
+        _stop_wakeup_after_poll(toplevel)
+
+
 def _ensure_tk_wakeup_fileevent(toplevel: tk.Misc) -> None:
-    """Register a Tcl readable handler so sync hooks drain without polling delay."""
+    """Register a Tcl readable handler so sync hooks drain without polling delay.
+
+    Windows (and any Tk without ``createfilehandler``) uses
+    :func:`_ensure_wakeup_after_poll` instead — required for D21 handler-less
+    download-complete delivery without an idle ``_webview is not None`` latch.
+    """
     if sys.platform == "darwin" or getattr(toplevel, "_tkwry_wake_fileevent", False):
         return
     read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
@@ -208,17 +294,17 @@ def _ensure_tk_wakeup_fileevent(toplevel: tk.Misc) -> None:
         return
 
     def _on_wake(_fd: int, _mask: int) -> None:
-        _pump_toplevel_wakeup_pipe(toplevel)
-        _drain_toplevel_sync_hooks(toplevel)
+        _service_toplevel_wakeup(toplevel)
 
     try:
         create_handler = getattr(toplevel, "createfilehandler", None)
         if create_handler is None:
+            _ensure_wakeup_after_poll(toplevel)
             return
         create_handler(read_fd, tk.READABLE, _on_wake)
         setattr(toplevel, "_tkwry_wake_fileevent", True)
     except (tk.TclError, OSError, ValueError):
-        pass
+        _ensure_wakeup_after_poll(toplevel)
 
 
 def _register_sync_hook_webview(toplevel: tk.Misc, web: WebView) -> None:
@@ -277,6 +363,7 @@ def _release_tk_wakeup_pipe(toplevel: tk.Misc) -> None:
         "_tkwry_wake_write_fd",
         "_tkwry_wake_pipe_users",
         "_tkwry_wake_fileevent",
+        "_tkwry_wake_after_poll",
         "_tkwry_sync_hook_webviews",
     ):
         if hasattr(toplevel, attr):
