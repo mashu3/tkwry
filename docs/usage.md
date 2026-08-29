@@ -337,7 +337,7 @@ plus the callback hooks above.
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `PermissionKind`,
 `PermissionResponse`, `DragDropEvent`, `WebViewPhase`.
-Types: `Cookie` (``repr`` omits ``value`` — never log secrets).
+Types: `WebView`, `WebSession`, `Cookie` (``repr`` omits ``value`` — never log secrets).
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
 `WebViewTimeoutError`, `WebViewNavigationError`,
 `RpcTimeoutError`, `RpcCancelledError`, `RpcSerializationError`.
@@ -347,7 +347,7 @@ Warning: `TkwrySecurityWarning`. Helpers: `rpc_cancelled`, `rpc_cancel_event`,
 Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`,
 `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`,
 `EvalCallback`, `EvalErrorHandler`, `CreationFailedHandler`, `DownloadHandler`,
-`DownloadCompleteHandler`.
+`DownloadCompleteHandler`, `PermissionHandler`.
 
 ## Related
 

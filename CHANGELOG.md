@@ -42,6 +42,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``clear_all_browsing_data``, zoom + permission + clipboard smoke, and
   post-``destroy`` → ``WebViewDestroyedError``; own pytest process on
   Linux / Windows CI
+- Docs CI (``scripts/check_docs.py``): ``__all__`` ↔ ``docs/usage.md`` API
+  summary, ``ast.parse`` on README / ``docs/*.md`` Python fences, relative
+  + GitHub-blob link / anchor / example-path checks
 
 ### Changed
 

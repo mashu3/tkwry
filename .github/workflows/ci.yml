@@ -41,6 +41,9 @@ jobs:
       - name: README PyPI links + long-description render
         run: python scripts/check_readme_pypi_links.py
 
+      - name: Docs ↔ __all__ / python fences / links
+        run: python scripts/check_docs.py
+
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
