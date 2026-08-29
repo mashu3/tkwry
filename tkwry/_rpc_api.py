@@ -53,6 +53,8 @@ from tkwry.ipc import (
 )
 
 _RPC_EXECUTOR_JOIN_SECONDS = 2.0
+# Worker→Tk stream chunks; same depth as native async queues (IPC / RPC / …).
+MAX_RPC_STREAM_PENDING = 2048
 
 
 class WebViewRpcMixin:
@@ -77,6 +79,7 @@ class WebViewRpcMixin:
             queue.SimpleQueue()
         )
         self._rpc_stream_queue: queue.SimpleQueue[tuple[str, Any]] = queue.SimpleQueue()
+        self._rpc_stream_dropped = 0
         self._rpc_stream_open: set[str] = set()
         self._rpc_timeout_after: dict[str, str] = {}
         self._rpc_cancel_events: dict[str, threading.Event] = {}
@@ -380,6 +383,19 @@ class WebViewRpcMixin:
             except queue.Empty:
                 return
 
+    def _enqueue_rpc_stream_chunk(self, req_id: str, item: Any) -> bool:
+        """Queue a worker stream chunk for the Tk thread. Return False if dropped."""
+        q = self._rpc_stream_queue
+        if q.qsize() >= MAX_RPC_STREAM_PENDING:
+            self._rpc_stream_dropped += 1
+            return False
+        try:
+            q.put_nowait((req_id, item))
+        except Exception:
+            self._rpc_stream_dropped += 1
+            return False
+        return True
+
     def _abort_inflight_rpc(self) -> None:
         """Drop inflight RPC on destroy without touching the dying native view."""
         pending = list(self._rpc_inflight.items())
@@ -553,10 +569,7 @@ class WebViewRpcMixin:
             if threading.get_ident() == self._tk_thread_id:
                 self._push_rpc_chunk(request.id, item)
                 return
-            try:
-                self._rpc_stream_queue.put_nowait((request.id, item))
-            except Exception:
-                return
+            self._enqueue_rpc_stream_chunk(request.id, item)
 
         try:
             outcome = dispatch_rpc(

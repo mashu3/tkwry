@@ -275,7 +275,9 @@ Omit `permission_handler` for the engine default; 0.1.5 does **not** change
 (see wry / platform notes).
 
 Async queues (IPC, RPC, page-load, title, drag-drop, eval) cap at **2048**
-pending items each; further events are compacted or dropped. Each IPC/RPC
+pending items each; further events are compacted or dropped. Worker→Tk
+RPC **stream** chunks use a separate 2048-deep queue (overflows counted
+as ``rpc_stream``). Each IPC/RPC
 **message** also caps at **10 MiB**. RPC is a separate queue from IPC. Use
 `take_queue_drop_counts()` to observe overflows — it returns
 `(ipc, page_load, title, drag_drop, eval, rpc)`.

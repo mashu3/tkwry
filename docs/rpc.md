@@ -144,7 +144,9 @@ IPC/RPC messages cap at **10 MiB**; RPC allows at most **256** positional
 args and **256** kwargs. Stream chunks reuse that **10 MiB** JSON cap.
 Oversized RPC / chunks reject with `RpcMessageTooLarge`; too many args
 with `RpcArgumentLimitError`. RPC has its own 2048-deep queue so IPC
-overflow cannot drop `tkwry.call`.
+overflow cannot drop `tkwry.call`. Worker→Tk **stream** chunks also cap
+at 2048 pending; further chunks are dropped (counted as ``rpc_stream``
+overflows; not yet in the 6-tuple from `take_queue_drop_counts()`).
 
 Use `take_queue_drop_counts()` to observe overflows — it returns
 `(ipc, page_load, title, drag_drop, eval, rpc)`.
@@ -164,8 +166,9 @@ window.tkwry.on("data_updated", (payload) => { ... });
 ```
 
 ``emit_all`` skips destroyed / not-ready / ``untrusted`` views and pages
-outside each view's ``bridge_origins``. It returns the number of views that
-received the event.
+outside each view's ``bridge_origins``. A sibling that fails ``emit`` is
+skipped (traceback to stderr); others still receive the event. Returns
+the number of views that successfully received it.
 
 See [`examples/ipc_demo.py`](../examples/ipc_demo.py).
 

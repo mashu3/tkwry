@@ -375,6 +375,24 @@ def test_rpc_worker_stream_hops_to_tk(tk_root) -> None:
     frame.destroy()
 
 
+def test_rpc_stream_queue_caps_and_counts_drops(tk_root) -> None:
+    from tkwry._rpc_api import MAX_RPC_STREAM_PENDING
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>rpc</p>")
+    for i in range(MAX_RPC_STREAM_PENDING):
+        assert web._enqueue_rpc_stream_chunk("s1", i) is True
+    assert web._rpc_stream_queue.qsize() == MAX_RPC_STREAM_PENDING
+    assert web._enqueue_rpc_stream_chunk("s1", "overflow") is False
+    assert web._rpc_stream_dropped == 1
+    assert web._rpc_stream_queue.qsize() == MAX_RPC_STREAM_PENDING
+    assert web._enqueue_rpc_stream_chunk("s1", "again") is False
+    assert web._rpc_stream_dropped == 2
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_rpc_timeout_sets_cancel_flag(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>rpc</p>")

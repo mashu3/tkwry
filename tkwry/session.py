@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import traceback
 import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -97,7 +98,9 @@ class WebSession:
 
         Must run on the Tk main thread. Skips views that are destroyed, not
         ready, ``untrusted``, or whose current page is outside that view's
-        ``bridge_origins``. Returns how many views received the event.
+        ``bridge_origins``. A sibling that raises during ``emit`` is skipped
+        (traceback to stderr); other views still receive the event. Returns
+        how many views successfully received it.
         """
         if not event:
             raise ValueError("emit_all: event name must be non-empty")
@@ -109,7 +112,11 @@ class WebSession:
         for web in list(self._webviews):
             if not web._emit_eligible():
                 continue
-            web.emit(event, data)
+            try:
+                web.emit(event, data)
+            except Exception:
+                traceback.print_exc()
+                continue
             sent += 1
         return sent
 

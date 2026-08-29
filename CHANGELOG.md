@@ -26,6 +26,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Cap worker→Tk RPC stream chunk queue at 2048 and count overflows
+  (``rpc_stream``); ``WebSession.emit_all`` continues after a sibling
+  ``emit`` failure (counts only successful sends)
 - Linux: initialize GTK before constructing ``WebSession`` / wry ``WebContext``
   (``ephemeral=True`` / ``data_directory=`` in ``WebView.__init__`` no longer
   panics with ``GTK has not been initialized`` in a fresh process)

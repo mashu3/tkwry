@@ -114,6 +114,41 @@ def test_emit_all_skips_ineligible_and_destroyed(
     frame_b.destroy()
 
 
+def test_emit_all_continues_after_sibling_emit_error(
+    tk_root, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import tkinter as tk
+
+    session = WebSession(ephemeral=True)
+    frame_a = tk.Frame(tk_root)
+    frame_b = tk.Frame(tk_root)
+    frame_c = tk.Frame(tk_root)
+    web_a = WebView(frame_a, html="<p>a</p>", session=session)
+    web_b = WebView(frame_b, html="<p>b</p>", session=session)
+    web_c = WebView(frame_c, html="<p>c</p>", session=session)
+    calls: list[object] = []
+
+    def emit(self: WebView, event: str, data: object = None) -> None:
+        if self is web_b:
+            raise RuntimeError("sibling boom")
+        calls.append(self)
+
+    monkeypatch.setattr(WebView, "_emit_eligible", lambda self: True)
+    monkeypatch.setattr(WebView, "emit", emit)
+
+    assert session.emit_all("ping") == 2
+    assert set(calls) == {web_a, web_c}
+    err = capsys.readouterr().err
+    assert "sibling boom" in err
+
+    web_a.destroy()
+    web_b.destroy()
+    web_c.destroy()
+    frame_a.destroy()
+    frame_b.destroy()
+    frame_c.destroy()
+
+
 def test_emit_all_rejects_empty_event_and_bad_payload(tk_root) -> None:
     import tkinter as tk
 
