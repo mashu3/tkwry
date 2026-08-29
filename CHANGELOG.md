@@ -19,6 +19,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``PermissionKind`` / ``PermissionResponse`` (Allow / Deny / Default). Sync
   hook on the Tk thread (same family as ``on_navigation``). Omit handler for
   engine default; does **not** change ``untrusted=True`` defaults
+- Create-time ``clipboard=True`` (default ``False``) → wry ``with_clipboard``;
+  Win/Linux Web Clipboard API opt-in; macOS WebView side always-on (document)
 
 ### Fixed
 

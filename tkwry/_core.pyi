@@ -125,6 +125,7 @@ class WebView:
         app_corp: bool = False,
         visible: bool = True,
         devtools: bool = False,
+        clipboard: bool = False,
         focused: bool = True,
         background_color: tuple[int, int, int, int] | None = None,
         user_agent: str | None = None,

@@ -113,6 +113,15 @@ callback — the call is fire-and-forget. Do not add fake kwargs.
 WebKitGTK `zoom-level`). This is **page** content zoom. Tk window
 iconify / zoom / geometry stay on the host **Toplevel** (below).
 
+## Clipboard (Web API opt-in)
+
+`WebView(..., clipboard=True)` → wry `with_clipboard(true)`. Default is
+**`False`** (opt-in). On **Windows** and **Linux** this enables the page
+Web Clipboard API / related accelerators. On **macOS** the WebView clipboard
+path is **always on** — the flag still records the constructor value but
+does not toggle a platform switch. This is **not** a Tk↔Web paste bridge
+(that stays later). Useful for Monaco / in-page editors.
+
 ## Window chrome (Tk, not the WebView)
 
 Title, icon, geometry, min/max size, fullscreen, `-topmost`, and

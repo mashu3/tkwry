@@ -106,6 +106,10 @@ DevTools need `devtools=True` at construction, then `open_devtools()`
 ```python
 web = WebView(frame, html="<h1>Hello</h1>", devtools=True)
 web.open_devtools()
+
+# Web Clipboard API (Monaco / editors): opt-in on Windows / Linux.
+# macOS WebView clipboard is always available — see platforms.md.
+web = WebView(frame, html="<textarea></textarea>", clipboard=True)
 ```
 
 Rapid `load_url` / `load_html` calls are **coalesced (last-wins)** —
@@ -318,16 +322,16 @@ web.destroy()   # release native webview; host Frame is kept
 | IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `stream` / `cancel`) |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_complete`; create-only `permission_handler=` |
 | Appearance | `set_background_color`, `set_zoom` / `reset_zoom`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
-| Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
+| Create-only | `set_user_agent`, `set_initialization_script` (raise after native create); `devtools=`, `clipboard=`, `permission_handler=` |
 | Layout | `pack`, `grid`, `place`, `sync_bounds` (delegate to host `Frame` except `sync_bounds`) |
-| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `untrusted`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
+| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `untrusted`, `clipboard`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
 | Diagnostics | `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
 `app_dev`, `csp` / `coop` / `corp`, `session` / `data_directory` / `ephemeral`,
 `untrusted`, `bridge_origins`, `bridge_allow`, `navigation_allow`,
 `open_external`, `download_allow`, `ipc_handler`, `rpc_traceback`, `devtools`,
-`background_color`, `user_agent`, `initialization_script`, `focused`,
+`clipboard`, `background_color`, `user_agent`, `initialization_script`, `focused`,
 `permission_handler`, `on_download`, `on_download_complete`, `on_creation_failed`,
 plus the callback hooks above.
 

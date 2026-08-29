@@ -1383,6 +1383,7 @@ impl WebView {
         app_corp = false,
         visible = true,
         devtools = false,
+        clipboard = false,
         focused = true,
         background_color = None,
         user_agent = None,
@@ -1415,6 +1416,7 @@ impl WebView {
         app_corp: bool,
         visible: bool,
         devtools: bool,
+        clipboard: bool,
         focused: bool,
         background_color: Option<(u8, u8, u8, u8)>,
         user_agent: Option<String>,
@@ -1757,6 +1759,7 @@ WebViews that share a session must use the same app= root \
             .with_bounds(make_rect(0.0, 0.0, width as f64, height as f64))
             .with_visible(visible)
             .with_devtools(devtools)
+            .with_clipboard(clipboard)
             .with_focused(focused)
             .with_navigation_handler(nav_handler)
             .with_on_page_load_handler(pageload_handler)

@@ -107,6 +107,7 @@ WEBVIEW_PROPERTIES = (
     "native",
     "destroyed",
     "untrusted",
+    "clipboard",
     "navigation_allow",
     "open_external",
     "download_allow",

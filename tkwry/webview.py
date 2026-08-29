@@ -305,7 +305,9 @@ class WebView(WebViewRpcMixin):
     the built-in ``navigation_allow`` / ``open_external`` policy for that
     direction. ``permission_handler`` is create-only (wry builder); omit it to
     keep the engine default. Timeout / bad return → ``PermissionResponse.Deny``
-    (does **not** change ``untrusted=True`` defaults).
+    (does **not** change ``untrusted=True`` defaults). ``clipboard=True`` is
+    create-only opt-in for the Web Clipboard API on Windows / Linux (macOS
+    WebView side is always-on — see platform notes).
 
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
@@ -399,6 +401,7 @@ class WebView(WebViewRpcMixin):
         corp: bool = False,
         rpc_traceback: bool = False,
         devtools: bool = False,
+        clipboard: bool = False,
         background_color: tuple[int, int, int, int] | None = None,
         user_agent: str | None = None,
         initialization_script: str | None = None,
@@ -519,6 +522,7 @@ class WebView(WebViewRpcMixin):
         self._on_download = on_download
         self._on_download_complete = on_download_complete
         self._devtools = devtools
+        self._clipboard = bool(clipboard)
         self._background_color = background_color
         self._user_agent = user_agent
         self._initialization_script = initialization_script
@@ -778,6 +782,17 @@ class WebView(WebViewRpcMixin):
         """``True`` when this WebView was created with ``untrusted=True``."""
         self._require_tk_thread()
         return self._untrusted
+
+    @property
+    def clipboard(self) -> bool:
+        """Create-time Web Clipboard API opt-in (``clipboard=True``).
+
+        On Windows / Linux this is the wry ``with_clipboard`` flag. On macOS
+        the WebView clipboard path is always available; this flag still
+        records the constructor value.
+        """
+        self._require_tk_thread()
+        return self._clipboard
 
     @property
     def navigation_allow(self) -> frozenset[str] | None:
@@ -3010,6 +3025,7 @@ class WebView(WebViewRpcMixin):
             # Map axis only (Notebook / unmapped): not the layout ``ready`` contract.
             "visible": self._frame_should_show(),
             "devtools": self._devtools,
+            "clipboard": self._clipboard,
             "focused": self._focused,
         }
         if self._background_color is not None:

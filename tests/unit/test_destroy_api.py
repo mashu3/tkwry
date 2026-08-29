@@ -81,6 +81,7 @@ POST_DESTROY_READABLE_PROPERTIES = frozenset(
     {
         "destroyed",
         "untrusted",
+        "clipboard",
         "navigation_allow",
         "open_external",
         "download_allow",
