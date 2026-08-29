@@ -145,7 +145,8 @@ only used **before** Tk reports a real size (`winfo_* <= 1`). Prefer passing
 
 **Window chrome is the host Toplevel**, not the WebView:
 [Platform notes — Window chrome](platforms.md#window-chrome-tk-not-the-webview).
-The WebView only follows its Frame (`sync_bounds`).
+Use `configure_window(root, title=..., geometry=..., minsize=..., …)` for
+the common chrome kwargs; the WebView only follows its Frame (`sync_bounds`).
 
 Unmapped hosts (inactive `Notebook` tabs) call `set_visible(False)`.
 `ready` stays layout-based (`True` while hidden); use
@@ -341,8 +342,8 @@ Types: `WebView`, `WebSession`, `Cookie` (``repr`` omits ``value`` — never log
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
 `WebViewTimeoutError`, `WebViewNavigationError`,
 `RpcTimeoutError`, `RpcCancelledError`, `RpcSerializationError`.
-Warning: `TkwrySecurityWarning`. Helpers: `rpc_cancelled`, `rpc_cancel_event`,
-`open_in_browser`, `unique_download_path`, `DEFAULT_CSP`.
+Warning: `TkwrySecurityWarning`. Helpers: `configure_window`, `rpc_cancelled`,
+`rpc_cancel_event`, `open_in_browser`, `unique_download_path`, `DEFAULT_CSP`.
 
 Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`,
 `PageLoadHandler`, `TitleChangedHandler`, `NewWindowHandler`, `DragDropHandler`,

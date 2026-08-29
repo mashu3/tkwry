@@ -142,7 +142,7 @@ Short checklist — **details live in [Platform notes](https://github.com/mashu3
 - **Alpha** — APIs may change; not for production yet (see banner above)
 - **Windows** — WebView2 Runtime required; missing runtime → `creation_failed` / `<<WebViewCreateFailed>>` (gated APIs raise `WebViewCreationError` with [install text](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#windows))
 - **Print** — `web.print()` opens the system dialog; no PDF, no return value, no success/fail/cancel (wry has none). See [Platform notes — Print](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#print)
-- **Window chrome** — title / icon / geometry / fullscreen / min/max / `-topmost` are the host **Toplevel**; WebView size follows the Frame (`sync_bounds`). See [Usage — Layout / resize](https://github.com/mashu3/tkwry/blob/main/docs/usage.md#layout--resize)
+- **Window chrome** — title / icon / geometry / fullscreen / min/max / `-topmost` are the host **Toplevel** (`configure_window`); WebView size follows the Frame (`sync_bounds`). See [Usage — Layout / resize](https://github.com/mashu3/tkwry/blob/main/docs/usage.md#layout--resize)
 - **Windows DevTools** — wry/WebView2 reports `is_devtools_open()` as `False` and `close_devtools()` is a no-op; `open_devtools()` still opens the inspector
 - **Linux** — no PyPI wheel (by design); best-effort source install
 - **Linux concurrent `eval_js_with_callback`** — evaluating on multiple WebViews at once can stall WebKitGTK; prefer sequential evals (see [Linux](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#linux))

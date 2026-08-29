@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   engine default; does **not** change ``untrusted=True`` defaults
 - Create-time ``clipboard=True`` (default ``False``) → wry ``with_clipboard``;
   Win/Linux Web Clipboard API opt-in; macOS WebView side always-on (document)
+- ``configure_window(...)`` — host Toplevel chrome helper (title / geometry /
+  min·max / fullscreen / ``-topmost`` / icon); not a WebView bounds API
 
 ### Fixed
 

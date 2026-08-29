@@ -125,11 +125,25 @@ does not toggle a platform switch. This is **not** a Tk↔Web paste bridge
 ## Window chrome (Tk, not the WebView)
 
 Title, icon, geometry, min/max size, fullscreen, `-topmost`, and
-iconify/zoom belong on the host **Toplevel** (`root.title(...)`,
-`root.geometry(...)`, `root.minsize(...)`, `root.attributes(...)`).
-The WebView only follows its **Frame** via `sync_bounds()` — there is no
-`web.set_size` / `web.set_title` / `web.set_icon`. See
-[Usage — Layout / resize](usage.md#layout--resize).
+iconify/zoom belong on the host **Toplevel**. Use
+`configure_window(...)` for the common set:
+
+```python
+from tkwry import configure_window
+
+configure_window(
+    root,
+    title="My App",
+    geometry="960x640",
+    minsize=(720, 480),
+    topmost=False,
+    # icon="assets/app.png",  # PNG/GIF/PPM; .ico on Windows
+)
+```
+
+Omitted kwargs are left unchanged. The WebView only follows its **Frame**
+via `sync_bounds()` — there is no `web.set_size` / `web.set_title` /
+`web.set_icon`. See [Usage — Layout / resize](usage.md#layout--resize).
 
 ## Screenshot
 
