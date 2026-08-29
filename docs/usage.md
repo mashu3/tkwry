@@ -57,12 +57,21 @@ Share cookies / cache / `localStorage` across WebViews via wry's
 `WebContext`:
 
 ```python
-from tkwry import WebSession, WebView
+from tkwry import Cookie, WebSession, WebView
 
 session = WebSession(data_directory="~/.myapp/webview")
 left = WebView(frame_a, html=HTML, session=session)
 right = WebView(frame_b, html=HTML, session=session)
 session.emit_all("theme", {"mode": "dark"})  # → both views (if emit-eligible)
+
+# Cookie CRUD is on WebView (wry names; Tk thread; ready). Never log values:
+for c in left.cookies_for_url("https://example.com/"):
+    print(c.name, c.domain)  # not c.value
+left.set_cookie(
+    Cookie("sid", "…", domain="example.com", path="/", secure=True, http_only=True)
+)
+left.delete_cookie(Cookie("sid", "", domain="example.com", path="/"))
+left.clear_all_browsing_data()  # this WebView's store
 ```
 
 Convenience: `WebView(..., data_directory=...)` or `ephemeral=True`
@@ -283,6 +292,7 @@ web.destroy()   # release native webview; host Frame is kept
 | Category | Members |
 |----------|---------|
 | Content | `load_url`, `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `print`, `url` |
+| Cookies / browsing data | `cookies`, `cookies_for_url`, `set_cookie`, `delete_cookie`, `clear_all_browsing_data`, `Cookie` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `last_eval_error`, `<<WebViewEvalFailed>>` |
 | IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `stream` / `cancel`) |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_complete` |
@@ -301,6 +311,7 @@ Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
 callback hooks above.
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`, `WebViewPhase`.
+Types: `Cookie` (``repr`` omits ``value`` — never log secrets).
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
 `WebViewTimeoutError`, `WebViewNavigationError`,
 `RpcTimeoutError`, `RpcCancelledError`, `RpcSerializationError`.

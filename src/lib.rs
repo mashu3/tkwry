@@ -1,6 +1,7 @@
 //! wry bindings for embedding a WebView into a Tkinter host window.
 
 mod app_protocol;
+mod cookie_api;
 #[cfg(target_os = "macos")]
 mod macos;
 mod session;
@@ -1805,6 +1806,45 @@ WebViews that share a session must use the same app= root \
         })
     }
 
+    fn cookies(&self) -> PyResult<Vec<cookie_api::Cookie>> {
+        with_webview(self, |wv| {
+            wv.cookies()
+                .map(|list| list.iter().map(cookie_api::Cookie::from_wry).collect())
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })
+    }
+
+    fn cookies_for_url(&self, url: &str) -> PyResult<Vec<cookie_api::Cookie>> {
+        with_webview(self, |wv| {
+            wv.cookies_for_url(url)
+                .map(|list| list.iter().map(cookie_api::Cookie::from_wry).collect())
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })
+    }
+
+    fn set_cookie(&self, cookie: cookie_api::Cookie) -> PyResult<()> {
+        let wry_cookie = cookie.to_wry()?;
+        with_webview(self, |wv| {
+            wv.set_cookie(&wry_cookie)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })
+    }
+
+    fn delete_cookie(&self, cookie: cookie_api::Cookie) -> PyResult<()> {
+        let wry_cookie = cookie.to_wry()?;
+        with_webview(self, |wv| {
+            wv.delete_cookie(&wry_cookie)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })
+    }
+
+    fn clear_all_browsing_data(&self) -> PyResult<()> {
+        with_webview(self, |wv| {
+            wv.clear_all_browsing_data()
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })
+    }
+
     fn eval_js(&self, script: &str) -> PyResult<()> {
         with_webview(self, |wv| {
             wv.evaluate_script(script)
@@ -2429,6 +2469,7 @@ fn disable_macos_window_tabbing(parent: usize) -> PyResult<()> {
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<WebView>()?;
     m.add_class::<session::WebSession>()?;
+    m.add_class::<cookie_api::Cookie>()?;
     m.add_class::<PageLoadEvent>()?;
     m.add_class::<NewWindowResponse>()?;
     m.add_class::<DragDropEvent>()?;

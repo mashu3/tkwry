@@ -8,7 +8,13 @@ from collections.abc import Callable
 import pytest
 from unit.test_api import WEBVIEW_METHODS, WEBVIEW_PROPERTIES
 
-from tkwry import NewWindowResponse, WebView, WebViewDestroyedError, WebViewPhase
+from tkwry import (
+    Cookie,
+    NewWindowResponse,
+    WebView,
+    WebViewDestroyedError,
+    WebViewPhase,
+)
 
 
 def _ping() -> str:
@@ -27,6 +33,11 @@ POST_DESTROY_ACTIONS: dict[str, Callable[[WebView], object]] = {
     "can_go_back": lambda w: w.can_go_back(),
     "can_go_forward": lambda w: w.can_go_forward(),
     "print": lambda w: w.print(),
+    "cookies": lambda w: w.cookies(),
+    "cookies_for_url": lambda w: w.cookies_for_url("https://example.com"),
+    "set_cookie": lambda w: w.set_cookie(Cookie("n", "v")),
+    "delete_cookie": lambda w: w.delete_cookie(Cookie("n", "v")),
+    "clear_all_browsing_data": lambda w: w.clear_all_browsing_data(),
     "eval_js": lambda w: w.eval_js("1"),
     "eval_js_with_callback": lambda w: w.eval_js_with_callback("1", lambda _r: None),
     "emit": lambda w: w.emit("x"),

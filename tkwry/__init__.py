@@ -44,7 +44,7 @@ def _reraise_linux_core_build_hint(exc: BaseException) -> None:
 
 
 try:
-    from tkwry._core import DragDropEvent, NewWindowResponse, PageLoadEvent
+    from tkwry._core import Cookie, DragDropEvent, NewWindowResponse, PageLoadEvent
     from tkwry.session import WebSession
     from tkwry.webview import (
         BridgeAllow,
@@ -75,6 +75,7 @@ __all__ = [
     "DEFAULT_CSP",
     "BridgeAllow",
     "BridgeOrigins",
+    "Cookie",
     "CreationFailedHandler",
     "DownloadCompleteHandler",
     "DownloadHandler",

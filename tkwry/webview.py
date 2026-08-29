@@ -19,6 +19,7 @@ from typing import Literal, TypeAlias, TypeVar, cast
 
 from tkwry._app import resolve_app, resolve_app_csp, validate_app_isolation
 from tkwry._core import (
+    Cookie,
     DragDropEvent,
     NewWindowResponse,
     PageLoadEvent,
@@ -1460,6 +1461,47 @@ class WebView(WebViewRpcMixin):
         :class:`tkinter.Toplevel`, not this method.
         """
         self._require_ready("print").print()
+
+    def cookies(self) -> list[Cookie]:
+        """Return all cookies known to this WebView's engine store.
+
+        Tk-thread only. Shared across views that use the same
+        :class:`~tkwry.WebSession`. Do not log returned ``Cookie.value``.
+        """
+        return list(self._require_ready("cookies").cookies())
+
+    def cookies_for_url(self, url: str) -> list[Cookie]:
+        """Return cookies the engine would send for *url*.
+
+        Tk-thread only. Do not log returned ``Cookie.value``.
+        """
+        return list(self._require_ready("cookies_for_url").cookies_for_url(url))
+
+    def set_cookie(self, cookie: Cookie) -> None:
+        """Store *cookie* in this WebView's engine cookie jar.
+
+        Tk-thread only. Engine support varies; values are never written to
+        tkwry logs.
+        """
+        self._require_ready("set_cookie").set_cookie(cookie)
+
+    def delete_cookie(self, cookie: Cookie) -> None:
+        """Delete a matching cookie from this WebView's engine jar.
+
+        Matching is engine-defined (typically name + domain + path).
+        Tk-thread only.
+        """
+        self._require_ready("delete_cookie").delete_cookie(cookie)
+
+    def clear_all_browsing_data(self) -> None:
+        """Clear browsing data for this WebView (cookies, cache, etc.).
+
+        Wraps wry ``clear_all_browsing_data`` on the **WebView**, not a
+        session-wide CDP wipe. Sibling views that share a
+        :class:`~tkwry.WebSession` may still see overlapping storage until
+        their stores are cleared too — engine-dependent. Tk-thread only.
+        """
+        self._require_ready("clear_all_browsing_data").clear_all_browsing_data()
 
     def _run_deferred_reload(self) -> None:
         if self._destroyed or self._webview is None:

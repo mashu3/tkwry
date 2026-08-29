@@ -187,7 +187,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 
 - **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, ETag/HEAD/Range, default CSP, optional COOP/CORP, bounded `watch_app()`; open-then-verify symlink/junction confinement)
 - **IPC / RPC / emit** — events vs request/response; sync-generator `stream`; worker RPC; typed TypeError; protocol `version`; JS `cancel`; Python→JS `emit`; origin/path allowlist (`bridge_origins`) + `bridge_allow` + `untrusted=` viewer mode
-- **WebSession** — shared wry `WebContext`; shared `app=` roots must match; `emit_all` broadcast
+- **WebSession** — shared wry `WebContext`; Cookie CRUD on `WebView` (`cookies` / `set_cookie` / …); shared `app=` roots must match; `emit_all` broadcast
 - **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
 - **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
 - **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` hide unmapped views)

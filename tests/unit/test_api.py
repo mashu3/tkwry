@@ -9,6 +9,7 @@ import tkwry
 from tkwry import (
     BridgeAllow,
     BridgeOrigins,
+    Cookie,
     CreationFailedHandler,
     DownloadCompleteHandler,
     DownloadHandler,
@@ -56,6 +57,11 @@ WEBVIEW_METHODS = (
     "can_go_back",
     "can_go_forward",
     "print",
+    "cookies",
+    "cookies_for_url",
+    "set_cookie",
+    "delete_cookie",
+    "clear_all_browsing_data",
     "eval_js",
     "eval_js_with_callback",
     "emit",
@@ -132,6 +138,7 @@ def test_public_exports() -> None:
     assert WebView is not None
     assert NativeWebView is not None
     assert WebSession is not None
+    assert Cookie is not None
     assert PageLoadEvent is not None
     assert DragDropEvent is not None
     assert NewWindowResponse is not None
