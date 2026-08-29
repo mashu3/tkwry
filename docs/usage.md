@@ -4,11 +4,91 @@ How-to for `WebView` after the [README landing](../README.md#-usage).
 Contracts live elsewhere: [Trust boundaries](trust.md),
 [IPC / RPC / emit](rpc.md), [Platform notes](platforms.md).
 
+| Start here | |
+|------------|--|
+| [Minimal app](#minimal-app) | First runnable window (`app=` or URL) |
+| [Hidden hosts](#hidden-hosts) | Notebook / `pack_forget` vs `lift` overlap |
+| [User-Agent](#user-agent) | App identity — not a Chrome spoof |
+| [API summary](#api-summary) | Public surface table |
+
 The constructor **does not raise** if the native view cannot be created
 (WebView2 missing, retries exhausted, …). Handle
 `<<WebViewCreateFailed>>` / `when_failed` / `on_creation_failed=`, or check
 `creation_failed` before treating the widget as live. Gated APIs still raise
 `WebViewCreationError`.
+
+## Minimal app
+
+A complete local UI in one file (no localhost HTTP server). Put HTML under
+`web/` and point `app=` at that directory:
+
+```text
+myapp/
+├── main.py
+└── web/
+    └── index.html
+```
+
+```html
+<!-- web/index.html -->
+<!DOCTYPE html>
+<html>
+  <body>
+    <h1 id="t">Hello from tkwry</h1>
+    <button id="ping">Ping Python</button>
+    <script>
+      document.getElementById("ping").onclick = async () => {
+        const n = await window.tkwry.call("ping");
+        document.getElementById("t").textContent = "pong " + n;
+      };
+    </script>
+  </body>
+</html>
+```
+
+```python
+# main.py
+import tkinter as tk
+from pathlib import Path
+
+from tkwry import WebView, configure_window
+
+ROOT = Path(__file__).resolve().parent
+WEB = ROOT / "web"
+
+root = tk.Tk()
+configure_window(root, title="My app", geometry="800x500", minsize=(400, 300))
+
+frame = tk.Frame(root)
+frame.pack(fill="both", expand=True)
+
+web = WebView(
+    frame,
+    app=WEB,
+    user_agent="MyApp/0.1",  # app identity — see User-Agent below
+)
+web.when_failed(lambda exc: print("create failed:", exc))
+
+
+@web.expose
+def ping() -> int:
+    return 1
+
+
+root.mainloop()
+```
+
+Next steps:
+
+- Shared cookies / tabs: [Shared session](#shared-session-websession) and
+  [`examples/browser_demo.py`](../examples/browser_demo.py)
+- JS↔Python streams / cancel: [IPC / RPC / emit](rpc.md) and
+  [`examples/ipc_demo.py`](../examples/ipc_demo.py)
+- Trust for arbitrary URLs: [Trust boundaries](trust.md)
+
+Real-device smoke stays in the examples (`browser_demo` print/download/destroy;
+`ipc_demo` stream+cancel). Automated Notebook hide/show:
+`tests/integration/test_notebook.py`.
 
 ## Local app assets (`app=` / `tkwry://`)
 
@@ -148,16 +228,45 @@ only used **before** Tk reports a real size (`winfo_* <= 1`). Prefer passing
 Use `configure_window(root, title=..., geometry=..., minsize=..., …)` for
 the common chrome kwargs; the WebView only follows its Frame (`sync_bounds`).
 
-Unmapped hosts (inactive `Notebook` tabs) call `set_visible(False)`.
-`ready` stays layout-based (`True` while hidden); use
-`phase is WebViewPhase.HIDDEN` when you need visibility.
+## Hidden hosts
 
-Switching which WebView is on screen: **unmap** the host (`Notebook`,
-`pack_forget`, `grid_remove`). Constructor `width`/`height` is eager
-warmup (native exists while hidden). `lift` / `tkraise` of still-mapped
-Frames does **not** hide the other native view — they overlap (Windows
-HWND z-order is synced; macOS shares one `NSView`). There is no
-`WebViewStack` / lazy-create helper yet.
+Native visibility follows **map state**, not Tk stacking order.
+
+| Approach | What happens | Use when |
+|----------|--------------|----------|
+| **Unmap** (`Notebook` inactive tab, `pack_forget`, `grid_remove`) | Host `<Unmap>` → `set_visible(False)`; `phase` may be `WebViewPhase.HIDDEN` | Switching which view is on screen |
+| **Constructor `width` / `height`** | Eager warmup — native can exist while still hidden / 1×1 | Create before first show without waiting for layout |
+| **`lift` / `tkraise` on still-mapped Frames** | Both natives stay shown and **overlap** (Win HWND z-order synced; macOS one `NSView`) | Never as a “hide the other tab” trick |
+
+There is **no** `WebViewStack` / lazy-create helper in 0.1.x. Prefer unmap.
+
+```python
+import tkinter as tk
+from tkinter import ttk
+
+from tkwry import WebView, WebViewPhase
+
+root = tk.Tk()
+nb = ttk.Notebook(root)
+nb.pack(fill="both", expand=True)
+
+page_a = tk.Frame(nb)
+page_b = tk.Frame(nb)
+nb.add(page_a, text="A")
+nb.add(page_b, text="B")
+
+# Inactive Notebook pages are unmapped → native hides automatically.
+web_a = WebView(page_a, html="<p>A</p>", width=400, height=300)
+web_b = WebView(page_b, html="<p>B</p>", width=400, height=300)
+
+# ready is layout-based (may stay True while HIDDEN):
+# web_a.phase is WebViewPhase.HIDDEN  # when tab B is selected
+
+root.mainloop()
+```
+
+Coverage: [`tests/integration/test_notebook.py`](../tests/integration/test_notebook.py).
+Multi-pane (still mapped): [`examples/multi_demo.py`](../examples/multi_demo.py).
 
 ## User-Agent
 
@@ -172,9 +281,9 @@ web = WebView(frame, url="https://example.com", user_agent="MyApp/1.2")
 The engine may **prefix or suffix** the default WebView UA — live tests
 check that your string appears **in** `navigator.userAgent`, not that it
 replaces the whole value. Client Hints and other `navigator.*` fields
-still describe the real engine. There are no UA presets, and
-`load_url(..., headers=)` (when added) would apply to **that request
-only** — it does not rewrite `navigator.userAgent`.
+still describe the real engine. There are no UA presets.
+`load_url(..., headers=)` applies to **that request only** — it does not
+rewrite `navigator.userAgent`.
 
 When a third-party site **degrades** in the WebView (YouTube comments
 missing, “unsupported browser”, Google login stuck), do not treat that

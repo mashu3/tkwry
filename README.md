@@ -37,7 +37,7 @@ Pre-built **abi3** wheels ship for **Windows** and **macOS**. **Linux** is sourc
 
 | Topic | Doc |
 |-------|-----|
-| Usage (`app=`, eval, layout, nav, downloads, API) | [docs/usage.md](https://github.com/mashu3/tkwry/blob/main/docs/usage.md) |
+| Usage (minimal app, `app=`, hidden hosts, UA, API) | [docs/usage.md](https://github.com/mashu3/tkwry/blob/main/docs/usage.md) |
 | Trust boundaries (`untrusted`, `bridge_origins`, recipes) | [docs/trust.md](https://github.com/mashu3/tkwry/blob/main/docs/trust.md) |
 | IPC / RPC / emit (`expose`, `call` / `stream`, cancel, limits) | [docs/rpc.md](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md) |
 | Platform notes (Windows / macOS / Linux, print, window chrome) | [docs/platforms.md](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md) |
@@ -128,9 +128,11 @@ root.mainloop()
 ```
 
 The constructor **does not raise** if native create fails. Handle
-`when_failed` / `<<WebViewCreateFailed>>`. How-to (`app=`, eval, layout,
-navigation, downloads, cleanup) and the API table:
-[Usage](https://github.com/mashu3/tkwry/blob/main/docs/usage.md). IPC / RPC / stream: [docs/rpc.md](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md).
+`when_failed` / `<<WebViewCreateFailed>>`. Minimal app, `app=`, hidden hosts,
+User-Agent, downloads, cleanup, and the API table:
+[Usage](https://github.com/mashu3/tkwry/blob/main/docs/usage.md)
+([Minimal app](https://github.com/mashu3/tkwry/blob/main/docs/usage.md#minimal-app)).
+IPC / RPC / stream: [docs/rpc.md](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md).
 Trust (`untrusted`, `bridge_origins`): [docs/trust.md](https://github.com/mashu3/tkwry/blob/main/docs/trust.md).
 
 ---

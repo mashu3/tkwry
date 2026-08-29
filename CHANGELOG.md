@@ -72,6 +72,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Document create-only ``user_agent=`` as app identity (engine may
   prefix/suffix; not a Chrome-spoof / fingerprint kit). Third-party
   sites that degrade in-WebView (e.g. YouTube comments) → system browser
+- Minimal-app tutorial + hidden-host recipe table in ``docs/usage.md``
+  (Notebook / ``pack_forget`` vs constructor warmup vs ``lift`` overlap;
+  links to ``test_notebook`` / examples)
 - README repo links are absolute GitHub URLs so PyPI long-description
   keeps working after the Usage split; ``project.urls.Documentation``
   points at ``docs/usage.md``
