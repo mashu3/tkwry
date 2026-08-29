@@ -29,3 +29,5 @@ cleanup_webkit
 pytest tests/integration/test_multi_webview.py -v --tb=short
 cleanup_webkit
 pytest tests/integration/test_lifecycle.py -v --tb=short
+cleanup_webkit
+pytest tests/integration/test_browser_essentials.py -v --tb=short

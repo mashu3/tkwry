@@ -40,3 +40,4 @@ pytest tests/integration/test_lifecycle.py -v --tb=short
 pytest tests/integration/test_multi_webview.py -v --tb=short
 pytest tests/integration/test_notebook.py -v --tb=short
 pytest tests/integration/test_viewport.py -v --tb=short
+pytest tests/integration/test_browser_essentials.py -v --tb=short

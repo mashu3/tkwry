@@ -35,6 +35,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pytest process (worker + Tk pump under GC aborted the full ``tests/unit/``
   process after the suite grew)
 
+### Tests
+
+- Browser-essentials integration (local HTTP): ``load_url`` custom headers,
+  ``Set-Cookie`` / ``set_cookie`` / ``delete_cookie`` /
+  ``clear_all_browsing_data``, zoom + permission + clipboard smoke, and
+  post-``destroy`` → ``WebViewDestroyedError``; own pytest process on
+  Linux / Windows CI
+
 ### Changed
 
 - Release workflow publishes to PyPI with ``pypa/gh-action-pypi-publish``
