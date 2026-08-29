@@ -26,6 +26,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Linux: initialize GTK before constructing ``WebSession`` / wry ``WebContext``
+  (``ephemeral=True`` / ``data_directory=`` in ``WebView.__init__`` no longer
+  panics with ``GTK has not been initialized`` in a fresh process)
 - Deliver download-complete ``last_download`` / ``<<WebViewDownloadComplete>>`` /
   ``<<WebViewDownloadFailed>>`` without ``on_download_complete`` (wakeup path;
   no idle ``_webview is not None`` poll latch)

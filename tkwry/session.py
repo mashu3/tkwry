@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -58,6 +59,14 @@ class WebSession:
             resolved = Path(data_directory).expanduser().absolute()
             resolved.mkdir(parents=True, exist_ok=True)
             path = str(resolved)
+        # Linux: wry ``WebContext`` touches WebKitGTK (ApplicationInfo) and
+        # panics if GTK was never initialized. Owned sessions are created in
+        # ``WebView.__init__`` before native WebView / GtkPump paths call
+        # ``gtk::init`` — so init here for any early ``WebSession(...)``.
+        if sys.platform.startswith("linux"):
+            from tkwry._core import ensure_gtk_init
+
+            ensure_gtk_init()
         self._native = NativeWebSession(data_directory=path, ephemeral=ephemeral)
         self._app_root: str | None = None
         self._webviews: weakref.WeakSet[WebView] = weakref.WeakSet()

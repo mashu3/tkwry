@@ -90,6 +90,17 @@ impl WebSession {
     #[new]
     #[pyo3(signature = (*, data_directory = None, ephemeral = false))]
     fn new(data_directory: Option<String>, ephemeral: bool) -> PyResult<Self> {
+        // WebContext construction uses WebKitGTK APIs that require gtk::init.
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            if let Err(e) = gtk::init() {
+                if !gtk::is_initialized() {
+                    return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "GTK init failed: {e}. Is $DISPLAY set?"
+                    )));
+                }
+            }
+        }
         let data_directory = data_directory.map(PathBuf::from);
         let state = WebSessionState::new(data_directory, ephemeral)?;
         Ok(Self {
