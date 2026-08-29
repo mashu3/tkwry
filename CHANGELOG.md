@@ -19,6 +19,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Deliver download-complete ``last_download`` / ``<<WebViewDownloadComplete>>`` /
   ``<<WebViewDownloadFailed>>`` without ``on_download_complete`` (wakeup path;
   no idle ``_webview is not None`` poll latch)
+- Windows CI: run long-lived ``thread=True`` RPC stress tests
+  (timeout / destroy-during-worker / JS cancel) in a separate pytest process
+  so arm64 does not abort with ``0x80000003`` after a long ``test_content``
+  create/destroy streak
 
 ### Changed
 
