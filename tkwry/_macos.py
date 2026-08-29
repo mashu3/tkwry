@@ -369,6 +369,7 @@ def _mac_service_wakeup(toplevel: tk.Misc) -> bool:
     drained = _drain_mac_tk_unfocus(toplevel)
     for web in _mac_webviews(toplevel):
         web._drain_sync_hooks()
+        web._wake_async_events()
     _sync_mac_web_input_cache(toplevel)
     if drained or had_pipe_data:
         try:

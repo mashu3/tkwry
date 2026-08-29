@@ -162,6 +162,73 @@ def test_download_complete_handler_keeps_poll(tk_root) -> None:
         web.destroy()
 
 
+def test_download_complete_wakeup_without_handler(tk_root) -> None:
+    """T7 / D21: complete arrives via wakeup; no idle ``_webview`` poll latch."""
+    web = _make_web(tk_root)
+    native = MagicMock()
+    native.drain_download_complete_events.return_value = [
+        ("https://example.com/a.zip", "/tmp/a.zip", True)
+    ]
+    web._webview = native
+    fired: list[str] = []
+    web.bind("<<WebViewDownloadComplete>>", lambda _evt: fired.append("ok"))
+    try:
+        assert web._needs_event_poll() is False
+        assert web._should_keep_polling() is False
+        # Simulate Rust complete push + pipe wake (not ``_native_download_complete``,
+        # which would arm poll for tests).
+        web._wake_async_events()
+        assert fired == ["ok"]
+        assert web.last_download == ("https://example.com/a.zip", "/tmp/a.zip", True)
+        assert web._needs_event_poll() is False
+        assert web._should_keep_polling() is False
+        assert web._event_poll_active is False
+    finally:
+        web._webview = None
+        web.destroy()
+
+
+def test_download_complete_poll_path_without_handler(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Handler-less complete still drains when an unrelated poll is already active."""
+    web = _make_web(tk_root)
+    monkeypatch.setattr(
+        "tkwry._core.pump_events", lambda max_iterations=None: False, raising=False
+    )
+    original = web._frame.after
+
+    def after(delay, func=None, *args):
+        if func is web._poll_events:
+            return ""
+        if func is None:
+            return original(delay)
+        return original(delay, func, *args)
+
+    monkeypatch.setattr(web._frame, "after", after)
+    native = MagicMock()
+    # macOS poll also wakes → ``_wake_async_events`` then poll deliver; one batch.
+    pending = [[("https://example.com/b.zip", "/tmp/b.zip", True)]]
+
+    def drain_complete() -> list[tuple[str, str | None, bool]]:
+        return pending.pop(0) if pending else []
+
+    native.drain_download_complete_events.side_effect = drain_complete
+    native.drain_eval_callbacks.return_value = []
+    web._webview = native
+    fired: list[str] = []
+    web.bind("<<WebViewDownloadComplete>>", lambda _evt: fired.append("ok"))
+    try:
+        web._event_poll_active = True
+        web._poll_events()
+        assert fired == ["ok"]
+        assert web.last_download == ("https://example.com/b.zip", "/tmp/b.zip", True)
+        assert web._event_poll_active is False
+    finally:
+        web._webview = None
+        web.destroy()
+
+
 def test_download_complete_delivery(tk_root) -> None:
     web = _make_web(tk_root)
     events: list[tuple[str, str | None, bool]] = []

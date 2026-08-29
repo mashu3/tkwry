@@ -108,7 +108,13 @@ def _run_pending_webview_destroy(web: WebView) -> None:
 
 
 def _drain_toplevel_sync_hooks(toplevel: tk.Misc) -> None:
-    """Drain pending navigation/new-window hooks for all WebViews on *toplevel*."""
+    """Drain sync hooks and wakeup-backed async queues for WebViews on *toplevel*.
+
+    The pipe wakeup is shared: navigation/new-window/download *start* sync hooks
+    and download-*complete* async events all write it. Complete events must be
+    delivered here so ``last_download`` / Tk events work without
+    ``on_download_complete`` (and without an idle ``_webview is not None`` poll).
+    """
     _drain_pending_destroy_webviews(toplevel)
     refs = getattr(toplevel, "_tkwry_sync_hook_webviews", None)
     if not refs:
@@ -121,6 +127,7 @@ def _drain_toplevel_sync_hooks(toplevel: tk.Misc) -> None:
         live.append(ref)
         if not web._destroyed:
             web._drain_sync_hooks()
+            web._wake_async_events()
     if live:
         setattr(toplevel, "_tkwry_sync_hook_webviews", live)
     elif hasattr(toplevel, "_tkwry_sync_hook_webviews"):

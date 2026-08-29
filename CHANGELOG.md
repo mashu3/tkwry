@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Deliver download-complete ``last_download`` / ``<<WebViewDownloadComplete>>`` /
+  ``<<WebViewDownloadFailed>>`` without ``on_download_complete`` (wakeup path;
+  no idle ``_webview is not None`` poll latch)
+
 ### Changed
 
 - Release workflow publishes to PyPI with ``pypa/gh-action-pypi-publish``

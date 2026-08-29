@@ -2264,6 +2264,22 @@ class WebView(WebViewRpcMixin):
             if handler is not None:
                 self._invoke_callback(handler, url, dest, success)
 
+    def _wake_async_events(self) -> None:
+        """Drain wakeup-backed async queues without an idle native poll.
+
+        ``download_complete_listening`` is always on so ``last_download`` and
+        ``<<WebViewDownloadComplete>>`` / ``Failed`` work without a handler.
+        Native complete pushes wake the Tk pipe; that path used to drain sync
+        hooks only, so handler-less completes sat in the queue forever after
+        ``76b50aa`` stopped polling on ``_webview is not None``. Deliver here
+        (and keep a continuous poll only while ``on_download_complete`` is set).
+        """
+        if self._destroyed:
+            return
+        self._deliver_download_complete_events()
+        if self._should_keep_polling():
+            self._ensure_event_poll()
+
     def _native_download_complete(
         self, url: str, dest: str | None, success: bool
     ) -> None:
@@ -2273,7 +2289,7 @@ class WebView(WebViewRpcMixin):
             return
         native.set_download_complete_listening(True)
         native._enqueue_download_complete_event(url, dest, success)
-        self._ensure_event_poll()
+        self._wake_async_events()
 
     def _native_new_window(self, url: str) -> NewWindowResponse:
         if self._on_new_window is None and not self._new_window_policy_active():
