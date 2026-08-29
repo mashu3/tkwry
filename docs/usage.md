@@ -89,6 +89,10 @@ web.eval_js("document.title = 'Hi'")  # fire-and-forget (Tk idle, no return valu
 web.eval_js("bad()", on_error=lambda exc: print("eval failed:", exc))
 web.eval_js_with_callback("document.title", print)  # async; callback on Tk main thread
 web.load_url("https://example.com")
+web.load_url(
+    "https://api.example.com/me",
+    headers={"Authorization": "Bearer …"},  # this request only; never logged
+)
 web.reload()
 web.print()  # system print dialog (no PDF, no success/fail result)
 print(web.url)
@@ -291,7 +295,7 @@ web.destroy()   # release native webview; host Frame is kept
 
 | Category | Members |
 |----------|---------|
-| Content | `load_url`, `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `print`, `url` |
+| Content | `load_url` (`headers=` this request only, http(s)), `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `print`, `url` |
 | Cookies / browsing data | `cookies`, `cookies_for_url`, `set_cookie`, `delete_cookie`, `clear_all_browsing_data`, `Cookie` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `last_eval_error`, `<<WebViewEvalFailed>>` |
 | IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `stream` / `cancel`) |

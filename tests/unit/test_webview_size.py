@@ -1034,7 +1034,7 @@ def test_queue_user_load_supersedes_initial_and_cancels_timer(
     assert web._initial_load is None
     assert web._initial_load_after_id is None
     assert cancelled == ["fake-timer"]
-    assert web._pending_load == ("url", "https://example.com/B")
+    assert web._pending_load == ("url", "https://example.com/B", None)
 
 
 def test_set_pending_load_preserves_initial_load(tk_root) -> None:
@@ -1223,7 +1223,7 @@ def test_reload_clears_pending_flush_load(
     web = WebView(frame, width=400, height=300)
     native = MagicMock()
     web._webview = native
-    web._pending_load = ("url", "https://example.com/stale")
+    web._pending_load = ("url", "https://example.com/stale", None)
     web._flush_load_scheduled = True
     monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
     monkeypatch.setattr(web, "_service_linux_events", lambda **_k: None, raising=False)
@@ -1365,7 +1365,7 @@ def test_flush_load_retries_without_clearing_pending_on_failure(
     native = MagicMock()
     native.load_url.side_effect = RuntimeError("boom")
     web._webview = native
-    web._pending_load = ("url", "https://example.com")
+    web._pending_load = ("url", "https://example.com", None)
     scheduled: list[int] = []
     monkeypatch.setattr(
         web, "_schedule_flush_load", lambda **_k: scheduled.append(1), raising=False
@@ -1374,13 +1374,13 @@ def test_flush_load_retries_without_clearing_pending_on_failure(
     monkeypatch.setattr(web, "_service_linux_events", lambda **_k: None, raising=False)
 
     web._flush_load()
-    assert web._pending_load == ("url", "https://example.com")
+    assert web._pending_load == ("url", "https://example.com", None)
     assert scheduled == [1]
     assert web._flush_load_attempt == 1
 
     web._flush_load_attempt = _FLUSH_LOAD_MAX_ATTEMPTS - 1
     web._flush_load()
-    assert web._pending_load == ("url", "https://example.com")
+    assert web._pending_load == ("url", "https://example.com", None)
     assert web._flush_load_attempt == 0
     err = capsys.readouterr().err
     assert "load still failing" in err

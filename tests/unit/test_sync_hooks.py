@@ -251,7 +251,7 @@ def test_navigation_deferred_load_avoids_sync_hook_deadlock(
     web.set_on_navigation(handler)
     assert web._native_navigation("https://example.com/") is True
     assert web._sync_hook_depth == 0
-    assert web._pending_load == ("url", "https://example.com/deferred")
+    assert web._pending_load == ("url", "https://example.com/deferred", None)
     assert native.load_url.call_count == 0
 
     web._flush_load()

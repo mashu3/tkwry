@@ -1757,6 +1757,28 @@ WebViews that share a session must use the same app= root \
         })
     }
 
+    /// Navigate with extra request headers (this navigation only).
+    ///
+    /// Header **values** must not appear in error messages (callers validate too).
+    fn load_url_with_headers(&self, url: &str, headers: Vec<(String, String)>) -> PyResult<()> {
+        use wry::http::{HeaderMap, HeaderName, HeaderValue};
+
+        let mut map = HeaderMap::new();
+        for (name, value) in headers {
+            let header_name = HeaderName::try_from(name.as_str())
+                .map_err(|_| pyo3::exceptions::PyValueError::new_err("invalid HTTP header name"))?;
+            let header_value = HeaderValue::try_from(value.as_str()).map_err(|_| {
+                pyo3::exceptions::PyValueError::new_err("invalid HTTP header value")
+            })?;
+            map.append(header_name, header_value);
+        }
+        let url = app_protocol::navigate_url(url);
+        with_webview(self, |wv| {
+            wv.load_url_with_headers(url.as_ref(), map)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })
+    }
+
     fn load_html(&self, html: &str) -> PyResult<()> {
         with_webview(self, |wv| {
             wv.load_html(html)

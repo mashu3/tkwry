@@ -12,7 +12,7 @@ import tkinter as tk
 import traceback
 import warnings
 import weakref
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from enum import Enum
 from pathlib import Path
 from typing import Literal, TypeAlias, TypeVar, cast
@@ -63,7 +63,7 @@ from tkwry._parent import (
     tk_embed_parent,
 )
 from tkwry._rpc_api import WebViewRpcMixin
-from tkwry._url import _normalize_url, _validate_url
+from tkwry._url import _normalize_load_headers, _normalize_url, _validate_url
 from tkwry.exceptions import (
     TkwrySecurityWarning,
     WebViewCreationError,
@@ -99,7 +99,10 @@ CreationFailedHandler: TypeAlias = Callable[[BaseException], None]
 DownloadHandler: TypeAlias = Callable[[str, str], str | Path | bool | None]
 DownloadCompleteHandler: TypeAlias = Callable[[str, str | None, bool], None]
 _DANGEROUS_DOWNLOAD_SCHEMES = frozenset({"javascript", "vbscript", "mailto"})
-_PendingLoad: TypeAlias = tuple[Literal["url"], str] | tuple[Literal["html"], str]
+_PendingLoad: TypeAlias = (
+    tuple[Literal["url"], str, tuple[tuple[str, str], ...] | None]
+    | tuple[Literal["html"], str]
+)
 _PendingEval: TypeAlias = tuple[float, EvalCallback, EvalErrorHandler | None]
 _NativeEvalWait: TypeAlias = tuple[int, int, EvalCallback, EvalErrorHandler | None]
 _SyncHookItem: TypeAlias = tuple[
@@ -561,6 +564,7 @@ class WebView(WebViewRpcMixin):
                     "tkwry:// URLs require app= (custom protocol root) at create"
                 )
         self._pending_url = None if html is not None else url
+        self._pending_url_headers: tuple[tuple[str, str], ...] | None = None
         self._pending_html = html
         self._lock_app_navigation = self._app_root is not None and not untrusted
         has_app = self._app_root is not None
@@ -1309,37 +1313,79 @@ class WebView(WebViewRpcMixin):
         """Remember constructor ``url``/``html`` until ``_run_initial_load``."""
         self._initial_load = load
 
-    def _set_pending_load(self, kind: Literal["url", "html"], payload: str) -> None:
+    def _set_pending_load(
+        self,
+        kind: Literal["url", "html"],
+        payload: str,
+        *,
+        headers: tuple[tuple[str, str], ...] | None = None,
+    ) -> None:
         """Write coalesced post-create load without touching ``_initial_load``."""
         if kind == "url":
-            self._pending_load = ("url", payload)
+            self._pending_load = ("url", payload, headers)
         else:
             self._pending_load = ("html", payload)
 
-    def _queue_user_load(self, kind: Literal["url", "html"], payload: str) -> None:
+    def _queue_user_load(
+        self,
+        kind: Literal["url", "html"],
+        payload: str,
+        *,
+        headers: tuple[tuple[str, str], ...] | None = None,
+    ) -> None:
         """User ``load_*`` last-wins: supersede constructor load and set pending."""
         self._clear_initial_load()
-        self._set_pending_load(kind, payload)
+        self._set_pending_load(
+            kind, payload, headers=headers if kind == "url" else None
+        )
 
     def _clear_pending_load(self) -> None:
         self._pending_load = None
 
-    def _set_precreate_url(self, url: str) -> None:
+    def _set_precreate_url(
+        self,
+        url: str,
+        *,
+        headers: tuple[tuple[str, str], ...] | None = None,
+    ) -> None:
         """Store URL applied at native create (clears pending HTML)."""
         self._pending_url = url
+        self._pending_url_headers = headers
         self._pending_html = None
 
     def _set_precreate_html(self, html: str) -> None:
         """Store HTML applied at native create (clears pending URL)."""
         self._pending_html = html
         self._pending_url = None
+        self._pending_url_headers = None
 
     def _clear_precreate_pending(self) -> None:
         """Drop pre-create URL/HTML after they are consumed into ``_initial_load``."""
         self._pending_url = None
+        self._pending_url_headers = None
         self._pending_html = None
 
-    def load_url(self, url: str) -> None:
+    def _apply_load_to_native(self, load: _PendingLoad) -> None:
+        """Push one coalesced load to the native WebView (must exist)."""
+        native = self._webview
+        if native is None:
+            return
+        if load[0] == "url":
+            _, payload, headers = load
+            if headers:
+                native.load_url_with_headers(payload, list(headers))
+            else:
+                native.load_url(payload)
+        else:
+            _, payload = load
+            native.load_html(payload)
+
+    def load_url(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> None:
         """Navigate to *url* (``http``/``https``/``file``/``tkwry``; scheme optional).
 
         Local filesystem paths (``/path/to/page.html``, ``C:\\page.html``) are
@@ -1347,13 +1393,26 @@ class WebView(WebViewRpcMixin):
         ``tkwry://localhost/...`` URLs require constructor ``app=`` (custom
         protocol root fixed at create time).
 
+        Optional *headers* are sent on **this navigation request only** (not
+        injected into in-page ``fetch`` / subresources). Requires an
+        ``http``/``https`` URL. Header values are never written to tkwry logs
+        or exception messages. A ``User-Agent`` header here does **not** rewrite
+        ``navigator.userAgent`` (create-time ``user_agent=`` is the identity
+        path). Redirect following is engine-defined.
+
         Multiple rapid calls are coalesced (**last-wins**): only the final URL
-        is loaded. Before the native view exists, the URL is stored and applied
-        at creation (unless superseded by :meth:`load_html`).
+        (and its headers) is loaded. Before the native view exists, the URL is
+        stored and applied at creation (unless superseded by :meth:`load_html`).
         """
         self._require_not_destroyed("load_url")
         normalized = _normalize_url(url)
         _validate_url(normalized)
+        header_items = _normalize_load_headers(headers)
+        if header_items is not None:
+            if not (
+                normalized.startswith("http://") or normalized.startswith("https://")
+            ):
+                raise ValueError("load_url headers= requires an http(s) URL")
         if normalized.startswith("tkwry:") and self._app_root is None:
             raise ValueError(
                 "tkwry:// URLs require app= (custom protocol root) at create"
@@ -1363,13 +1422,13 @@ class WebView(WebViewRpcMixin):
                 "WebView native creation failed; cannot call load_url()"
             ) from self._creation_error
         if self._webview is None:
-            self._set_precreate_url(normalized)
+            self._set_precreate_url(normalized, headers=header_items)
             return
         if self._sync_hook_depth > 0:
-            self._queue_user_load("url", normalized)
+            self._queue_user_load("url", normalized, headers=header_items)
             self._track_after(self._frame.after_idle(self._flush_load))
             return
-        self._queue_user_load("url", normalized)
+        self._queue_user_load("url", normalized, headers=header_items)
         self._dispatch_pending_load()
 
     def load_html(self, html: str) -> None:
@@ -2886,7 +2945,7 @@ class WebView(WebViewRpcMixin):
         if html is not None:
             initial_load = ("html", html)
         elif url is not None:
-            initial_load = ("url", url)
+            initial_load = ("url", url, self._pending_url_headers)
 
         kwargs: dict = {
             "width": width,
@@ -3159,18 +3218,19 @@ class WebView(WebViewRpcMixin):
         if self._initial_load is not load or self._pending_load is not None:
             self._clear_initial_load()
             return
-        kind, payload = load
         if sys.platform == "linux":
-            self._set_pending_load(kind, payload)
+            if load[0] == "url":
+                _, payload, headers = load
+                self._set_pending_load("url", payload, headers=headers)
+            else:
+                _, payload = load
+                self._set_pending_load("html", payload)
             self._dispatch_pending_load()
             if self._pending_load is None:
                 self._clear_initial_load()
             return
         try:
-            if kind == "url":
-                self._webview.load_url(payload)
-            else:
-                self._webview.load_html(payload)
+            self._apply_load_to_native(load)
         except Exception:
             traceback.print_exc()
             self._bump_initial_load_attempt()
@@ -3186,14 +3246,11 @@ class WebView(WebViewRpcMixin):
         self._flush_load_scheduled = False
         if self._destroyed or self._webview is None or self._pending_load is None:
             return
-        kind, payload = self._pending_load
+        load = self._pending_load
         if sys.platform == "linux":
             self._sync_bounds()
         try:
-            if kind == "url":
-                self._webview.load_url(payload)
-            else:
-                self._webview.load_html(payload)
+            self._apply_load_to_native(load)
         except Exception:
             traceback.print_exc()
             self._flush_load_attempt += 1

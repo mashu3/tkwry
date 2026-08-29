@@ -125,9 +125,9 @@ def test_load_coalesces_to_last_pending(tk_root) -> None:
 
     assert web._initial_load is None
     # Linux may flush pending loads synchronously; Win/macOS keep the coalesced entry.
-    assert web._pending_load in (None, ("url", "https://example.com/c"))
+    assert web._pending_load in (None, ("url", "https://example.com/c", None))
     if web._pending_load is not None:
-        assert web._pending_load == ("url", "https://example.com/c")
+        assert web._pending_load == ("url", "https://example.com/c", None)
 
     web.destroy()
     frame.destroy()
@@ -144,9 +144,9 @@ def test_load_after_create_cancels_deferred_initial_load(tk_root) -> None:
 
     assert web._initial_load is None
     # Linux may flush pending loads synchronously; do not rely on native url().
-    assert web._pending_load in (None, ("url", "https://example.com/B"))
+    assert web._pending_load in (None, ("url", "https://example.com/B", None))
     if web._pending_load is not None:
-        assert web._pending_load == ("url", "https://example.com/B")
+        assert web._pending_load == ("url", "https://example.com/B", None)
     web._run_initial_load()  # delayed callback must be a no-op
     assert web._initial_load is None
     assert web._pending_load != ("html", "<p>A</p>")

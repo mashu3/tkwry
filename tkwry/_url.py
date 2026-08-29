@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import unquote, urlparse, urlunparse
 from urllib.request import url2pathname
@@ -581,3 +582,34 @@ def _validate_url(url: str) -> None:
         _validate_file_url(url)
     if parsed.scheme == "tkwry":
         _validate_tkwry_url(parsed)
+
+
+def _normalize_load_headers(
+    headers: Mapping[str, str] | None,
+) -> tuple[tuple[str, str], ...] | None:
+    """Validate *headers* for :meth:`~tkwry.WebView.load_url`.
+
+    Returns a stable tuple of ``(name, value)`` pairs, or ``None`` when
+    *headers* is omitted / empty. **Values are never included in error
+    messages** (names may be). Rejects CR/LF to block header injection.
+    """
+    if headers is None:
+        return None
+    if not isinstance(headers, Mapping):
+        raise TypeError("headers must be a mapping of str to str")
+    if len(headers) == 0:
+        return None
+    items: list[tuple[str, str]] = []
+    for raw_name, raw_value in headers.items():
+        if not isinstance(raw_name, str) or not isinstance(raw_value, str):
+            raise TypeError("headers keys and values must be str")
+        name = raw_name.strip()
+        if not name:
+            raise ValueError("header name must be non-empty")
+        if any(ch in name for ch in ("\r", "\n", "\x00")):
+            raise ValueError(f"invalid header name: {name!r}")
+        if any(ch in raw_value for ch in ("\r", "\n", "\x00")):
+            # Do not echo the value.
+            raise ValueError(f"invalid header value for {name!r}")
+        items.append((name, raw_value))
+    return tuple(items)

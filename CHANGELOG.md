@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Cookie / browsing-data wrap: ``Cookie``, ``cookies`` / ``cookies_for_url``,
   ``set_cookie`` / ``delete_cookie``, ``clear_all_browsing_data`` (wry 0.56
   names on ``WebView``; ``repr(Cookie)`` omits ``value``)
+- ``load_url(..., headers={...})`` — extra headers on that navigation only
+  (http(s); values never logged; not a ``navigator.userAgent`` spoof)
 
 ### Fixed
 
