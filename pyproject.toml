@@ -32,7 +32,7 @@ dependencies = []
 [project.urls]
 Homepage = "https://github.com/mashu3/tkwry"
 Repository = "https://github.com/mashu3/tkwry"
-Documentation = "https://github.com/mashu3/tkwry#readme"
+Documentation = "https://github.com/mashu3/tkwry/blob/main/docs/usage.md"
 "Bug Tracker" = "https://github.com/mashu3/tkwry/issues"
 Changelog = "https://github.com/mashu3/tkwry/blob/main/CHANGELOG.md"
 

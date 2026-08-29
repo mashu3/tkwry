@@ -25,6 +25,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Document create-only ``user_agent=`` as app identity (engine may
   prefix/suffix; not a Chrome-spoof / fingerprint kit). Third-party
   sites that degrade in-WebView (e.g. YouTube comments) → system browser
+- README repo links are absolute GitHub URLs so PyPI long-description
+  keeps working after the Usage split; ``project.urls.Documentation``
+  points at ``docs/usage.md``
 
 ## [0.1.4] - 2026-08-14
 

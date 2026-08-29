@@ -29,13 +29,16 @@ jobs:
           python-version: "3.12"
 
       - name: Install ruff
-        run: pip install "ruff>=0.9"
+        run: pip install "ruff>=0.9" "readme-renderer[md]"
 
       - name: Ruff check
         run: ruff check tkwry tests examples
 
       - name: Ruff format
         run: ruff format --check tkwry tests examples
+
+      - name: README PyPI links + long-description render
+        run: python scripts/check_readme_pypi_links.py
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
