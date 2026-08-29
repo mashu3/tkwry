@@ -113,6 +113,19 @@ def test_user_agent_and_init_script_via_setters_before_create(tk_root) -> None:
         frame.destroy()
 
 
+def test_set_zoom_and_reset_zoom_smoke(tk_root) -> None:
+    """Page zoom binder reaches the engine without inventing clamps."""
+    frame = host_frame(tk_root)
+    web = WebView(frame, html=_PAGE)
+    try:
+        assert wait_until(tk_root, lambda: web.ready, steps=200)
+        web.set_zoom(1.25)
+        web.reset_zoom()
+    finally:
+        web.destroy()
+        frame.destroy()
+
+
 def test_devtools_open_close_roundtrip(tk_root) -> None:
     """Smoke: binder + platform DevTools open/close stay consistent.
 

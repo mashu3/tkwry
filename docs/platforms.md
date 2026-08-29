@@ -104,6 +104,15 @@ WebKit wait for a return value — see
 There is no PDF, no headless print, and no success / fail / cancel
 callback — the call is fire-and-forget. Do not add fake kwargs.
 
+## Zoom (page, not window)
+
+`web.set_zoom(scale)` wraps wry `WebView::zoom` (`1.0` = 100%).
+`web.reset_zoom()` is `set_zoom(1.0)`. Tk-thread / ready; destroy raises
+`WebViewDestroyedError`. tkwry does **not** clamp — engine ranges differ
+(WebView2 typically about `0.25`–`5.0`; WKWebView `pageZoom` on macOS 11+;
+WebKitGTK `zoom-level`). This is **page** content zoom. Tk window
+iconify / zoom / geometry stay on the host **Toplevel** (below).
+
 ## Window chrome (Tk, not the WebView)
 
 Title, icon, geometry, min/max size, fullscreen, `-topmost`, and

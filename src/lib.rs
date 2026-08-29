@@ -1828,6 +1828,17 @@ WebViews that share a session must use the same app= root \
         })
     }
 
+    /// Page zoom factor (`1.0` = 100%). Wraps wry `WebView::zoom`.
+    ///
+    /// Engine range is platform-defined (e.g. WebView2 typically `0.25`–`5.0`);
+    /// tkwry does not clamp.
+    fn set_zoom(&self, scale: f64) -> PyResult<()> {
+        with_webview(self, |wv| {
+            wv.zoom(scale)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })
+    }
+
     fn cookies(&self) -> PyResult<Vec<cookie_api::Cookie>> {
         with_webview(self, |wv| {
             wv.cookies()

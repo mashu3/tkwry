@@ -57,6 +57,8 @@ WEBVIEW_METHODS = (
     "can_go_back",
     "can_go_forward",
     "print",
+    "set_zoom",
+    "reset_zoom",
     "cookies",
     "cookies_for_url",
     "set_cookie",

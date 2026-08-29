@@ -95,6 +95,7 @@ web.load_url(
 )
 web.reload()
 web.print()  # system print dialog (no PDF, no success/fail result)
+web.set_zoom(1.25)  # page zoom (1.0 = 100%); reset_zoom() → 1.0
 print(web.url)
 web.focus()
 ```
@@ -118,6 +119,7 @@ generate `<<WebViewEvalFailed>>`, and set `last_eval_error`
 printed to stderr.
 
 Print honesty: [Platform notes — Print](platforms.md#print).
+Page zoom: [Platform notes — Zoom](platforms.md#zoom-page-not-window).
 DevTools OS caveats: [Platform notes](platforms.md).
 
 ## Layout / resize
@@ -300,7 +302,7 @@ web.destroy()   # release native webview; host Frame is kept
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `last_eval_error`, `<<WebViewEvalFailed>>` |
 | IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `stream` / `cancel`) |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_complete` |
-| Appearance | `set_background_color`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
+| Appearance | `set_background_color`, `set_zoom` / `reset_zoom`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
 | Layout | `pack`, `grid`, `place`, `sync_bounds` (delegate to host `Frame` except `sync_bounds`) |
 | Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `untrusted`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |

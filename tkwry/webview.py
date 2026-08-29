@@ -1521,6 +1521,29 @@ class WebView(WebViewRpcMixin):
         """
         self._require_ready("print").print()
 
+    def set_zoom(self, scale: float) -> None:
+        """Set the page zoom factor (``1.0`` = 100%).
+
+        Wraps wry ``WebView::zoom``. Tk-thread and ready required. Engine
+        range is platform-defined (WebView2 typically accepts about
+        ``0.25``–``5.0``; WKWebView ``pageZoom`` on macOS 11+; WebKitGTK
+        ``zoom-level``). tkwry does not clamp — out-of-range values raise
+        from the engine when it rejects them.
+
+        This is **page** zoom, not Tk window zoom/iconify (those belong on
+        the host :class:`~tkinter.Toplevel`).
+        """
+        if isinstance(scale, bool) or not isinstance(scale, (int, float)):
+            raise TypeError("scale must be a finite float")
+        scale_f = float(scale)
+        if not math.isfinite(scale_f):
+            raise ValueError("scale must be a finite float")
+        self._require_ready("set_zoom").set_zoom(scale_f)
+
+    def reset_zoom(self) -> None:
+        """Reset page zoom to ``1.0`` (same as ``set_zoom(1.0)``)."""
+        self._require_ready("reset_zoom").set_zoom(1.0)
+
     def cookies(self) -> list[Cookie]:
         """Return all cookies known to this WebView's engine store.
 

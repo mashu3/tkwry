@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   names on ``WebView``; ``repr(Cookie)`` omits ``value``)
 - ``load_url(..., headers={...})`` — extra headers on that navigation only
   (http(s); values never logged; not a ``navigator.userAgent`` spoof)
+- ``set_zoom(scale)`` / ``reset_zoom()`` — page zoom (wry ``WebView::zoom``;
+  ``1.0`` = 100%; no tkwry clamp; not Tk window zoom)
 
 ### Fixed
 
