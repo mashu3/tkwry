@@ -10,6 +10,9 @@
 # also aborted the process on Windows arm64 with STATUS_BREAKPOINT
 # (0x80000003) while ThreadPoolExecutor spins a thread under GC after a long
 # ``test_content`` create/destroy streak. Keep those in a fresh process.
+#
+# Off-thread sync-hook unit tests similarly abort under GC after a long
+# ``tests/unit/`` streak (Linux Aborted / Windows 0x80000003). Isolate them.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,7 +27,8 @@ CONTENT_RPC_WORKER_STRESS=(
   tests/integration/test_content.py::test_rpc_js_cancel_rejects_worker
 )
 
-pytest tests/unit/ -v --tb=short
+pytest tests/unit/test_sync_hooks.py -v --tb=short
+pytest tests/unit/ --ignore=tests/unit/test_sync_hooks.py -v --tb=short
 pytest tests/integration/test_content.py -v --tb=short \
   --deselect "${CONTENT_RPC_WORKER_STRESS[0]}" \
   --deselect "${CONTENT_RPC_WORKER_STRESS[1]}" \

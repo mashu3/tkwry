@@ -12,8 +12,13 @@ cleanup_webkit() {
   pkill -9 -f '[Ww]eb[Kk]it' 2>/dev/null || true
 }
 
+# Off-thread sync-hook unit tests (worker + Tk pump) have aborted under GC
+# after a long ``tests/unit/`` create/destroy streak on GHA. Run them first
+# in a fresh process, then the rest of unit (ignore this file).
+pytest tests/unit/test_sync_hooks.py -v --tb=short
+cleanup_webkit
 # WebKitGTK hangs in a single pytest process after many WebViews; split suites.
-pytest tests/unit/ -v --tb=short
+pytest tests/unit/ --ignore=tests/unit/test_sync_hooks.py -v --tb=short
 cleanup_webkit
 pytest tests/integration/test_content.py -v --tb=short
 cleanup_webkit
