@@ -42,9 +42,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (timeout / destroy-during-worker / JS cancel) in a separate pytest process
   so arm64 does not abort with ``0x80000003`` after a long ``test_content``
   create/destroy streak
-- Linux / Windows CI: run ``tests/unit/test_sync_hooks.py`` in a separate
-  pytest process (worker + Tk pump under GC aborted the full ``tests/unit/``
-  process after the suite grew)
+- Linux / Windows / macOS CI: run ``tests/unit/test_sync_hooks.py`` in a
+  separate pytest process (worker + Tk pump under GC aborted the full suite
+  after the create/destroy streak grew)
 
 ### Tests
 
