@@ -23,6 +23,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Win/Linux Web Clipboard API opt-in; macOS WebView side always-on (document)
 - ``configure_window(...)`` — host Toplevel chrome helper (title / geometry /
   min·max / fullscreen / ``-topmost`` / icon); not a WebView bounds API
+- ``QueueDropCounts`` + ``take_queue_drop_stats()`` — named overflow snapshot
+  including ``download_complete`` and ``rpc_stream``; legacy 6-tuple
+  ``take_queue_drop_counts()`` unchanged
 
 ### Fixed
 

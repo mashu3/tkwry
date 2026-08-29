@@ -396,6 +396,11 @@ class WebViewRpcMixin:
             return False
         return True
 
+    def _take_rpc_stream_dropped(self) -> int:
+        n = self._rpc_stream_dropped
+        self._rpc_stream_dropped = 0
+        return n
+
     def _abort_inflight_rpc(self) -> None:
         """Drop inflight RPC on destroy without touching the dying native view."""
         pending = list(self._rpc_inflight.items())

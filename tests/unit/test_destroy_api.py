@@ -75,7 +75,9 @@ POST_DESTROY_ACTIONS: dict[str, Callable[[WebView], object]] = {
     "wait_until_ready": lambda w: w.wait_until_ready(timeout=0.05),
 }
 
-POST_DESTROY_ALLOWED = frozenset({"destroy", "take_queue_drop_counts"})
+POST_DESTROY_ALLOWED = frozenset(
+    {"destroy", "take_queue_drop_counts", "take_queue_drop_stats"}
+)
 
 POST_DESTROY_READABLE_PROPERTIES = frozenset(
     {
@@ -127,6 +129,16 @@ def test_destroy_is_idempotent_and_drop_counts_readable(tk_root) -> None:
     web.destroy()
     assert web.destroyed is True
     assert web.take_queue_drop_counts() == (0, 0, 0, 0, 0, 0)
+    assert web.take_queue_drop_stats() == (
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    )
     frame.destroy()
 
 

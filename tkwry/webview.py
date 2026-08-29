@@ -15,7 +15,7 @@ import weakref
 from collections.abc import Callable, Collection, Mapping
 from enum import Enum
 from pathlib import Path
-from typing import Literal, TypeAlias, TypeVar, cast
+from typing import Literal, NamedTuple, TypeAlias, TypeVar, cast
 
 from tkwry._app import resolve_app, resolve_app_csp, validate_app_isolation
 from tkwry._core import (
@@ -177,6 +177,24 @@ class WebViewPhase(Enum):
     HIDDEN = "hidden"
     TEARING_DOWN = "tearing_down"
     DESTROYED = "destroyed"
+
+
+class QueueDropCounts(NamedTuple):
+    """Overflow drops since the last :meth:`~WebView.take_queue_drop_stats` call.
+
+    The first six fields match :meth:`~WebView.take_queue_drop_counts`.
+    ``download_complete`` and ``rpc_stream`` are only on this named view
+    (kept out of the legacy 6-tuple through 0.1.x).
+    """
+
+    ipc: int
+    page_load: int
+    title: int
+    drag_drop: int
+    eval: int
+    rpc: int
+    download_complete: int
+    rpc_stream: int
 
 
 class WebView(WebViewRpcMixin):
@@ -1159,7 +1177,8 @@ class WebView(WebViewRpcMixin):
         if you need another embedded view. Further APIs raise
         :exc:`~tkwry.WebViewDestroyedError` except snapshot properties
         (``destroyed``, ``phase``, ``last_*``, …),
-        :meth:`take_queue_drop_counts`, and a second ``destroy()``
+        :meth:`take_queue_drop_counts` / :meth:`take_queue_drop_stats`, and a
+        second ``destroy()``
         (idempotent). :meth:`wait_until_ready` after destroy raises; if
         destroy happens during a wait, that wait returns ``False``.
 
@@ -1795,6 +1814,10 @@ class WebView(WebViewRpcMixin):
         RPC uses a dedicated queue so IPC overflow cannot drop ``tkwry.call``.
         Readable after :meth:`destroy` so local drops counted during teardown
         (for example pending evals) are not lost.
+
+        Does **not** include ``download_complete`` or ``rpc_stream`` overflows —
+        use :meth:`take_queue_drop_stats` for the full named snapshot. Calling
+        either method resets the shared six counters.
         """
         self._require_tk_thread()
         local = self._take_local_queue_drop_counts()
@@ -1808,6 +1831,32 @@ class WebView(WebViewRpcMixin):
             local[3] + native[3],
             local[4] + native[4],
             local[5] + native[5],
+        )
+
+    def take_queue_drop_stats(self) -> QueueDropCounts:
+        """Return named queue overflow counts since the last stats (or counts) take.
+
+        Includes the legacy six fields plus ``download_complete`` (native
+        download-complete queue) and ``rpc_stream`` (worker→Tk stream chunk
+        queue). Resets those counters (and the shared six). Readable after
+        :meth:`destroy`. Prefer this over :meth:`take_queue_drop_counts` for
+        new code.
+        """
+        self._require_tk_thread()
+        local = self._take_local_queue_drop_counts()
+        rpc_stream = self._take_rpc_stream_dropped()
+        if self._destroyed or self._webview is None:
+            return QueueDropCounts(*local, download_complete=0, rpc_stream=rpc_stream)
+        native = self._webview.take_queue_drop_stats()
+        return QueueDropCounts(
+            local[0] + native[0],
+            local[1] + native[1],
+            local[2] + native[2],
+            local[3] + native[3],
+            local[4] + native[4],
+            local[5] + native[5],
+            native[6],
+            rpc_stream,
         )
 
     def set_on_title_changed(self, handler: TitleChangedHandler | None) -> None:

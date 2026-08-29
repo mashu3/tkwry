@@ -145,11 +145,11 @@ args and **256** kwargs. Stream chunks reuse that **10 MiB** JSON cap.
 Oversized RPC / chunks reject with `RpcMessageTooLarge`; too many args
 with `RpcArgumentLimitError`. RPC has its own 2048-deep queue so IPC
 overflow cannot drop `tkwry.call`. Worker→Tk **stream** chunks also cap
-at 2048 pending; further chunks are dropped (counted as ``rpc_stream``
-overflows; not yet in the 6-tuple from `take_queue_drop_counts()`).
+at 2048 pending; further chunks are dropped (``rpc_stream``).
 
-Use `take_queue_drop_counts()` to observe overflows — it returns
-`(ipc, page_load, title, drag_drop, eval, rpc)`.
+Prefer `take_queue_drop_stats()` → `QueueDropCounts` (includes
+`download_complete` and `rpc_stream`). Legacy `take_queue_drop_counts()`
+still returns `(ipc, page_load, title, drag_drop, eval, rpc)`.
 
 ## Python to JS events (emit)
 

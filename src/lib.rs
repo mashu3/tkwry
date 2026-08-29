@@ -2165,6 +2165,24 @@ WebViews that share a session must use the same app= root \
         ))
     }
 
+    /// Same counters as ``take_queue_drop_counts`` plus download-complete overflow.
+    ///
+    /// Returns
+    /// ``(ipc, page_load, title, drag_drop, eval, rpc, download_complete)``.
+    fn take_queue_drop_stats(&self) -> PyResult<(u64, u64, u64, u64, u64, u64, u64)> {
+        self.require_owner_thread()?;
+        Ok((
+            self.ipc_overflow_dropped.swap(0, Ordering::SeqCst),
+            self.page_load_overflow_dropped.swap(0, Ordering::SeqCst),
+            self.title_overflow_dropped.swap(0, Ordering::SeqCst),
+            self.drag_drop_overflow_dropped.swap(0, Ordering::SeqCst),
+            self.eval_overflow_dropped.swap(0, Ordering::SeqCst),
+            self.rpc_overflow_dropped.swap(0, Ordering::SeqCst),
+            self.download_complete_overflow_dropped
+                .swap(0, Ordering::SeqCst),
+        ))
+    }
+
     fn set_ipc_listening(&self, enabled: bool) -> PyResult<()> {
         self.require_owner_thread()?;
         set_listening_and_clear_queue(&self.ipc_listening, &self.ipc_pending, enabled)?;

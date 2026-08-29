@@ -94,6 +94,7 @@ WEBVIEW_METHODS = (
     "set_on_download_complete",
     "sync_bounds",
     "take_queue_drop_counts",
+    "take_queue_drop_stats",
     "pack",
     "grid",
     "place",
@@ -152,6 +153,7 @@ def test_public_exports() -> None:
     assert PermissionKind is not None
     assert PermissionResponse is not None
     assert WebViewPhase is not None
+    assert tkwry.QueueDropCounts is not None
     assert tkwry.WebViewNotReadyError is not None
     assert tkwry.WebViewCreationError is not None
     assert tkwry.WebViewDestroyedError is not None

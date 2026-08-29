@@ -276,11 +276,12 @@ Omit `permission_handler` for the engine default; 0.1.5 does **not** change
 
 Async queues (IPC, RPC, page-load, title, drag-drop, eval) cap at **2048**
 pending items each; further events are compacted or dropped. Worker→Tk
-RPC **stream** chunks use a separate 2048-deep queue (overflows counted
-as ``rpc_stream``). Each IPC/RPC
-**message** also caps at **10 MiB**. RPC is a separate queue from IPC. Use
-`take_queue_drop_counts()` to observe overflows — it returns
-`(ipc, page_load, title, drag_drop, eval, rpc)`.
+RPC **stream** chunks and download-complete events also cap at 2048.
+Each IPC/RPC **message** also caps at **10 MiB**. RPC is a separate queue
+from IPC. Prefer `take_queue_drop_stats()` → `QueueDropCounts` (named
+fields including `download_complete` and `rpc_stream`). The legacy
+`take_queue_drop_counts()` 6-tuple
+`(ipc, page_load, title, drag_drop, eval, rpc)` remains for 0.1.x.
 
 Callback exceptions are printed to stderr and do not stop event delivery.
 
@@ -328,7 +329,7 @@ web.destroy()   # release native webview; host Frame is kept
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create); `devtools=`, `clipboard=`, `permission_handler=` |
 | Layout | `pack`, `grid`, `place`, `sync_bounds` (delegate to host `Frame` except `sync_bounds`) |
 | Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `untrusted`, `clipboard`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
-| Diagnostics | `take_queue_drop_counts` |
+| Diagnostics | `take_queue_drop_stats` / `QueueDropCounts`, `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
 `app_dev`, `csp` / `coop` / `corp`, `session` / `data_directory` / `ephemeral`,
@@ -340,7 +341,8 @@ plus the callback hooks above.
 
 Enums: `PageLoadEvent`, `NewWindowResponse`, `PermissionKind`,
 `PermissionResponse`, `DragDropEvent`, `WebViewPhase`.
-Types: `WebView`, `WebSession`, `Cookie` (``repr`` omits ``value`` — never log secrets).
+Types: `WebView`, `WebSession`, `Cookie` (``repr`` omits ``value`` — never log secrets),
+`QueueDropCounts`.
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
 `WebViewTimeoutError`, `WebViewNavigationError`,
 `RpcTimeoutError`, `RpcCancelledError`, `RpcSerializationError`.
