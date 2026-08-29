@@ -897,6 +897,8 @@ def test_app_spa_fallback_serves_index_for_client_routes(
 
 def test_shared_session_local_storage_roundtrip(tk_root, tmp_path: Path) -> None:
     """Two WebViews with the same WebSession share localStorage."""
+    import tkinter as tk
+
     from tkwry import WebSession
 
     app_dir = tmp_path / "app"
@@ -906,32 +908,73 @@ def test_shared_session_local_storage_roundtrip(tk_root, tmp_path: Path) -> None
         encoding="utf-8",
     )
     session = WebSession(data_directory=tmp_path / "profile")
-    frame_a = host_frame(tk_root)
-    frame_b = host_frame(tk_root)
+
+    # Side-by-side hosts (stacked ``host_frame`` pack can leave one undersized
+    # on Windows CI after a long ``test_content`` streak).
+    tk_root.geometry("700x320")
+    row = tk.Frame(tk_root)
+    row.pack(fill="both", expand=True)
+    row.columnconfigure(0, weight=1, minsize=280)
+    row.columnconfigure(1, weight=1, minsize=280)
+    frame_a = tk.Frame(row, width=320, height=240, bg="#111")
+    frame_b = tk.Frame(row, width=320, height=240, bg="#222")
+    frame_a.grid_propagate(False)
+    frame_b.grid_propagate(False)
+    frame_a.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+    frame_b.grid(row=0, column=1, sticky="nsew", padx=4, pady=4)
+    tk_root.update_idletasks()
+    tk_root.update()
+
     web_a = WebView(frame_a, app=app_dir, session=session, width=320, height=240)
     web_b = WebView(frame_b, app=app_dir, session=session, width=320, height=240)
 
     assert wait_until(tk_root, lambda: web_a.ready and web_b.ready, steps=300)
     pump(tk_root, steps=60)
 
-    web_a.eval_js("localStorage.setItem('tkwry_session_key', 'shared-ok');")
-    pump(tk_root, steps=40)
+    def _page_marker(web: WebView) -> bool:
+        results: list[str] = []
+        web.eval_js_with_callback(
+            "document.getElementById('t') && document.getElementById('t').textContent",
+            results.append,
+        )
+        return wait_until(
+            tk_root,
+            lambda: any("s" in str(v) for v in results),
+            steps=80,
+        )
+
+    assert _page_marker(web_a), "web_a page marker missing"
+    assert _page_marker(web_b), "web_b page marker missing"
+
+    set_acks: list[str] = []
+    web_a.eval_js_with_callback(
+        "localStorage.setItem('tkwry_session_key', 'shared-ok'); 'set-ok'",
+        set_acks.append,
+    )
+    assert wait_until(
+        tk_root,
+        lambda: any("set-ok" in str(v) for v in set_acks),
+        steps=200,
+    ), f"setItem did not settle: {set_acks!r}"
 
     values: list[str] = []
 
-    def on_value(value: str) -> None:
-        values.append(value)
+    def read_key() -> bool:
+        web_b.eval_js_with_callback(
+            "localStorage.getItem('tkwry_session_key')",
+            values.append,
+        )
+        return any("shared-ok" in str(v) for v in values)
 
-    web_b.eval_js_with_callback("localStorage.getItem('tkwry_session_key')", on_value)
-    assert wait_until(tk_root, lambda: values, steps=200), (
-        f"expected localStorage value, got {values!r}"
+    assert wait_until(tk_root, read_key, steps=300), (
+        f"expected shared localStorage value, got {values!r}"
     )
-    assert "shared-ok" in values[0]
 
     web_a.destroy()
     web_b.destroy()
     frame_a.destroy()
     frame_b.destroy()
+    row.destroy()
 
 
 def test_rpc_concurrent_calls_and_ipc_mix(tk_root) -> None:
