@@ -132,6 +132,55 @@ Unmapped hosts (inactive `Notebook` tabs) call `set_visible(False)`.
 `ready` stays layout-based (`True` while hidden); use
 `phase is WebViewPhase.HIDDEN` when you need visibility.
 
+Switching which WebView is on screen: **unmap** the host (`Notebook`,
+`pack_forget`, `grid_remove`). Constructor `width`/`height` is eager
+warmup (native exists while hidden). `lift` / `tkraise` of still-mapped
+Frames does **not** hide the other native view — they overlap (Windows
+HWND z-order is synced; macOS shares one `NSView`). There is no
+`WebViewStack` / lazy-create helper yet.
+
+## User-Agent
+
+Create-only (`user_agent=` or `set_user_agent` before the native view
+exists). After create it raises. Use it to **name your app**, not to
+pretend to be Chrome:
+
+```python
+web = WebView(frame, url="https://example.com", user_agent="MyApp/1.2")
+```
+
+The engine may **prefix or suffix** the default WebView UA — live tests
+check that your string appears **in** `navigator.userAgent`, not that it
+replaces the whole value. Client Hints and other `navigator.*` fields
+still describe the real engine. There are no UA presets, and
+`load_url(..., headers=)` (when added) would apply to **that request
+only** — it does not rewrite `navigator.userAgent`.
+
+When a third-party site **degrades** in the WebView (YouTube comments
+missing, “unsupported browser”, Google login stuck), do not treat that
+as a missing spoof API. Check the URL first: `/embed/` and
+`youtube-nocookie.com` never show comments. `untrusted=True` uses an
+ephemeral profile, so there is no lasting Google session. If you need
+the full site (comments, login, payments), send that URL to the system
+browser:
+
+```python
+from tkwry import open_in_browser
+
+web = WebView(
+    frame,
+    app="./web",
+    navigation_allow=[],  # keep YouTube out of the WebView
+    open_external=True,   # off-list http(s) → default browser
+)
+# or from a button / custom hook:
+open_in_browser("https://www.youtube.com/watch?v=…")
+```
+
+A desktop-looking `user_agent=` at create is an app-level experiment
+only. WebView2 / WKWebView / WebKitGTK still fingerprint as themselves;
+tkwry will not ship a per-site compat layer.
+
 ## Navigation / lifecycle callbacks
 
 ```python

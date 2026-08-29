@@ -13,6 +13,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ([maturin#2334](https://github.com/PyO3/maturin/issues/2334))
 - Move README how-to (``app=``, eval, layout, navigation, downloads, API
   table) to ``docs/usage.md``; README Usage is the Basic example plus links
+- Document hidden-host switching: unmap (Notebook / ``pack_forget``) hides
+  native; ``lift`` of mapped Frames overlaps; constructor size is eager
+  warmup, not lazy create
+- Document create-only ``user_agent=`` as app identity (engine may
+  prefix/suffix; not a Chrome-spoof / fingerprint kit). Third-party
+  sites that degrade in-WebView (e.g. YouTube comments) → system browser
 
 ## [0.1.4] - 2026-08-14
 

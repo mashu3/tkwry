@@ -89,7 +89,8 @@ private APIs — avoid in Mac App Store builds.
 **Notebook / tabs:** unmapped tabs hide the native view (`set_visible(False)`)
 and show again on `<Map>` — required because frames share the toplevel
 `NSView`. `ready` is layout-based (can stay `True` while hidden); prefer
-visible-tab work after the tab is selected. No extra app code for tabs/panes —
+visible-tab work after the tab is selected. `lift` of still-mapped Frames
+does not hide the other native view. No extra app code for tabs/panes —
 [`examples/multi_demo.py`](../examples/multi_demo.py).
 
 Lifecycle / IPC / page-load handlers run on the **Tk main thread**. RPC may
