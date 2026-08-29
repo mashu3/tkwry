@@ -23,6 +23,9 @@ from tkwry import (
     NewWindowResponse,
     PageLoadEvent,
     PageLoadHandler,
+    PermissionHandler,
+    PermissionKind,
+    PermissionResponse,
     TitleChangedHandler,
     WebSession,
     WebView,
@@ -43,6 +46,7 @@ PUBLIC_TYPE_ALIASES = (
     NavigationHandler,
     NewWindowHandler,
     PageLoadHandler,
+    PermissionHandler,
     TitleChangedHandler,
 )
 
@@ -144,6 +148,8 @@ def test_public_exports() -> None:
     assert PageLoadEvent is not None
     assert DragDropEvent is not None
     assert NewWindowResponse is not None
+    assert PermissionKind is not None
+    assert PermissionResponse is not None
     assert WebViewPhase is not None
     assert tkwry.WebViewNotReadyError is not None
     assert tkwry.WebViewCreationError is not None

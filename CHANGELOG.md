@@ -15,6 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (http(s); values never logged; not a ``navigator.userAgent`` spoof)
 - ``set_zoom(scale)`` / ``reset_zoom()`` — page zoom (wry ``WebView::zoom``;
   ``1.0`` = 100%; no tkwry clamp; not Tk window zoom)
+- Create-time ``permission_handler=`` → wry ``with_permission_handler``;
+  ``PermissionKind`` / ``PermissionResponse`` (Allow / Deny / Default). Sync
+  hook on the Tk thread (same family as ``on_navigation``). Omit handler for
+  engine default; does **not** change ``untrusted=True`` defaults
 
 ### Fixed
 

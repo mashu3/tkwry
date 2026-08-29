@@ -199,7 +199,13 @@ tkwry will not ship a per-site compat layer.
 ## Navigation / lifecycle callbacks
 
 ```python
-from tkwry import NewWindowResponse, PageLoadEvent, unique_download_path
+from tkwry import (
+    NewWindowResponse,
+    PageLoadEvent,
+    PermissionKind,
+    PermissionResponse,
+    unique_download_path,
+)
 
 web = WebView(
     frame,
@@ -207,6 +213,11 @@ web = WebView(
     on_page_load=lambda evt, url: print(evt, url),
     on_title_changed=lambda title: root.title(title),
     on_navigation=lambda url: url.startswith("https://"),
+    permission_handler=lambda kind: (
+        PermissionResponse.Allow
+        if kind in (PermissionKind.Camera, PermissionKind.Microphone)
+        else PermissionResponse.Default
+    ),
     on_new_window=lambda url: NewWindowResponse.Deny,
 )
 
@@ -242,17 +253,21 @@ happened before `set_on_page_load` / constructor `on_page_load`.
 
 **Callback threads:** lifecycle / IPC / page-load / title / DnD handlers run
 on the **Tk main thread**. RPC handlers default to the same thread; use
-`@web.expose(thread=True)` for background work. `on_navigation` and
-`on_new_window` are also invoked on Tk, but WebKit **blocks** until they
-return a value — keep them fast (heavy work → return deny/default and defer
-with `root.after`). Do **not** create another WebView from `on_new_window`
-(even deferred): WKWebView deadlocks. Prefer `open_external=True` or
-`open_in_browser(url)`; intercept links in JS for in-app tabs (see
-[`examples/browser_demo.py`](../examples/browser_demo.py)). Timed-out sync
-hooks are canceled after about **60s** total wait. Navigation / new-window
-timeouts still return the default (deny) and signal `WebViewNavigationError`
-via `<<WebViewNavigationFailed>>` / `last_navigation_error` — they are not
-raised on the WebKit thread.
+`@web.expose(thread=True)` for background work. `on_navigation`,
+`on_new_window`, and create-time `permission_handler` are also invoked on Tk,
+but WebKit **blocks** until they return a value — keep them fast (heavy work
+→ return deny/default and defer with `root.after`). Do **not** create another
+WebView from `on_new_window` (even deferred): WKWebView deadlocks. Prefer
+`open_external=True` or `open_in_browser(url)`; intercept links in JS for
+in-app tabs (see [`examples/browser_demo.py`](../examples/browser_demo.py)).
+Timed-out sync hooks are canceled after about **60s** total wait. Navigation /
+new-window timeouts still return the default (deny) and signal
+`WebViewNavigationError` via `<<WebViewNavigationFailed>>` /
+`last_navigation_error` — they are not raised on the WebKit thread.
+`permission_handler` timeouts / bad returns → `PermissionResponse.Deny`.
+Omit `permission_handler` for the engine default; 0.1.5 does **not** change
+`untrusted=True` to default-Deny for permissions. Coverage varies by engine
+(see wry / platform notes).
 
 Async queues (IPC, RPC, page-load, title, drag-drop, eval) cap at **2048**
 pending items each; further events are compacted or dropped. Each IPC/RPC
@@ -301,7 +316,7 @@ web.destroy()   # release native webview; host Frame is kept
 | Cookies / browsing data | `cookies`, `cookies_for_url`, `set_cookie`, `delete_cookie`, `clear_all_browsing_data`, `Cookie` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `last_eval_error`, `<<WebViewEvalFailed>>` |
 | IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `stream` / `cancel`) |
-| Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_complete` |
+| Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_complete`; create-only `permission_handler=` |
 | Appearance | `set_background_color`, `set_zoom` / `reset_zoom`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create) |
 | Layout | `pack`, `grid`, `place`, `sync_bounds` (delegate to host `Frame` except `sync_bounds`) |
@@ -313,10 +328,11 @@ Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
 `untrusted`, `bridge_origins`, `bridge_allow`, `navigation_allow`,
 `open_external`, `download_allow`, `ipc_handler`, `rpc_traceback`, `devtools`,
 `background_color`, `user_agent`, `initialization_script`, `focused`,
-`on_download`, `on_download_complete`, `on_creation_failed`, plus the
-callback hooks above.
+`permission_handler`, `on_download`, `on_download_complete`, `on_creation_failed`,
+plus the callback hooks above.
 
-Enums: `PageLoadEvent`, `NewWindowResponse`, `DragDropEvent`, `WebViewPhase`.
+Enums: `PageLoadEvent`, `NewWindowResponse`, `PermissionKind`,
+`PermissionResponse`, `DragDropEvent`, `WebViewPhase`.
 Types: `Cookie` (``repr`` omits ``value`` — never log secrets).
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
 `WebViewTimeoutError`, `WebViewNavigationError`,

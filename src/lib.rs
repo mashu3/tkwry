@@ -623,6 +623,126 @@ fn extract_new_window_response(
     }
 }
 
+fn extract_permission_response(
+    result: &Bound<'_, PyAny>,
+    context: &str,
+) -> Option<PermissionResponse> {
+    match result.extract::<PermissionResponse>() {
+        Ok(value) => Some(value),
+        Err(err) => {
+            eprintln!("tkwry: {context}: callback must return PermissionResponse ({err})");
+            None
+        }
+    }
+}
+
+fn permission_kind_from_wry(kind: wry::PermissionKind) -> PermissionKind {
+    match kind {
+        wry::PermissionKind::Microphone => PermissionKind::Microphone,
+        wry::PermissionKind::Camera => PermissionKind::Camera,
+        wry::PermissionKind::Geolocation => PermissionKind::Geolocation,
+        wry::PermissionKind::Notifications => PermissionKind::Notifications,
+        wry::PermissionKind::ClipboardRead => PermissionKind::ClipboardRead,
+        wry::PermissionKind::DisplayCapture => PermissionKind::DisplayCapture,
+        wry::PermissionKind::Midi => PermissionKind::Midi,
+        wry::PermissionKind::Sensors => PermissionKind::Sensors,
+        wry::PermissionKind::MediaKeySystemAccess => PermissionKind::MediaKeySystemAccess,
+        wry::PermissionKind::LocalFonts => PermissionKind::LocalFonts,
+        wry::PermissionKind::WindowManagement => PermissionKind::WindowManagement,
+        wry::PermissionKind::PointerLock => PermissionKind::PointerLock,
+        wry::PermissionKind::AutomaticDownloads => PermissionKind::AutomaticDownloads,
+        wry::PermissionKind::FileSystemAccess => PermissionKind::FileSystemAccess,
+        wry::PermissionKind::Autoplay => PermissionKind::Autoplay,
+        _ => PermissionKind::Other,
+    }
+}
+
+fn permission_response_to_wry(resp: PermissionResponse) -> wry::PermissionResponse {
+    match resp {
+        PermissionResponse::Allow => wry::PermissionResponse::Allow,
+        PermissionResponse::Deny => wry::PermissionResponse::Deny,
+        PermissionResponse::Default => wry::PermissionResponse::Default,
+    }
+}
+
+fn abort_permission_sync_hooks(pending: &PermissionSyncPending) {
+    let requests = match pending.lock() {
+        Ok(mut queue) => std::mem::take(&mut *queue),
+        Err(_) => {
+            eprintln!("tkwry: permission sync hook queue dropped (lock poisoned)");
+            return;
+        }
+    };
+    for (_, slot) in requests {
+        slot.cancelled.store(true, Ordering::SeqCst);
+        resolve_sync_hook(&slot, PermissionResponse::Deny);
+    }
+}
+
+fn enqueue_permission_sync_hook(
+    pending: &PermissionSyncPending,
+    kind: PermissionKind,
+    slot: Arc<SyncHookSlot<PermissionResponse>>,
+) -> bool {
+    let mut queue = match pending.lock() {
+        Ok(queue) => queue,
+        Err(_) => {
+            eprintln!("tkwry: permission hook dropped (queue lock poisoned)");
+            return false;
+        }
+    };
+    // Coalesce duplicate kinds: cancel the older pending request.
+    queue.retain(|(existing_kind, old_slot)| {
+        if *existing_kind == kind {
+            old_slot.cancelled.store(true, Ordering::SeqCst);
+            resolve_sync_hook(old_slot, PermissionResponse::Deny);
+            false
+        } else {
+            true
+        }
+    });
+    if queue.len() >= MAX_SYNC_HOOK_PENDING {
+        eprintln!("tkwry: rejecting permission sync hook (queue full at {MAX_SYNC_HOOK_PENDING})");
+        return false;
+    }
+    queue.push((kind, slot));
+    true
+}
+
+fn drain_permission_sync_hooks(permission_cb: &PyCallback, pending: &PermissionSyncPending) {
+    let requests = match pending.lock() {
+        Ok(mut queue) => std::mem::take(&mut *queue),
+        Err(_) => {
+            eprintln!("tkwry: permission sync hook queue dropped (lock poisoned)");
+            return;
+        }
+    };
+    for (kind, slot) in requests {
+        if slot.cancelled.load(Ordering::SeqCst) {
+            resolve_sync_hook(&slot, PermissionResponse::Deny);
+            continue;
+        }
+        mark_sync_hook_started(&slot);
+        let resp = Python::attach(|py| {
+            if let Some(func) = clone_py_callback(py, permission_cb) {
+                match func.call1(py, (kind,)) {
+                    Ok(result) => {
+                        extract_permission_response(result.bind(py), "permission_handler")
+                            .unwrap_or(PermissionResponse::Deny)
+                    }
+                    Err(err) => {
+                        report_py_error(py, err);
+                        PermissionResponse::Deny
+                    }
+                }
+            } else {
+                PermissionResponse::Default
+            }
+        });
+        resolve_sync_hook(&slot, resp);
+    }
+}
+
 fn normalize_document_url(url: Option<String>) -> Option<String> {
     url.filter(|url| !url.is_empty() && !url.eq_ignore_ascii_case("about:blank"))
 }
@@ -663,6 +783,40 @@ enum NewWindowResponse {
     Deny,
 }
 
+/// Permission kinds requested by the page (wry ``PermissionKind``).
+///
+/// Engine coverage varies; see docs. ``Other`` covers unrecognized kinds.
+#[pyclass(eq, eq_int, frozen, from_py_object)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PermissionKind {
+    Microphone,
+    Camera,
+    Geolocation,
+    Notifications,
+    ClipboardRead,
+    DisplayCapture,
+    Midi,
+    Sensors,
+    MediaKeySystemAccess,
+    LocalFonts,
+    WindowManagement,
+    PointerLock,
+    AutomaticDownloads,
+    FileSystemAccess,
+    Autoplay,
+    Other,
+}
+
+/// Response for ``permission_handler`` (wry ``PermissionResponse``).
+#[pyclass(eq, eq_int, frozen, from_py_object)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum PermissionResponse {
+    Allow,
+    Deny,
+    #[default]
+    Default,
+}
+
 #[pyclass(eq, eq_int, frozen, from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DragDropEvent {
@@ -685,6 +839,8 @@ type EvalCallbackMap = Arc<Mutex<HashMap<u64, EvalCallbackEntry>>>;
 type DrainedEvalCallback = (u64, Py<PyAny>, Option<String>);
 type NavSyncPending = Arc<Mutex<Vec<(String, Arc<SyncHookSlot<bool>>)>>>;
 type NewWinSyncPending = Arc<Mutex<Vec<(String, Arc<SyncHookSlot<NewWindowResponse>>)>>>;
+type PermissionSyncPending =
+    Arc<Mutex<Vec<(PermissionKind, Arc<SyncHookSlot<PermissionResponse>>)>>>;
 type DownloadSyncPending =
     Arc<Mutex<Vec<(String, String, Arc<SyncHookSlot<DownloadStartResult>>)>>>;
 type DownloadCompletePendingItem = (String, Option<String>, bool);
@@ -1090,11 +1246,13 @@ struct WebView {
     eval_overflow_dropped: Arc<AtomicU64>,
     nav_sync_pending: NavSyncPending,
     newwin_sync_pending: NewWinSyncPending,
+    permission_sync_pending: PermissionSyncPending,
     download_sync_pending: DownloadSyncPending,
     /// Pipe write fd registered by Python to wake the Tk event loop.
     wakeup_write_fd: Arc<AtomicI32>,
     nav_cb: PyCallback,
     newwin_cb: PyCallback,
+    permission_cb: PyCallback,
     download_cb: PyCallback,
     #[cfg(target_os = "macos")]
     mac: macos::MacPlatformState,
@@ -1140,6 +1298,9 @@ impl WebView {
         if let Ok(mut newwin) = self.newwin_cb.lock() {
             *newwin = None;
         }
+        if let Ok(mut permission) = self.permission_cb.lock() {
+            *permission = None;
+        }
         if let Ok(mut download) = self.download_cb.lock() {
             *download = None;
         }
@@ -1151,6 +1312,7 @@ impl WebView {
         }
         abort_nav_sync_hooks(&self.nav_sync_pending);
         abort_newwin_sync_hooks(&self.newwin_sync_pending);
+        abort_permission_sync_hooks(&self.permission_sync_pending);
         abort_download_sync_hooks(&self.download_sync_pending);
         // Destroy teardown: log poison instead of failing destroy.
         for result in [
@@ -1227,6 +1389,7 @@ impl WebView {
         initialization_script = None,
         on_navigation = None,
         on_new_window = None,
+        on_permission = None,
         page_load_listening = false,
         ipc_listening = false,
         title_listening = false,
@@ -1258,6 +1421,7 @@ impl WebView {
         initialization_script: Option<String>,
         on_navigation: Option<Py<PyAny>>,
         on_new_window: Option<Py<PyAny>>,
+        on_permission: Option<Py<PyAny>>,
         page_load_listening: bool,
         ipc_listening: bool,
         title_listening: bool,
@@ -1315,6 +1479,7 @@ impl WebView {
 
         let nav_cb: PyCallback = Arc::new(Mutex::new(on_navigation));
         let newwin_cb: PyCallback = Arc::new(Mutex::new(on_new_window));
+        let permission_cb: PyCallback = Arc::new(Mutex::new(on_permission));
         let download_cb: PyCallback = Arc::new(Mutex::new(on_download_started));
         let page_load_pending: PageLoadPending = Arc::new(Mutex::new(VecDeque::new()));
         let ipc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
@@ -1340,6 +1505,7 @@ impl WebView {
         let eval_overflow_dropped = Arc::new(AtomicU64::new(0));
         let nav_sync_pending: NavSyncPending = Arc::new(Mutex::new(Vec::new()));
         let newwin_sync_pending: NewWinSyncPending = Arc::new(Mutex::new(Vec::new()));
+        let permission_sync_pending: PermissionSyncPending = Arc::new(Mutex::new(Vec::new()));
         let download_sync_pending: DownloadSyncPending = Arc::new(Mutex::new(Vec::new()));
         let wakeup_write_fd = Arc::new(AtomicI32::new(-1));
 
@@ -1428,6 +1594,11 @@ impl WebView {
                     NewWindowResponse::Allow => wry::NewWindowResponse::Allow,
                 }
             };
+
+        let has_permission_handler = permission_cb
+            .lock()
+            .map(|guard| guard.is_some())
+            .unwrap_or(false);
 
         let drag_drop_pending_clone = drag_drop_pending.clone();
         let drag_drop_listening_clone = drag_drop_listening.clone();
@@ -1594,6 +1765,38 @@ WebViews that share a session must use the same app= root \
             .with_drag_drop_handler(drag_drop_handler)
             .with_download_started_handler(download_started_handler)
             .with_download_completed_handler(download_completed_handler);
+        if has_permission_handler {
+            let permission_cb_clone = permission_cb.clone();
+            let permission_sync_pending_clone = permission_sync_pending.clone();
+            let wakeup_fd_for_permission = wakeup_write_fd.clone();
+            let owner_thread_for_permission = owner_thread;
+            builder = builder.with_permission_handler(move |kind: wry::PermissionKind| {
+                let kind = permission_kind_from_wry(kind);
+                let slot = Arc::new(SyncHookSlot::new());
+                if !enqueue_permission_sync_hook(&permission_sync_pending_clone, kind, slot.clone())
+                {
+                    return wry::PermissionResponse::Deny;
+                }
+                notify_wakeup(&wakeup_fd_for_permission);
+                if Python::attach(|_py| python_thread_id().ok())
+                    == Some(owner_thread_for_permission)
+                {
+                    drain_permission_sync_hooks(
+                        &permission_cb_clone,
+                        &permission_sync_pending_clone,
+                    );
+                }
+                let resp = wait_sync_hook(
+                    &slot,
+                    SYNC_HOOK_TIMEOUT,
+                    SYNC_HOOK_HANDLER_TIMEOUT,
+                    "permission_handler",
+                    PermissionResponse::Deny,
+                    Some(&wakeup_fd_for_permission),
+                );
+                permission_response_to_wry(resp)
+            });
+        }
         if with_ipc {
             let ipc_pending_for_handler = ipc_pending.clone();
             let rpc_pending_for_handler = rpc_pending.clone();
@@ -1736,12 +1939,14 @@ WebViews that share a session must use the same app= root \
             eval_overflow_dropped,
             nav_sync_pending,
             newwin_sync_pending,
+            permission_sync_pending,
             download_sync_pending,
             wakeup_write_fd,
             #[cfg(target_os = "macos")]
             mac,
             nav_cb,
             newwin_cb,
+            permission_cb,
             download_cb,
             wry_call_depth: Cell::new(0),
             destroy_pending: Cell::new(false),
@@ -1940,6 +2145,7 @@ WebViews that share a session must use the same app= root \
         self.require_owner_thread()?;
         drain_nav_sync_hooks(&self.nav_cb, &self.nav_sync_pending);
         drain_newwin_sync_hooks(&self.newwin_cb, &self.newwin_sync_pending);
+        drain_permission_sync_hooks(&self.permission_cb, &self.permission_sync_pending);
         drain_download_sync_hooks(&self.download_cb, &self.download_sync_pending);
         Ok(())
     }
@@ -2375,6 +2581,7 @@ where
     // are not rejected while the Tk thread is inside load_url / eval_js.
     drain_nav_sync_hooks(&this.nav_cb, &this.nav_sync_pending);
     drain_newwin_sync_hooks(&this.newwin_cb, &this.newwin_sync_pending);
+    drain_permission_sync_hooks(&this.permission_cb, &this.permission_sync_pending);
     let result = (|| -> PyResult<T> {
         let guard = this
             .inner
@@ -2404,6 +2611,7 @@ where
     this.enter_wry_call();
     drain_nav_sync_hooks(&this.nav_cb, &this.nav_sync_pending);
     drain_newwin_sync_hooks(&this.newwin_cb, &this.newwin_sync_pending);
+    drain_permission_sync_hooks(&this.permission_cb, &this.permission_sync_pending);
 
     let taken = {
         let mut guard = this
@@ -2505,6 +2713,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<cookie_api::Cookie>()?;
     m.add_class::<PageLoadEvent>()?;
     m.add_class::<NewWindowResponse>()?;
+    m.add_class::<PermissionKind>()?;
+    m.add_class::<PermissionResponse>()?;
     m.add_class::<DragDropEvent>()?;
     m.add_function(wrap_pyfunction!(pump_events, m)?)?;
     m.add_function(wrap_pyfunction!(ensure_gtk_init, m)?)?;

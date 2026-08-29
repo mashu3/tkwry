@@ -23,6 +23,8 @@ from tkwry._core import (
     DragDropEvent,
     NewWindowResponse,
     PageLoadEvent,
+    PermissionKind,
+    PermissionResponse,
 )
 from tkwry._core import (
     WebView as NativeWebView,
@@ -92,6 +94,7 @@ NavigationHandler: TypeAlias = Callable[[str], bool]
 PageLoadHandler: TypeAlias = Callable[[PageLoadEvent, str], None]
 TitleChangedHandler: TypeAlias = Callable[[str], None]
 NewWindowHandler: TypeAlias = Callable[[str], NewWindowResponse]
+PermissionHandler: TypeAlias = Callable[[PermissionKind], PermissionResponse]
 DragDropHandler: TypeAlias = Callable[[DragDropEvent, list[str], tuple[int, int]], None]
 EvalCallback: TypeAlias = Callable[[str], None]
 EvalErrorHandler: TypeAlias = Callable[[Exception], None]
@@ -295,11 +298,14 @@ class WebView(WebViewRpcMixin):
     ``last_download`` and generate ``<<WebViewDownloadComplete>>`` or
     ``<<WebViewDownloadFailed>>`` (same ``(url, dest, success)`` tuple).
 
-    **Navigation hooks** (``on_navigation``, ``on_new_window``) run on the
-    **Tk main thread**, but WebKit **blocks** until they return a value.
-    Keep them fast (heavy work → deny/default and defer with ``after``).
-    Custom hooks replace the built-in ``navigation_allow`` / ``open_external``
-    policy for that direction.
+    **Navigation hooks** (``on_navigation``, ``on_new_window``) and
+    create-time ``permission_handler`` run on the **Tk main thread**, but
+    WebKit **blocks** until they return a value. Keep them fast (heavy work
+    → deny/default and defer with ``after``). Custom navigation hooks replace
+    the built-in ``navigation_allow`` / ``open_external`` policy for that
+    direction. ``permission_handler`` is create-only (wry builder); omit it to
+    keep the engine default. Timeout / bad return → ``PermissionResponse.Deny``
+    (does **not** change ``untrusted=True`` defaults).
 
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
@@ -401,6 +407,7 @@ class WebView(WebViewRpcMixin):
         on_page_load: PageLoadHandler | None = None,
         on_title_changed: TitleChangedHandler | None = None,
         on_new_window: NewWindowHandler | None = None,
+        permission_handler: PermissionHandler | None = None,
         drag_drop_handler: DragDropHandler | None = None,
         on_download: DownloadHandler | None = None,
         on_download_complete: DownloadCompleteHandler | None = None,
@@ -507,6 +514,7 @@ class WebView(WebViewRpcMixin):
         self._on_page_load = on_page_load
         self._on_title_changed = on_title_changed
         self._on_new_window = on_new_window
+        self._permission_handler = permission_handler
         self._drag_drop_handler = drag_drop_handler
         self._on_download = on_download
         self._on_download_complete = on_download_complete
@@ -2303,6 +2311,32 @@ class WebView(WebViewRpcMixin):
             return NewWindowResponse.Deny
         return result
 
+    def _invoke_permission_handler(self, kind: PermissionKind) -> PermissionResponse:
+        handler = self._permission_handler
+        if handler is None:
+            return PermissionResponse.Default
+        try:
+            result = handler(kind)
+        except Exception:
+            traceback.print_exc()
+            return PermissionResponse.Deny
+        if not isinstance(result, PermissionResponse):
+            print(
+                "tkwry: permission_handler must return PermissionResponse, "
+                f"got {type(result).__name__}",
+                file=sys.stderr,
+            )
+            return PermissionResponse.Deny
+        return result
+
+    def _native_permission(self, kind: PermissionKind) -> PermissionResponse:
+        return self._dispatch_sync_hook(
+            lambda: self._invoke_permission_handler(kind),
+            default=PermissionResponse.Deny,
+            kind="permission_handler",
+            detail=repr(kind),
+        )
+
     def _download_scheme(self, url: str) -> str:
         from urllib.parse import urlparse
 
@@ -3004,6 +3038,8 @@ class WebView(WebViewRpcMixin):
             kwargs["on_navigation"] = self._native_navigation
         if self._on_new_window is not None or self._new_window_policy_active():
             kwargs["on_new_window"] = self._native_new_window
+        if self._permission_handler is not None:
+            kwargs["on_permission"] = self._native_permission
         kwargs["page_load_listening"] = self._on_page_load is not None
         kwargs["ipc_listening"] = self._ipc_listening_wanted()
         kwargs["title_listening"] = self._on_title_changed is not None

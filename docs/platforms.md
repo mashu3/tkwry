@@ -94,9 +94,9 @@ does not hide the other native view. No extra app code for tabs/panes —
 [`examples/multi_demo.py`](../examples/multi_demo.py).
 
 Lifecycle / IPC / page-load handlers run on the **Tk main thread**. RPC may
-use a worker (`thread=True`). `on_navigation` / `on_new_window` still make
-WebKit wait for a return value — see
-[Usage — Navigation / lifecycle callbacks](usage.md#navigation--lifecycle-callbacks).
+use a worker (`thread=True`). `on_navigation` / `on_new_window` /
+create-time `permission_handler` still make WebKit wait for a return value —
+see [Usage — Navigation / lifecycle callbacks](usage.md#navigation--lifecycle-callbacks).
 
 ## Print
 

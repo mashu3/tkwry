@@ -7,6 +7,8 @@ __all__: Final = [
     "Cookie",
     "PageLoadEvent",
     "NewWindowResponse",
+    "PermissionKind",
+    "PermissionResponse",
     "DragDropEvent",
     "pump_events",
     "ensure_gtk_init",
@@ -23,6 +25,31 @@ class PageLoadEvent:
 class NewWindowResponse:
     Allow: NewWindowResponse
     Deny: NewWindowResponse
+
+@final
+class PermissionKind:
+    Microphone: PermissionKind
+    Camera: PermissionKind
+    Geolocation: PermissionKind
+    Notifications: PermissionKind
+    ClipboardRead: PermissionKind
+    DisplayCapture: PermissionKind
+    Midi: PermissionKind
+    Sensors: PermissionKind
+    MediaKeySystemAccess: PermissionKind
+    LocalFonts: PermissionKind
+    WindowManagement: PermissionKind
+    PointerLock: PermissionKind
+    AutomaticDownloads: PermissionKind
+    FileSystemAccess: PermissionKind
+    Autoplay: PermissionKind
+    Other: PermissionKind
+
+@final
+class PermissionResponse:
+    Allow: PermissionResponse
+    Deny: PermissionResponse
+    Default: PermissionResponse
 
 @final
 class DragDropEvent:
@@ -104,6 +131,7 @@ class WebView:
         initialization_script: str | None = None,
         on_navigation: Callable[[str], bool] | None = None,
         on_new_window: Callable[[str], NewWindowResponse] | None = None,
+        on_permission: Callable[[PermissionKind], PermissionResponse] | None = None,
         page_load_listening: bool = False,
         ipc_listening: bool = False,
         title_listening: bool = False,

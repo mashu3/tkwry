@@ -44,7 +44,14 @@ def _reraise_linux_core_build_hint(exc: BaseException) -> None:
 
 
 try:
-    from tkwry._core import Cookie, DragDropEvent, NewWindowResponse, PageLoadEvent
+    from tkwry._core import (
+        Cookie,
+        DragDropEvent,
+        NewWindowResponse,
+        PageLoadEvent,
+        PermissionKind,
+        PermissionResponse,
+    )
     from tkwry.session import WebSession
     from tkwry.webview import (
         BridgeAllow,
@@ -59,6 +66,7 @@ try:
         NavigationHandler,
         NewWindowHandler,
         PageLoadHandler,
+        PermissionHandler,
         TitleChangedHandler,
         WebView,
         WebViewPhase,
@@ -89,6 +97,9 @@ __all__ = [
     "NewWindowResponse",
     "PageLoadEvent",
     "PageLoadHandler",
+    "PermissionHandler",
+    "PermissionKind",
+    "PermissionResponse",
     "TitleChangedHandler",
     "RpcCancelledError",
     "RpcSerializationError",
