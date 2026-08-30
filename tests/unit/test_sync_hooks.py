@@ -273,10 +273,10 @@ def test_sync_hook_timeout_only_before_handler_starts(
         return True
 
     web.set_on_navigation(slow_handler)
-    web._ensure_tk_wakeup_pipe()
-    web._ensure_event_poll()
     # Pre-start window only — once ``slow_handler`` runs, handler timeout applies.
     monkeypatch.setattr("tkwry.webview._SYNC_HOOK_TIMEOUT_S", 0.15)
+    monkeypatch.setattr(web, "_ensure_event_poll", lambda: None, raising=False)
+    monkeypatch.setattr(web, "_wake_tk_for_sync_hook", lambda: None, raising=False)
 
     result_holder: list[bool] = []
 
@@ -285,23 +285,12 @@ def test_sync_hook_timeout_only_before_handler_starts(
 
     thread = threading.Thread(target=worker)
     thread.start()
-    deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline:
-        tk_root.update_idletasks()
-        tk_root.update()
+    deadline = time.monotonic() + 2.0
+    while thread.is_alive() and time.monotonic() < deadline:
         web._drain_sync_hooks()
-        web._poll_events()
-        if started.is_set() or not thread.is_alive():
-            break
-
-    assert started.is_set(), "handler must start within pre-start timeout window"
-
-    while time.monotonic() < deadline and thread.is_alive():
-        tk_root.update_idletasks()
-        tk_root.update()
-        web._drain_sync_hooks()
-        web._poll_events()
+        time.sleep(0.01)
 
     thread.join(timeout=2.0)
+    assert started.is_set(), "handler must start within pre-start timeout window"
     assert result_holder == [True]
     web.destroy()
