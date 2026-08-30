@@ -202,3 +202,14 @@ def test_hotkeys_zoom_true_creates(tk_root) -> None:
     finally:
         web.destroy()
         frame.destroy()
+
+
+def test_back_forward_gestures_true_creates(tk_root) -> None:
+    frame = host_frame(tk_root)
+    web = WebView(frame, html=_PAGE, back_forward_gestures=True)
+    try:
+        assert web.back_forward_gestures is True
+        assert wait_until(tk_root, lambda: web.ready, steps=200)
+    finally:
+        web.destroy()
+        frame.destroy()

@@ -135,6 +135,19 @@ and pinch page zoom in WebView2. It does **not** change `set_zoom` /
 still stored). WebView2 Runtime before 91.0.865.0 cannot disable pinch
 when the flag is `False`.
 
+## Back / forward gestures (swipe)
+
+`WebView(..., back_forward_gestures=True)` maps to wry
+`with_back_forward_navigation_gestures` (default **`False`**, same as wry).
+Horizontal trackpad / touch swipe then drives history navigation.
+
+This is **not** `go_back` / `go_forward` (those stay explicit API).
+
+**Windows:** WebView2 `IsSwipeNavigationEnabled`. Setting `False` does
+nothing on Runtime older than 92.0.902.0 (swipe stays on). **macOS:**
+WKWebView `allowsBackForwardNavigationGestures`. **Linux:** WebKitGTK
+`enable-back-forward-navigation-gestures`.
+
 ## Clipboard (Web API opt-in)
 
 `WebView(..., clipboard=True)` → wry `with_clipboard(true)`. Default is

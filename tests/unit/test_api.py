@@ -113,6 +113,7 @@ WEBVIEW_PROPERTIES = (
     "javascript_enabled",
     "autoplay",
     "hotkeys_zoom",
+    "back_forward_gestures",
     "navigation_allow",
     "open_external",
     "download_allow",

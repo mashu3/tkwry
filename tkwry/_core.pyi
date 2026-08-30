@@ -129,6 +129,7 @@ class WebView:
         javascript_enabled: bool = True,
         autoplay: bool = True,
         hotkeys_zoom: bool = False,
+        back_forward_gestures: bool = False,
         focused: bool = True,
         background_color: tuple[int, int, int, int] | None = None,
         user_agent: str | None = None,

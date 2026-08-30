@@ -26,6 +26,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Create-time ``hotkeys_zoom=True`` (default ``False``, wry) — WebView2
   Ctrl+/- / Ctrl+wheel / pinch page zoom (Windows); not ``set_zoom``;
   macOS / Linux ignore the engine flag
+- Create-time ``back_forward_gestures=True`` (default ``False``, wry) —
+  trackpad / swipe history navigation (Win / macOS / Linux); not
+  ``go_back`` / ``go_forward``
 
 ### Tests
 

@@ -1432,6 +1432,7 @@ impl WebView {
         javascript_enabled = true,
         autoplay = true,
         hotkeys_zoom = false,
+        back_forward_gestures = false,
         focused = true,
         background_color = None,
         user_agent = None,
@@ -1468,6 +1469,7 @@ impl WebView {
         javascript_enabled: bool,
         autoplay: bool,
         hotkeys_zoom: bool,
+        back_forward_gestures: bool,
         focused: bool,
         background_color: Option<(u8, u8, u8, u8)>,
         user_agent: Option<String>,
@@ -1824,6 +1826,7 @@ WebViews that share a session must use the same app= root \
         }
         builder = builder.with_autoplay(autoplay);
         builder = builder.with_hotkeys_zoom(hotkeys_zoom);
+        builder = builder.with_back_forward_navigation_gestures(back_forward_gestures);
         if has_permission_handler {
             let permission_cb_clone = permission_cb.clone();
             let permission_sync_pending_clone = permission_sync_pending.clone();

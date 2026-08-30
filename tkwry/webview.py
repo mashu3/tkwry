@@ -345,6 +345,9 @@ class WebView(WebViewRpcMixin):
     :attr:`~tkwry.PermissionKind.Autoplay` on ``permission_handler``.
     ``hotkeys_zoom=True`` enables WebView2 Ctrl+/- / Ctrl+wheel / pinch zoom
     (Windows only; wry default ``False``). Distinct from :meth:`set_zoom`.
+    ``back_forward_gestures=True`` enables trackpad / swipe back-forward
+    navigation (wry ``with_back_forward_navigation_gestures``; default
+    ``False``). Effective on Windows, macOS, and Linux.
 
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
@@ -451,6 +454,7 @@ class WebView(WebViewRpcMixin):
         javascript_enabled: bool = True,
         autoplay: bool = True,
         hotkeys_zoom: bool = False,
+        back_forward_gestures: bool = False,
         background_color: tuple[int, int, int, int] | None = None,
         user_agent: str | None = None,
         initialization_script: str | None = None,
@@ -579,6 +583,7 @@ class WebView(WebViewRpcMixin):
         self._javascript_enabled = bool(javascript_enabled)
         self._autoplay = bool(autoplay)
         self._hotkeys_zoom = bool(hotkeys_zoom)
+        self._back_forward_gestures = bool(back_forward_gestures)
         self._background_color = background_color
         self._user_agent = user_agent
         self._initialization_script = initialization_script
@@ -894,6 +899,18 @@ class WebView(WebViewRpcMixin):
         """
         self._require_tk_thread()
         return self._hotkeys_zoom
+
+    @property
+    def back_forward_gestures(self) -> bool:
+        """Create-time swipe back/forward navigation (default ``False``).
+
+        Maps to wry ``with_back_forward_navigation_gestures``. Horizontal
+        trackpad / touch swipe triggers history navigation on Windows
+        (WebView2), macOS (WKWebView), and Linux (WebKitGTK). Not
+        :meth:`go_back` / :meth:`go_forward`.
+        """
+        self._require_tk_thread()
+        return self._back_forward_gestures
 
     @property
     def navigation_allow(self) -> frozenset[str] | None:
@@ -3272,6 +3289,7 @@ class WebView(WebViewRpcMixin):
             "javascript_enabled": self._javascript_enabled,
             "autoplay": self._autoplay,
             "hotkeys_zoom": self._hotkeys_zoom,
+            "back_forward_gestures": self._back_forward_gestures,
             "focused": self._focused,
         }
         if self._background_color is not None:
