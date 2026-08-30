@@ -36,6 +36,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``https://tkwry.localhost`` secure context; ``False`` is wry's
   ``http://tkwry.localhost`` (mixed content, not SW / SubtleCrypto);
   macOS / Linux stay ``tkwry://``
+- Create-time ``proxy=`` — ``{"http": "host:port"}`` or
+  ``{"socks5": "host:port"}`` (wry ``with_proxy_config``); credentials
+  rejected and never logged; macOS 14+ (``mac-proxy`` feature)
 
 ### Tests
 

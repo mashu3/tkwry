@@ -178,6 +178,25 @@ macOS / Linux ignore the flag and stay `tkwry://localhost`. Changing the
 flag on an existing Windows profile moves the origin (cookies /
 `localStorage` do not follow).
 
+## Proxy (HTTP CONNECT / SOCKSv5)
+
+`WebView(..., proxy={"http": "127.0.0.1:8080"})` or
+`proxy={"socks5": "127.0.0.1:1080"}` maps to wry `with_proxy_config`
+(create-only; default `None`). Exactly **one** of `http` / `socks5`.
+Values may be `host:port`, `[ipv6]:port`, or `scheme://host:port`.
+
+wry exposes **host + port only** — credentials in the value raise
+`ValueError` and are **never** echoed in the message (same honesty bar as
+cookie / header values).
+
+**Windows:** WebView2 `--proxy-server=…`. **Linux:** WebKitGTK custom
+network proxy. **macOS:** requires **14.0+** and wry's `mac-proxy`
+feature (enabled in tkwry). Older macOS: create may fail if `proxy=` is
+set — omit the option on older hosts.
+
+This does **not** change system proxy env vars (`HTTP_PROXY`, …) for
+non-WebView Python code.
+
 ## Clipboard (Web API opt-in)
 
 `WebView(..., clipboard=True)` → wry `with_clipboard(true)`. Default is

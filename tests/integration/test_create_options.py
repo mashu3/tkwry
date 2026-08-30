@@ -235,3 +235,15 @@ def test_https_scheme_false_creates(tk_root) -> None:
     finally:
         web.destroy()
         frame.destroy()
+
+
+def test_proxy_http_creates(tk_root) -> None:
+    """Create-time proxy= must not break html= create (no live proxy needed)."""
+    frame = host_frame(tk_root)
+    web = WebView(frame, html=_PAGE, proxy={"http": "127.0.0.1:9"})
+    try:
+        assert web.proxy == {"http": "127.0.0.1:9"}
+        assert wait_until(tk_root, lambda: web.ready, steps=200)
+    finally:
+        web.destroy()
+        frame.destroy()

@@ -160,6 +160,77 @@ def _validate_background_color(color: tuple[int, int, int, int]) -> None:
         _validate_color_component(val, name)
 
 
+def _normalize_proxy(
+    proxy: Mapping[str, str] | None,
+) -> tuple[dict[str, str], tuple[str, str, str]] | None:
+    """Normalize ``proxy=`` to a public dict and a native ``(kind, host, port)``.
+
+    Accepts exactly one of ``{"http": "..."}`` or ``{"socks5": "..."}``.
+    Values may be ``host:port``, ``[ipv6]:port``, or ``scheme://host:port``.
+    Credentials are rejected without echoing them (wry has host/port only).
+    """
+    if proxy is None:
+        return None
+    if not isinstance(proxy, Mapping):
+        raise TypeError("proxy= must be a mapping or None")
+    keys = {str(k) for k in proxy}
+    if keys not in ({"http"}, {"socks5"}):
+        raise ValueError(
+            "proxy= must be exactly one of {'http': 'host:port'} "
+            "or {'socks5': 'host:port'}"
+        )
+    kind = "http" if "http" in keys else "socks5"
+    raw_value = proxy[kind]
+    if not isinstance(raw_value, str):
+        raise TypeError(f"proxy[{kind!r}] must be a str")
+    raw = raw_value.strip()
+    if not raw:
+        raise ValueError(f"proxy[{kind!r}] must be a non-empty host:port string")
+
+    host: str
+    port: str
+    if "://" in raw:
+        parsed = urlparse(raw)
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError(
+                "proxy= must not include credentials (wry supports host and port only)"
+            )
+        scheme = (parsed.scheme or "").lower()
+        if scheme != kind:
+            raise ValueError(f"proxy[{kind!r}] URL scheme must be {kind!r}")
+        if not parsed.hostname or parsed.port is None:
+            raise ValueError(
+                f"proxy[{kind!r}] URL must include host and port "
+                f"(e.g. '{kind}://127.0.0.1:8080')"
+            )
+        host = parsed.hostname
+        port = str(parsed.port)
+    elif raw.startswith("["):
+        end = raw.find("]")
+        if end < 0 or end + 1 >= len(raw) or raw[end + 1] != ":":
+            raise ValueError(f"proxy[{kind!r}] IPv6 form must be '[addr]:port'")
+        host = raw[1:end]
+        port = raw[end + 2 :]
+    else:
+        if raw.count(":") != 1:
+            raise ValueError(
+                f"proxy[{kind!r}] must be 'host:port' "
+                "(use '[ipv6]:port' for IPv6, or a scheme:// URL)"
+            )
+        host, port = raw.split(":", 1)
+
+    host = host.strip()
+    port = port.strip()
+    if not host or not port:
+        raise ValueError(f"proxy[{kind!r}] must include both host and port")
+    if not port.isdigit() or not (1 <= int(port) <= 65535):
+        raise ValueError(f"proxy[{kind!r}] port must be an integer 1-65535")
+
+    public_endpoint = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+    public = {kind: public_endpoint}
+    return public, (kind, host, port)
+
+
 def _noop_native_eval_callback(_result: str) -> None:
     """Stub passed to Rust; Python delivers via ``_native_eval_wait``."""
 
@@ -355,6 +426,10 @@ class WebView(WebViewRpcMixin):
     ``https://tkwry.localhost`` (secure context) vs wry's
     ``http://tkwry.localhost`` (``False``; mixed content, not SW / SubtleCrypto).
     macOS / Linux stay ``tkwry://``.
+    ``proxy=`` is create-only: exactly one of ``{"http": "host:port"}`` or
+    ``{"socks5": "host:port"}`` (optional ``scheme://`` form). Maps to wry
+    ``with_proxy_config``. Credentials are rejected (never logged). macOS
+    needs 14.0+ (wry ``mac-proxy``).
 
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
@@ -464,6 +539,7 @@ class WebView(WebViewRpcMixin):
         back_forward_gestures: bool = False,
         default_context_menus: bool = True,
         https_scheme: bool = True,
+        proxy: Mapping[str, str] | None = None,
         background_color: tuple[int, int, int, int] | None = None,
         user_agent: str | None = None,
         initialization_script: str | None = None,
@@ -488,6 +564,7 @@ class WebView(WebViewRpcMixin):
         require_tk_thread(frame)
         if background_color is not None:
             _validate_background_color(background_color)
+        proxy_norm = _normalize_proxy(proxy)
         ephemeral = ephemeral or incognito
         if session is not None and (data_directory is not None or ephemeral):
             raise ValueError(
@@ -595,6 +672,11 @@ class WebView(WebViewRpcMixin):
         self._back_forward_gestures = bool(back_forward_gestures)
         self._default_context_menus = bool(default_context_menus)
         self._https_scheme = bool(https_scheme)
+        if proxy_norm is None:
+            self._proxy: dict[str, str] | None = None
+            self._proxy_native: tuple[str, str, str] | None = None
+        else:
+            self._proxy, self._proxy_native = proxy_norm
         self._background_color = background_color
         self._user_agent = user_agent
         self._initialization_script = initialization_script
@@ -948,6 +1030,18 @@ class WebView(WebViewRpcMixin):
         """
         self._require_tk_thread()
         return self._https_scheme
+
+    @property
+    def proxy(self) -> dict[str, str] | None:
+        """Create-time HTTP CONNECT / SOCKSv5 proxy (default ``None``).
+
+        Maps to wry ``with_proxy_config``. Exactly one of
+        ``{"http": "host:port"}`` or ``{"socks5": "host:port"}``.
+        Credentials are not supported. Returns a shallow copy (or ``None``).
+        macOS requires 14.0+ (wry ``mac-proxy`` feature).
+        """
+        self._require_tk_thread()
+        return None if self._proxy is None else dict(self._proxy)
 
     @property
     def navigation_allow(self) -> frozenset[str] | None:
@@ -3331,6 +3425,8 @@ class WebView(WebViewRpcMixin):
             "https_scheme": self._https_scheme,
             "focused": self._focused,
         }
+        if self._proxy_native is not None:
+            kwargs["proxy"] = self._proxy_native
         if self._background_color is not None:
             kwargs["background_color"] = self._background_color
         if self._user_agent is not None:

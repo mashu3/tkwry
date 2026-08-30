@@ -1437,6 +1437,7 @@ impl WebView {
         back_forward_gestures = false,
         default_context_menus = true,
         https_scheme = true,
+        proxy = None,
         focused = true,
         background_color = None,
         user_agent = None,
@@ -1476,6 +1477,7 @@ impl WebView {
         back_forward_gestures: bool,
         default_context_menus: bool,
         https_scheme: bool,
+        proxy: Option<(String, String, String)>,
         focused: bool,
         background_color: Option<(u8, u8, u8, u8)>,
         user_agent: Option<String>,
@@ -1841,6 +1843,19 @@ WebViews that share a session must use the same app= root \
         #[cfg(not(target_os = "windows"))]
         {
             let _ = default_context_menus;
+        }
+        if let Some((kind, host, port)) = proxy {
+            let endpoint = wry::ProxyEndpoint { host, port };
+            let config = match kind.as_str() {
+                "http" => wry::ProxyConfig::Http(endpoint),
+                "socks5" => wry::ProxyConfig::Socks5(endpoint),
+                _ => {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "proxy kind must be 'http' or 'socks5'",
+                    ));
+                }
+            };
+            builder = builder.with_proxy_config(config);
         }
         if has_permission_handler {
             let permission_cb_clone = permission_cb.clone();
