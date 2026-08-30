@@ -318,8 +318,8 @@ only used **before** Tk reports a real size (`winfo_* <= 1`). Prefer passing
 [Platform notes — Window chrome](platforms.md#window-chrome-tk-not-the-webview).
 Use `configure_window(root, title=..., geometry=..., minsize=..., …)` for
 the common chrome kwargs; the WebView only follows its Frame (`sync_bounds`).
-ttk / dark host chrome / custom titlebar → **tkface** (app dependency),
-not tkwry.
+ttk / dark host chrome / custom titlebar → **tkface** (sibling; import OK),
+not a second chrome kit inside tkwry.
 
 ## Hidden hosts
 
