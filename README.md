@@ -145,6 +145,7 @@ Short checklist — **details live in [Platform notes](https://github.com/mashu3
 - **Alpha** — APIs may change; not for production yet (see banner above)
 - **Windows** — WebView2 Runtime required; missing runtime → `creation_failed` / `<<WebViewCreateFailed>>` (gated APIs raise `WebViewCreationError` with [install text](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#windows))
 - **Print** — `web.print()` opens the system dialog; no PDF, no return value, no success/fail/cancel (wry has none). See [Platform notes — Print](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#print)
+- **Downloads** — cancel is **start-deny only** (`on_download` → `False` / allowlist); no mid-flight abort, pause/resume, or progress % until wry exposes them. `in_flight_downloads` is observational. See [Platform notes — Downloads](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#downloads)
 - **Window chrome** — title / icon / geometry / fullscreen / min/max / `-topmost` are the host **Toplevel** (`configure_window`); WebView size follows the Frame (`sync_bounds`). See [Usage — Layout / resize](https://github.com/mashu3/tkwry/blob/main/docs/usage.md#layout--resize)
 - **Windows DevTools** — wry/WebView2 reports `is_devtools_open()` as `False` and `close_devtools()` is a no-op; `open_devtools()` still opens the inspector
 - **Linux** — no PyPI wheel (by design); best-effort source install

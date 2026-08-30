@@ -124,6 +124,9 @@ See [Usage — Shared session](usage.md#shared-session-websession).
   `on_download_complete(url, dest, success)` is notify-only.
   Completions also set `last_download` and generate
   `<<WebViewDownloadComplete>>` or `<<WebViewDownloadFailed>>`.
+  **Cancel is start-deny only** — wry has no in-flight abort; returning
+  `False` / `None` from `on_download` (or failing the allowlist) is the
+  only stop. `in_flight_downloads` is observational (no cancel API).
 - **Dangerous schemes** — `javascript:` / `blob:` / `vbscript:` /
   `mailto:` are denied at the native navigation hook even without Python
   `on_navigation`. `data:` is not blocked there (WebView2 `html=` /

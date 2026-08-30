@@ -98,6 +98,17 @@ use a worker (`thread=True`). `on_navigation` / `on_new_window` /
 create-time `permission_handler` still make WebKit wait for a return value —
 see [Usage — Navigation / lifecycle callbacks](usage.md#navigation--lifecycle-callbacks).
 
+## Downloads
+
+Start / complete wrap wry's download handlers. Cancel **before** the
+transfer starts with `on_download` returning `False` / `None` (or deny via
+`download_allow` / `untrusted`). There is **no** mid-flight abort,
+pause/resume, or progress % in wry **0.56.1** — tkwry does **not** invent
+`cancel_download()` / progress callbacks. `in_flight_downloads` is
+observational (starts that passed the policy hook until complete). See
+[Usage](usage.md#navigation--lifecycle-callbacks) and
+[Trust — Downloads](trust.md).
+
 ## Print
 
 `web.print()` opens the **system** print dialog (wry `WebView::print`).

@@ -356,6 +356,8 @@ web.go_forward()
 # Downloads: untrusted=True denies unless on_download / download_allow permits.
 # on_download must return an absolute path (or True / False). Same-name files:
 # unique_download_path(dest) — tkwry does not overwrite or prompt.
+# Cancel = start-deny only (False / None). No mid-flight abort / progress % —
+# see Platform notes — Downloads.
 web = WebView(
     frame,
     url="https://example.com",
@@ -364,7 +366,8 @@ web = WebView(
     on_download=lambda url, dest: unique_download_path(dest),
     on_download_complete=lambda url, dest, ok: print(ok, dest),
 )
-# also: last_download, in_flight_downloads, <<WebViewDownloadComplete>> / <<WebViewDownloadFailed>>
+# also: last_download, in_flight_downloads (observational),
+# <<WebViewDownloadComplete>> / <<WebViewDownloadFailed>>
 ```
 
 `on_page_load` fires `PageLoadEvent.Started` and `PageLoadEvent.Finished`
