@@ -628,17 +628,14 @@ def test_install_tabbing_disable_off_main_defers_to_tk_init(
         fake_disable,
         raising=False,
     )
+    # Do not spawn a real Thread: after a long native create/destroy streak,
+    # Thread.start() + GC has aborted macOS CI (same class as test_sync_hooks).
+    off_main = threading.Thread(name="off-main")
+    monkeypatch.setattr("tkwry._macos.threading.current_thread", lambda: off_main)
     try:
         tk.Tk.__init__ = fake_orig  # type: ignore[method-assign]
 
-        done = threading.Event()
-
-        def worker() -> None:
-            _macos.install_automatic_window_tabbing_disable()
-            done.set()
-
-        threading.Thread(target=worker).start()
-        done.wait(timeout=2.0)
+        _macos.install_automatic_window_tabbing_disable()
 
         assert disable_calls == []
         patched_init = tk.Tk.__init__

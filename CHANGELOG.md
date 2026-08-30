@@ -27,6 +27,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Ctrl+/- / Ctrl+wheel / pinch page zoom (Windows); not ``set_zoom``;
   macOS / Linux ignore the engine flag
 
+### Tests
+
+- macOS: tabbing-disable off-main unit test patches ``current_thread``
+  instead of ``Thread.start()`` (GHA Abort under GC after a long native streak)
+
 ## [0.1.5] - 2026-08-30
 
 Browser essentials (cookies, headers, zoom, permission, clipboard), 0.1.4

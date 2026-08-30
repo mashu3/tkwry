@@ -3,6 +3,8 @@
 # Off-thread sync-hook unit tests (worker + Tk pump) can Abort under GC after a
 # long create/destroy streak when packed into one pytest process with the rest
 # of ``tests/`` — same class of flake already isolated on Linux / Windows.
+# Do not spawn extra OS threads from remaining unit tests in this process
+# (see ``test_install_tabbing_disable_off_main_defers_to_tk_init``).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
