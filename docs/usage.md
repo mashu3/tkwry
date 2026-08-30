@@ -443,9 +443,11 @@ web.destroy()   # release native webview; host Frame is kept
 
 ## Observability
 
-Use **`phase`** / :class:`~tkwry.WebViewPhase` for a cheap lifecycle snapshot
-and **`take_queue_drop_stats()`** to detect handler backlogs. Both are safe to
-read from the Tk main thread; stats remain readable after :meth:`~tkwry.WebView.destroy`.
+Use **`phase`** / :class:`~tkwry.WebViewPhase` for a cheap lifecycle snapshot,
+**`bounds`** for the native view geometry last applied by the engine (same
+space as ``set_bounds`` / ``sync_bounds``), and **`take_queue_drop_stats()`**
+to detect handler backlogs. All are safe to read from the Tk main thread; stats
+remain readable after :meth:`~tkwry.WebView.destroy`.
 
 ### Lifecycle phase
 
@@ -549,7 +551,7 @@ Stability policy (0.2.0).
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_complete`; create-only `permission_handler=` |
 | Appearance | `set_background_color`, `set_zoom` / `reset_zoom`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create); `devtools=`, `clipboard=`, `permission_handler=` |
-| Layout | `pack`, `grid`, `place`, `sync_bounds` (delegate to host `Frame` except `sync_bounds`) |
+| Layout | `pack`, `grid`, `place`, `sync_bounds`, `bounds` (native geometry in ``set_bounds`` space) |
 | Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `in_flight_downloads`, `untrusted`, `clipboard`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
 | Diagnostics | `take_queue_drop_stats` / `QueueDropCounts`, `take_queue_drop_counts` |
 

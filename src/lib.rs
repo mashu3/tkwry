@@ -43,6 +43,51 @@ fn make_rect(x: f64, y: f64, width: f64, height: f64) -> wry::Rect {
     }
 }
 
+/// Inverse of [`make_rect`]: values in the same space Tk passes to ``set_bounds``.
+fn rect_to_tuple(rect: wry::Rect) -> (f64, f64, f64, f64) {
+    use wry::dpi::{Position, Size};
+    #[cfg(target_os = "windows")]
+    {
+        let x = match rect.position {
+            Position::Physical(p) => p.x as f64,
+            Position::Logical(p) => p.x,
+        };
+        let y = match rect.position {
+            Position::Physical(p) => p.y as f64,
+            Position::Logical(p) => p.y,
+        };
+        let width = match rect.size {
+            Size::Physical(s) => s.width as f64,
+            Size::Logical(s) => s.width,
+        };
+        let height = match rect.size {
+            Size::Physical(s) => s.height as f64,
+            Size::Logical(s) => s.height,
+        };
+        (x, y, width, height)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let x = match rect.position {
+            Position::Logical(p) => p.x,
+            Position::Physical(p) => p.x as f64,
+        };
+        let y = match rect.position {
+            Position::Logical(p) => p.y,
+            Position::Physical(p) => p.y as f64,
+        };
+        let width = match rect.size {
+            Size::Logical(s) => s.width,
+            Size::Physical(s) => s.width as f64,
+        };
+        let height = match rect.size {
+            Size::Logical(s) => s.height,
+            Size::Physical(s) => s.height as f64,
+        };
+        (x, y, width, height)
+    }
+}
+
 /// Maximum number of buffered async events per channel. When the Tk thread falls
 /// behind, queues are compacted where possible before the oldest event is dropped.
 const MAX_PAGE_LOAD_PENDING: usize = 2048;
@@ -2438,6 +2483,15 @@ WebViews that share a session must use the same app= root \
         with_webview(self, |wv| {
             wv.set_bounds(make_rect(x, y, width, height))
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })
+    }
+
+    fn bounds(&self) -> PyResult<(f64, f64, f64, f64)> {
+        with_webview(self, |wv| {
+            let rect = wv
+                .bounds()
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            Ok(rect_to_tuple(rect))
         })
     }
 

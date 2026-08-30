@@ -1855,6 +1855,11 @@ class WebView(WebViewRpcMixin):
             ) from self._creation_error
         self._sync_bounds_and_stacking()
 
+    @property
+    def bounds(self) -> tuple[float, float, float, float]:
+        """Native view bounds in ``set_bounds`` space: ``(x, y, width, height)``."""
+        return self._require_ready("bounds").bounds()
+
     def take_queue_drop_counts(self) -> tuple[int, int, int, int, int, int]:
         """Return overflow drop counts since the last call.
 

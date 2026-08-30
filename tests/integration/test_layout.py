@@ -243,3 +243,28 @@ def test_sync_bounds_public_api(tk_root) -> None:
 
     web.destroy()
     host.destroy()
+
+
+def test_bounds_getter_matches_sync_bounds(tk_root) -> None:
+    import tkinter as tk
+
+    tk_root.geometry("480x320")
+    host = tk.Frame(tk_root, width=360, height=220, bg="#222")
+    host.pack_propagate(False)
+    host.pack(padx=20, pady=20)
+
+    web = WebView(host, html="<p>bounds-getter</p>")
+    assert wait_until(tk_root, lambda: web.native is not None)
+    pump(tk_root, steps=40)
+
+    web.sync_bounds()
+    pump(tk_root, steps=20)
+    host.update_idletasks()
+
+    expected = expected_bounds(host)
+    assert bounds_close([web.bounds], expected), (
+        f"expected {expected}, got {web.bounds}"
+    )
+
+    web.destroy()
+    host.destroy()

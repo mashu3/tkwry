@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Release provenance: ``SHA256SUMS`` on GitHub Releases, artifact build
   attestations in ``release.yml``, and [docs/provenance.md](docs/provenance.md)
   (checksum verify, ``gh attestation verify``, optional ``cargo audit`` note)
+- ``WebView.bounds`` — read native ``(x, y, width, height)`` in ``set_bounds``
+  space (wry ``bounds()`` wrap)
 
 ## [0.1.5] - 2026-08-30
 

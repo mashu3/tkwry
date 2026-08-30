@@ -9,7 +9,11 @@ import pytest
 
 from tkwry import WebView, WebViewPhase
 from tkwry._linux import GtkPump
-from tkwry.exceptions import WebViewCreationError, WebViewDestroyedError
+from tkwry.exceptions import (
+    WebViewCreationError,
+    WebViewDestroyedError,
+    WebViewNotReadyError,
+)
 from tkwry.webview import _CREATE_MAX_ATTEMPTS, _FLUSH_LOAD_MAX_ATTEMPTS
 
 _real_try_create = WebView._try_create
@@ -656,6 +660,29 @@ def test_sync_bounds_shows_via_show_native_view(
     assert web._sync_bounds() is True
     assert bounds == [(10, 20, 400, 300)]
     assert shown == [web._webview]
+
+
+def test_bounds_property_reads_native(tk_root, monkeypatch: pytest.MonkeyPatch) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+
+    class Native:
+        def bounds(self) -> tuple[float, float, float, float]:
+            return (10.0, 20.0, 400.0, 300.0)
+
+        def destroy(self) -> None:
+            pass
+
+    web._webview = Native()  # type: ignore[assignment]
+    assert web.bounds == (10.0, 20.0, 400.0, 300.0)
+
+
+def test_bounds_raises_when_not_ready(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    with pytest.raises(WebViewNotReadyError):
+        _ = web.bounds
 
 
 def test_layout_ready_false_for_init_size_before_map_on_win32(
