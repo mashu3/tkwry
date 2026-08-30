@@ -29,23 +29,25 @@ pub(crate) struct AppServeOptions {
 }
 
 /// Map a ``tkwry://`` URL to the WebView2 navigation form used with
-/// ``with_https_scheme(true)``.
+/// ``with_https_scheme``.
 ///
-/// wry rewrites ``{scheme}://localhost/...`` → ``https://{scheme}.localhost/...``
+/// wry rewrites ``{scheme}://localhost/...`` → ``http(s)://{scheme}.localhost/...``
 /// for ``with_url`` at create time, but **not** for later ``WebView::load_url``.
 /// tkwry always loads ``app=`` content via deferred ``load_url``, so Windows
-/// needs the same rewrite here.
+/// needs the same rewrite here. ``https_scheme`` selects ``https`` (tkwry
+/// default / secure context) vs ``http`` (wry default / mixed content).
 #[cfg(target_os = "windows")]
-pub(crate) fn navigate_url(url: &str) -> Cow<'_, str> {
+pub(crate) fn navigate_url(url: &str, https_scheme: bool) -> Cow<'_, str> {
     if let Some(rest) = url.strip_prefix("tkwry://") {
-        Cow::Owned(format!("https://tkwry.{rest}"))
+        let scheme = if https_scheme { "https" } else { "http" };
+        Cow::Owned(format!("{scheme}://tkwry.{rest}"))
     } else {
         Cow::Borrowed(url)
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-pub(crate) fn navigate_url(url: &str) -> Cow<'_, str> {
+pub(crate) fn navigate_url(url: &str, _https_scheme: bool) -> Cow<'_, str> {
     Cow::Borrowed(url)
 }
 
@@ -558,7 +560,7 @@ fn spa_fallback_allowed(request: &Request<Vec<u8>>, options: &AppServeOptions) -
 fn is_tkwry_origin(value: &str) -> bool {
     matches!(
         value.trim().to_ascii_lowercase().as_str(),
-        "tkwry://localhost" | "tkwry://app" | "https://tkwry.localhost"
+        "tkwry://localhost" | "tkwry://app" | "https://tkwry.localhost" | "http://tkwry.localhost"
     )
 }
 
@@ -569,6 +571,7 @@ fn is_tkwry_referer(value: &str) -> bool {
         || lower.starts_with("tkwry://app/")
         || lower.starts_with("tkwry://app?")
         || lower.starts_with("https://tkwry.localhost")
+        || lower.starts_with("http://tkwry.localhost")
 }
 
 /// True when a custom-protocol request clearly comes from another origin.
@@ -659,14 +662,17 @@ mod tests {
     #[test]
     fn navigate_url_rewrites_tkwry_on_windows_only() {
         let input = "tkwry://localhost/index.html";
-        let out = navigate_url(input);
+        let https = navigate_url(input, true);
+        let http = navigate_url(input, false);
         if cfg!(target_os = "windows") {
-            assert_eq!(out.as_ref(), "https://tkwry.localhost/index.html");
+            assert_eq!(https.as_ref(), "https://tkwry.localhost/index.html");
+            assert_eq!(http.as_ref(), "http://tkwry.localhost/index.html");
         } else {
-            assert_eq!(out.as_ref(), input);
+            assert_eq!(https.as_ref(), input);
+            assert_eq!(http.as_ref(), input);
         }
         assert_eq!(
-            navigate_url("https://example.com/").as_ref(),
+            navigate_url("https://example.com/", true).as_ref(),
             "https://example.com/"
         );
     }
@@ -990,6 +996,17 @@ mod tests {
             &options,
         );
         assert_eq!(windows_origin.status(), StatusCode::OK);
+
+        let windows_http_origin = serve_app_request(
+            &root,
+            request_with(
+                Method::GET,
+                "/index.html",
+                &[("origin", "http://tkwry.localhost")],
+            ),
+            &options,
+        );
+        assert_eq!(windows_http_origin.status(), StatusCode::OK);
 
         let top_level = serve_app_request(&root, dummy_request("/index.html"), &options);
         assert_eq!(top_level.status(), StatusCode::OK);

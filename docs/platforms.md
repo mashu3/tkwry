@@ -162,6 +162,22 @@ still work — they do not depend on the context menu.
 macOS / Linux: wry has no equivalent builder flag (constructor value is
 still stored). WKWebView / WebKitGTK keep their engine default menus.
 
+## HTTPS scheme (Windows `app=`)
+
+`WebView(..., app=..., https_scheme=True)` maps to wry
+`with_https_scheme` (tkwry default **`True`** — already the Windows
+`app=` origin since 0.1.2). WebView2 then navigates
+`https://tkwry.localhost/...` (a **secure context**: Service Worker,
+`crypto.subtle`).
+
+`https_scheme=False` uses wry's own default: `http://tkwry.localhost/...`.
+That matches custom-scheme mixed-content on macOS / Linux more closely,
+but is **not** a secure context.
+
+macOS / Linux ignore the flag and stay `tkwry://localhost`. Changing the
+flag on an existing Windows profile moves the origin (cookies /
+`localStorage` do not follow).
+
 ## Clipboard (Web API opt-in)
 
 `WebView(..., clipboard=True)` → wry `with_clipboard(true)`. Default is

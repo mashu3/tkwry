@@ -18,6 +18,7 @@ APP_ORIGINS = frozenset(
         "tkwry://localhost",
         "tkwry://app",
         "https://tkwry.localhost",
+        "http://tkwry.localhost",
     }
 )
 INLINE_ORIGINS = frozenset({"about:blank", "null"})

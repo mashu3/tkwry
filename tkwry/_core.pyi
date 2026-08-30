@@ -131,6 +131,7 @@ class WebView:
         hotkeys_zoom: bool = False,
         back_forward_gestures: bool = False,
         default_context_menus: bool = True,
+        https_scheme: bool = True,
         focused: bool = True,
         background_color: tuple[int, int, int, int] | None = None,
         user_agent: str | None = None,

@@ -351,6 +351,10 @@ class WebView(WebViewRpcMixin):
     ``default_context_menus=False`` hides the WebView2 page context menu
     (Windows only; wry default ``True``). ``untrusted=True`` does **not**
     flip it. Distinct from Tk window menus and from ``devtools=``.
+    ``https_scheme=`` (default ``True``) selects the Windows ``app=`` origin
+    ``https://tkwry.localhost`` (secure context) vs wry's
+    ``http://tkwry.localhost`` (``False``; mixed content, not SW / SubtleCrypto).
+    macOS / Linux stay ``tkwry://``.
 
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
@@ -459,6 +463,7 @@ class WebView(WebViewRpcMixin):
         hotkeys_zoom: bool = False,
         back_forward_gestures: bool = False,
         default_context_menus: bool = True,
+        https_scheme: bool = True,
         background_color: tuple[int, int, int, int] | None = None,
         user_agent: str | None = None,
         initialization_script: str | None = None,
@@ -589,6 +594,7 @@ class WebView(WebViewRpcMixin):
         self._hotkeys_zoom = bool(hotkeys_zoom)
         self._back_forward_gestures = bool(back_forward_gestures)
         self._default_context_menus = bool(default_context_menus)
+        self._https_scheme = bool(https_scheme)
         self._background_color = background_color
         self._user_agent = user_agent
         self._initialization_script = initialization_script
@@ -929,6 +935,19 @@ class WebView(WebViewRpcMixin):
         """
         self._require_tk_thread()
         return self._default_context_menus
+
+    @property
+    def https_scheme(self) -> bool:
+        """Create-time Windows ``app=`` custom-protocol scheme (default ``True``).
+
+        Maps to wry ``with_https_scheme``. ``True`` uses
+        ``https://tkwry.localhost`` (secure context: Service Worker,
+        ``crypto.subtle``). ``False`` uses wry's ``http://tkwry.localhost``
+        (mixed content easier; **not** a secure context). macOS / Linux
+        stay ``tkwry://``; this still records the constructor value.
+        """
+        self._require_tk_thread()
+        return self._https_scheme
 
     @property
     def navigation_allow(self) -> frozenset[str] | None:
@@ -3309,6 +3328,7 @@ class WebView(WebViewRpcMixin):
             "hotkeys_zoom": self._hotkeys_zoom,
             "back_forward_gestures": self._back_forward_gestures,
             "default_context_menus": self._default_context_menus,
+            "https_scheme": self._https_scheme,
             "focused": self._focused,
         }
         if self._background_color is not None:

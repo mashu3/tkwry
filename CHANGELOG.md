@@ -32,6 +32,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Create-time ``default_context_menus=False`` (default ``True``, wry) —
   hide WebView2 page context menu (Windows); not Tk chrome;
   ``untrusted=True`` does not flip it; macOS / Linux ignore the engine flag
+- Create-time ``https_scheme=`` (default ``True`` on Windows ``app=``) —
+  ``https://tkwry.localhost`` secure context; ``False`` is wry's
+  ``http://tkwry.localhost`` (mixed content, not SW / SubtleCrypto);
+  macOS / Linux stay ``tkwry://``
 
 ### Tests
 

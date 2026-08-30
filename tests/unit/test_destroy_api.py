@@ -90,6 +90,7 @@ POST_DESTROY_READABLE_PROPERTIES = frozenset(
         "hotkeys_zoom",
         "back_forward_gestures",
         "default_context_menus",
+        "https_scheme",
         "navigation_allow",
         "open_external",
         "download_allow",

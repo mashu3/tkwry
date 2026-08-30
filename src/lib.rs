@@ -1305,6 +1305,8 @@ struct WebView {
     wry_call_depth: Cell<u32>,
     /// ``destroy()`` requested while a nested wry call is active.
     destroy_pending: Cell<bool>,
+    /// Windows ``app=``: rewrite ``tkwry://`` → ``http(s)://tkwry.localhost``.
+    https_scheme: bool,
     /// Keeps the shared ``WebContext`` alive (custom protocol / profile).
     #[allow(dead_code)]
     session: Option<Arc<Mutex<session::WebSessionState>>>,
@@ -1434,6 +1436,7 @@ impl WebView {
         hotkeys_zoom = false,
         back_forward_gestures = false,
         default_context_menus = true,
+        https_scheme = true,
         focused = true,
         background_color = None,
         user_agent = None,
@@ -1472,6 +1475,7 @@ impl WebView {
         hotkeys_zoom: bool,
         back_forward_gestures: bool,
         default_context_menus: bool,
+        https_scheme: bool,
         focused: bool,
         background_color: Option<(u8, u8, u8, u8)>,
         user_agent: Option<String>,
@@ -1923,8 +1927,9 @@ WebViews that share a session must use the same app= root \
             #[cfg(target_os = "windows")]
             {
                 use wry::WebViewBuilderExtWindows;
-                // Match macOS/Linux ``tkwry://`` origins more closely for CORS.
-                builder = builder.with_https_scheme(true);
+                // ``True`` (tkwry default): ``https://tkwry.localhost`` secure context.
+                // ``False``: wry default ``http://tkwry.localhost`` (mixed content).
+                builder = builder.with_https_scheme(https_scheme);
             }
         }
 
@@ -2023,12 +2028,13 @@ WebViews that share a session must use the same app= root \
             download_cb,
             wry_call_depth: Cell::new(0),
             destroy_pending: Cell::new(false),
+            https_scheme,
             session: session_state,
         })
     }
 
     fn load_url(&self, url: &str) -> PyResult<()> {
-        let url = app_protocol::navigate_url(url);
+        let url = app_protocol::navigate_url(url, self.https_scheme);
         with_webview(self, |wv| {
             wv.load_url(url.as_ref())
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
@@ -2050,7 +2056,7 @@ WebViews that share a session must use the same app= root \
             })?;
             map.append(header_name, header_value);
         }
-        let url = app_protocol::navigate_url(url);
+        let url = app_protocol::navigate_url(url, self.https_scheme);
         with_webview(self, |wv| {
             wv.load_url_with_headers(url.as_ref(), map)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))

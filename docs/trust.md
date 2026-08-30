@@ -89,7 +89,7 @@ See [Usage — Shared session](usage.md#shared-session-websession).
 
 - **Bridge origins** — IPC/RPC are accepted only from the initial content
   origin (`html=` → `about:blank`; `app=` → `tkwry://` /
-  `https://tkwry.localhost`; `url=` → that site). Foreign pages still see
+  `https://tkwry.localhost` / `http://tkwry.localhost`; `url=` → that site). Foreign pages still see
   `window.ipc` (engine injection) but messages are dropped / RPC rejects with
   `RpcOriginError`. Use `bridge_origins=["https://trusted.example"]` (whole
   origin) or a **path prefix**
@@ -153,7 +153,8 @@ security warning). Copy that only if every page is trusted, and do not
 
 Constructor `app=` fixes the filesystem root at create time. Later
 `load_url("tkwry://localhost/other.html")` can navigate within that root
-(Windows WebView2 rewrites this to `https://tkwry.localhost/...` internally).
+(Windows WebView2 rewrites this to `https://tkwry.localhost/...` by
+default, or `http://tkwry.localhost/...` when `https_scheme=False`).
 
 The `tkwry://` handler percent-decodes each path segment (so `%2e%2e`
 cannot bypass `..`), rejects NUL / invalid UTF-8 / Windows drive and UNC

@@ -27,6 +27,7 @@ def test_origin_of_common_forms() -> None:
     assert origin_of("http://localhost:8080/x") == "http://localhost:8080"
     assert origin_of("tkwry://localhost/index.html") == "tkwry://localhost"
     assert origin_of("https://tkwry.localhost/app.js") == "https://tkwry.localhost"
+    assert origin_of("http://tkwry.localhost/app.js") == "http://tkwry.localhost"
     assert origin_of("file:///tmp/index.html") == "file://"
     assert origin_of("data:text/html,hi") == "null"
 
@@ -88,6 +89,7 @@ def test_path_prefix_matches_boundary() -> None:
 def test_app_and_untrusted_navigation_policy() -> None:
     assert app_navigation_allowed("tkwry://localhost/index.html")
     assert app_navigation_allowed("https://tkwry.localhost/x")
+    assert app_navigation_allowed("http://tkwry.localhost/x")
     assert app_navigation_allowed("about:blank")
     assert not app_navigation_allowed("https://example.com/")
     assert not app_navigation_allowed("file:///tmp/x")
@@ -99,6 +101,7 @@ def test_app_and_untrusted_navigation_policy() -> None:
     assert untrusted_navigation_allowed("about:blank")
     assert not untrusted_navigation_allowed("tkwry://localhost/")
     assert not untrusted_navigation_allowed("https://tkwry.localhost/")
+    assert not untrusted_navigation_allowed("http://tkwry.localhost/")
     assert not untrusted_navigation_allowed("file:///tmp/x")
     assert not untrusted_navigation_allowed("javascript:alert(1)")
 
@@ -109,6 +112,7 @@ def test_is_external_http_url() -> None:
     assert not is_external_http_url("file:///tmp/x")
     assert not is_external_http_url("javascript:alert(1)")
     assert not is_external_http_url("https://tkwry.localhost/index.html")
+    assert not is_external_http_url("http://tkwry.localhost/index.html")
     assert not is_external_http_url("tkwry://localhost/index.html")
 
 

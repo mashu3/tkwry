@@ -41,6 +41,7 @@ def test_app_locks_navigation_and_new_window(tk_root, tmp_path: Path) -> None:
     assert web.bridge_origins == APP_ORIGINS
     assert web._invoke_navigation_handler("tkwry://localhost/index.html") is True
     assert web._invoke_navigation_handler("https://tkwry.localhost/x") is True
+    assert web._invoke_navigation_handler("http://tkwry.localhost/x") is True
     assert web._invoke_navigation_handler("https://evil.example/") is False
     assert web._invoke_navigation_handler("file:///tmp/secret") is False
     assert web._invoke_navigation_handler("data:text/html,<p>x</p>") is False
@@ -170,6 +171,8 @@ def test_untrusted_rejects_bridge_and_forces_ephemeral(tk_root) -> None:
         web.emit("x", {})
     assert web._invoke_navigation_handler("https://example.com/") is True
     assert web._invoke_navigation_handler("tkwry://localhost/") is False
+    assert web._invoke_navigation_handler("https://tkwry.localhost/") is False
+    assert web._invoke_navigation_handler("http://tkwry.localhost/") is False
     assert web._invoke_navigation_handler("file:///tmp/x") is False
     # html= + untrusted still allows NavigateToString (data: → null origin).
     assert web._invoke_navigation_handler("data:text/html,<p>x</p>") is True

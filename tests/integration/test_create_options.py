@@ -224,3 +224,14 @@ def test_default_context_menus_false_creates(tk_root) -> None:
     finally:
         web.destroy()
         frame.destroy()
+
+
+def test_https_scheme_false_creates(tk_root) -> None:
+    frame = host_frame(tk_root)
+    web = WebView(frame, html=_PAGE, https_scheme=False)
+    try:
+        assert web.https_scheme is False
+        assert wait_until(tk_root, lambda: web.ready, steps=200)
+    finally:
+        web.destroy()
+        frame.destroy()
