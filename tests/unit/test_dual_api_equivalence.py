@@ -153,3 +153,31 @@ def test_setter_after_ctor_kw_last_wins(tk_root) -> None:
         assert web._on_page_load is not handler_a
     finally:
         web.destroy()
+
+
+def test_on_callback_error_ctor_matches_setter(tk_root) -> None:
+    handler = lambda _exc, _kind: None  # noqa: E731
+    frame_ctor = _make_frame(tk_root)
+    frame_set = _make_frame(tk_root)
+    web_ctor = WebView(frame_ctor, html="<p>ctor</p>", on_callback_error=handler)
+    web_set = WebView(frame_set, html="<p>setter</p>")
+    try:
+        web_set.set_on_callback_error(handler)
+        assert web_ctor._on_callback_error is handler
+        assert web_set._on_callback_error is handler
+    finally:
+        web_ctor.destroy()
+        web_set.destroy()
+
+
+def test_clear_on_callback_error_restores_default(tk_root) -> None:
+    frame = _make_frame(tk_root)
+    web = WebView(frame, html="<p>x</p>")
+    try:
+        assert web._on_callback_error is None
+        web.set_on_callback_error(lambda _e, _k: None)
+        assert web._on_callback_error is not None
+        web.set_on_callback_error(None)
+        assert web._on_callback_error is None
+    finally:
+        web.destroy()

@@ -2,13 +2,16 @@
 
 How-to for `WebView` after the [README landing](../README.md#-usage).
 Contracts live elsewhere: [Trust boundaries](trust.md),
-[IPC / RPC / emit](rpc.md), [Platform notes](platforms.md).
+[IPC / RPC / emit](rpc.md), [Platform notes](platforms.md),
+[Packaging notes](packaging.md).
 
 | Start here | |
 |------------|--|
 | [Minimal app](#minimal-app) | First runnable window (`app=` or URL) |
 | [Hidden hosts](#hidden-hosts) | Notebook / `pack_forget` vs `lift` overlap |
 | [User-Agent](#user-agent) | App identity — not a Chrome spoof |
+| [Observability](#observability) | ``WebViewPhase`` + ``take_queue_drop_stats()`` |
+| [API stability](#api-stability) | Public vs Provisional (Alpha) |
 | [API summary](#api-summary) | Public surface table |
 
 The constructor **does not raise** if the native view cannot be created
@@ -429,6 +432,103 @@ web.destroy()   # release native webview; host Frame is kept
 # in-flight RPC / streams are cancelled cooperatively (pool join ~2s)
 ```
 
+## Observability
+
+Use **`phase`** / :class:`~tkwry.WebViewPhase` for a cheap lifecycle snapshot
+and **`take_queue_drop_stats()`** to detect handler backlogs. Both are safe to
+read from the Tk main thread; stats remain readable after :meth:`~tkwry.WebView.destroy`.
+
+### Lifecycle phase
+
+``WebView.phase`` is derived — it does not drive transitions. Typical flow:
+
+| Phase | Meaning | Action |
+|-------|---------|--------|
+| `PRE_CREATE` | Host frame exists; native not yet live | Wait or handle create failure |
+| `NATIVE` | Native view exists; layout may still be 1×1 | Optional ``sync_bounds()`` |
+| `READY` | Sized and eligible for gated APIs | ``eval_js`` / ``expose`` / ``emit`` |
+| `HIDDEN` | Host unmapped (e.g. inactive Notebook tab) | ``ready`` may stay true; prefer re-select tab before eval |
+| `CREATE_FAILED` | Native create abandoned | ``creation_error`` / ``<<WebViewCreateFailed>>`` |
+| `TEARING_DOWN` / `DESTROYED` | ``destroy()`` in progress or done | Do not call gated APIs |
+
+```python
+from tkwry import WebView, WebViewPhase
+
+def on_ready(_event=None):
+    if web.phase is not WebViewPhase.READY:
+        return
+    web.eval_js("console.log('live')")
+
+web.bind("<<WebViewReady>>", on_ready)
+```
+
+Hidden-host rules: [Hidden hosts](#hidden-hosts).
+
+### Queue drop stats
+
+Internal async queues cap at **2048** pending items. Overflow events are
+**dropped and counted** — delivery is best-effort under backlog.
+
+```python
+from tkwry import QueueDropCounts
+
+stats: QueueDropCounts = web.take_queue_drop_stats()
+if any(
+    (
+        stats.ipc,
+        stats.page_load,
+        stats.title,
+        stats.drag_drop,
+        stats.eval,
+        stats.rpc,
+        stats.download_complete,
+        stats.rpc_stream,
+    )
+):
+    print("tkwry queue drops:", stats)
+```
+
+Call periodically from a Tk timer or after heavy bursts (IPC storms, stream
+chunks, download-complete without handler). Each call **resets** counters
+(both ``take_queue_drop_stats`` and the legacy six-field
+``take_queue_drop_counts`` share the first six buckets).
+
+**Interpretation:**
+
+- **`eval` / `rpc` spikes** — Python handlers or ``eval_js_with_callback`` too
+  slow; shorten work or move to ``@expose(thread=True)``.
+- **`download_complete`** — complete events arrived faster than Tk drained them
+  (rare unless the main loop is blocked).
+- **`rpc_stream`** — generator ``@expose`` yields faster than JS consumes;
+  cancel on the JS side or throttle yields.
+
+Sync-hook timeouts (navigation / new window / permission) surface via
+``last_navigation_error`` / ``<<WebViewNavigationFailed>>`` — not queue drops.
+
+Provisional callback exceptions: ``on_callback_error`` (see
+[API stability](#api-stability)).
+
+## API stability
+
+**Alpha (0.1.x):** behavior may change; not recommended for production.
+
+| Class | Rule |
+|-------|------|
+| **Public** | Listed in ``tkwry.__all__`` and the [API summary](#api-summary) below |
+| **Provisional** | Documented but **not** in ``__all__`` — may change in 0.2.x |
+| **Internal** | Underscore modules / methods — unsupported |
+
+**Provisional today:**
+
+| Symbol | Notes |
+|--------|-------|
+| ``on_callback_error`` / ``set_on_callback_error`` | Route callback exceptions to app code (`exc`, `kind`); default remains stderr |
+
+Constructor vs setter **dual paths** (e.g. ``on_navigation=`` vs
+``set_on_navigation``) are intended to be equivalent before native create and
+after; prefer one style per app. Beta will publish a full classification and
+Stability policy (0.2.0).
+
 ## API summary
 
 | Category | Members |
@@ -472,4 +572,5 @@ Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`,
 - [Trust boundaries](trust.md)
 - [IPC / RPC / emit](rpc.md)
 - [Platform notes](platforms.md)
+- [Packaging notes](packaging.md)
 - [README — Known limitations](../README.md#-known-limitations)
