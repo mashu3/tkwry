@@ -928,20 +928,42 @@ def test_shared_session_local_storage_roundtrip(tk_root, tmp_path: Path) -> None
     web_a = WebView(frame_a, app=app_dir, session=session, width=320, height=240)
     web_b = WebView(frame_b, app=app_dir, session=session, width=320, height=240)
 
+    load_events_a: list[tuple[PageLoadEvent, str]] = []
+    load_events_b: list[tuple[PageLoadEvent, str]] = []
+    web_a.set_on_page_load(lambda evt, url: load_events_a.append((evt, url)))
+    web_b.set_on_page_load(lambda evt, url: load_events_b.append((evt, url)))
+
     assert wait_until(tk_root, lambda: web_a.ready and web_b.ready, steps=300)
+
+    def app_page_finished(events: list[tuple[PageLoadEvent, str]]) -> bool:
+        return any(
+            evt == PageLoadEvent.Finished
+            and ("tkwry" in url or url.startswith("https://tkwry"))
+            for evt, url in events
+        )
+
+    assert wait_until(tk_root, lambda: app_page_finished(load_events_a), steps=400), (
+        f"web_a app page did not finish: {load_events_a!r}"
+    )
+    assert wait_until(tk_root, lambda: app_page_finished(load_events_b), steps=400), (
+        f"web_b app page did not finish: {load_events_b!r}"
+    )
     pump(tk_root, steps=60)
 
     def _page_marker(web: WebView) -> bool:
         results: list[str] = []
-        web.eval_js_with_callback(
-            "document.getElementById('t') && document.getElementById('t').textContent",
-            results.append,
-        )
-        return wait_until(
-            tk_root,
-            lambda: any("s" in str(v) for v in results),
-            steps=80,
-        )
+
+        def marker_ready() -> bool:
+            web.eval_js_with_callback(
+                (
+                    "document.getElementById('t')"
+                    " && document.getElementById('t').textContent"
+                ),
+                results.append,
+            )
+            return any("s" in str(v) for v in results)
+
+        return wait_until(tk_root, marker_ready, steps=300)
 
     assert _page_marker(web_a), "web_a page marker missing"
     assert _page_marker(web_b), "web_b page marker missing"
