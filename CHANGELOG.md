@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-08-30
+
+Browser essentials (cookies, headers, zoom, permission, clipboard), 0.1.4
+download-complete / RPC fixes, docs CI, and tag gates.
+
 ### Added
 
 - Cookie / browsing-data wrap: ``Cookie``, ``cookies`` / ``cookies_for_url``,
@@ -50,6 +55,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Linux / Windows / macOS CI: run ``tests/unit/test_sync_hooks.py`` in a
   separate pytest process (worker + Tk pump under GC aborted the full suite
   after the create/destroy streak grew)
+- macOS CI: stabilize sync-hook pre-start timeout unit test (GHA Tk drain
+  timing)
 
 ### Tests
 
@@ -582,6 +589,7 @@ eval, macOS IME / import-order / DevTools private APIs, Notebook `ready`≠map.
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.1.5]: https://github.com/mashu3/tkwry/releases/tag/v0.1.5
 [0.1.4]: https://github.com/mashu3/tkwry/releases/tag/v0.1.4
 [0.1.3]: https://github.com/mashu3/tkwry/releases/tag/v0.1.3
 [0.1.2]: https://github.com/mashu3/tkwry/releases/tag/v0.1.2
