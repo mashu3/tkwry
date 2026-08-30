@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ``incognito=True`` constructor alias for ``ephemeral=True`` on
   ``WebView`` / ``WebSession`` (wry ``with_incognito``; inspect
   ``session.ephemeral``)
+- Create-time ``javascript_enabled=False`` (default ``True``) → wry
+  ``with_javascript_disabled``; ``untrusted=True`` does not flip it
 
 ## [0.1.5] - 2026-08-30
 

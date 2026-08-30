@@ -337,7 +337,9 @@ class WebView(WebViewRpcMixin):
     keep the engine default. Timeout / bad return → ``PermissionResponse.Deny``
     (does **not** change ``untrusted=True`` defaults). ``clipboard=True`` is
     create-only opt-in for the Web Clipboard API on Windows / Linux (macOS
-    WebView side is always-on — see platform notes).
+    WebView side is always-on — see platform notes). ``javascript_enabled=False``
+    is a create-only break-glass (wry ``with_javascript_disabled``); default
+    stays ``True`` and ``untrusted=True`` does **not** flip it.
 
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
@@ -441,6 +443,7 @@ class WebView(WebViewRpcMixin):
         rpc_traceback: bool = False,
         devtools: bool = False,
         clipboard: bool = False,
+        javascript_enabled: bool = True,
         background_color: tuple[int, int, int, int] | None = None,
         user_agent: str | None = None,
         initialization_script: str | None = None,
@@ -566,6 +569,7 @@ class WebView(WebViewRpcMixin):
         self._on_callback_error = on_callback_error
         self._devtools = devtools
         self._clipboard = bool(clipboard)
+        self._javascript_enabled = bool(javascript_enabled)
         self._background_color = background_color
         self._user_agent = user_agent
         self._initialization_script = initialization_script
@@ -850,6 +854,16 @@ class WebView(WebViewRpcMixin):
         """
         self._require_tk_thread()
         return self._clipboard
+
+    @property
+    def javascript_enabled(self) -> bool:
+        """Create-time JavaScript flag (default ``True``).
+
+        ``False`` maps to wry ``with_javascript_disabled``. Create-only;
+        ``untrusted=True`` does not change this default.
+        """
+        self._require_tk_thread()
+        return self._javascript_enabled
 
     @property
     def navigation_allow(self) -> frozenset[str] | None:
@@ -3225,6 +3239,7 @@ class WebView(WebViewRpcMixin):
             "visible": self._frame_should_show(),
             "devtools": self._devtools,
             "clipboard": self._clipboard,
+            "javascript_enabled": self._javascript_enabled,
             "focused": self._focused,
         }
         if self._background_color is not None:

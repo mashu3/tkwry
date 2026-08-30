@@ -137,6 +137,13 @@ path is **always on** — the flag still records the constructor value but
 does not toggle a platform switch. This is **not** a Tk↔Web paste bridge
 (that stays later). Useful for Monaco / in-page editors.
 
+## JavaScript (create-time)
+
+`WebView(..., javascript_enabled=False)` maps to wry
+`with_javascript_disabled`. Default is **`True`**. This is a break-glass
+for untrusted pages, not the `untrusted=True` viewer preset (that flag
+does not turn JS off). Create-only; `eval_js` / init scripts need JS on.
+
 ## Window chrome (Tk, not the WebView)
 
 Title, icon, geometry, min/max size, fullscreen, `-topmost`, and

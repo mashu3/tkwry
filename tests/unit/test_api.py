@@ -110,6 +110,7 @@ WEBVIEW_PROPERTIES = (
     "destroyed",
     "untrusted",
     "clipboard",
+    "javascript_enabled",
     "navigation_allow",
     "open_external",
     "download_allow",

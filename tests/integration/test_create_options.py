@@ -169,3 +169,14 @@ def test_devtools_open_close_roundtrip(tk_root) -> None:
             pass
         web.destroy()
         frame.destroy()
+
+
+def test_javascript_enabled_false_creates(tk_root) -> None:
+    frame = host_frame(tk_root)
+    web = WebView(frame, html=_PAGE, javascript_enabled=False)
+    try:
+        assert web.javascript_enabled is False
+        assert wait_until(tk_root, lambda: web.ready, steps=200)
+    finally:
+        web.destroy()
+        frame.destroy()
