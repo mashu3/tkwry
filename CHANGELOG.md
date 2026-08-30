@@ -31,6 +31,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - macOS: tabbing-disable off-main unit test patches ``current_thread``
   instead of ``Thread.start()`` (GHA Abort under GC after a long native streak)
+- Windows CI: isolate remaining ``thread=True`` RPC worker integration
+  (``test_rpc_worker_thread_does_not_block_handler_thread_flag``) with the
+  other worker-stress cases (``0x80000003`` under GC after ``test_content``)
 
 ## [0.1.5] - 2026-08-30
 
