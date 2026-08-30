@@ -118,6 +118,9 @@ See [Usage — Shared session](usage.md#shared-session-websession).
   `open_external=True` (see [Usage — User-Agent](usage.md#user-agent)).
   `javascript_enabled=False` is a separate create-time break-glass (page
   JS off); `untrusted=True` does **not** disable JavaScript by default.
+  `default_context_menus=False` is a separate Windows create-time opt-out
+  of the WebView2 page context menu (Inspect / Back / …);
+  `untrusted=True` does **not** hide it.
 - **Downloads (trusted)** — wry default is allow-all. `download_allow`
   restricts by origin / path prefix; `on_download(url, dest)` runs on the Tk
   thread (WebKit waits) and may return `True`, `False`/`None`, or an **absolute**

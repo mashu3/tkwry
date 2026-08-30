@@ -348,6 +348,9 @@ class WebView(WebViewRpcMixin):
     ``back_forward_gestures=True`` enables trackpad / swipe back-forward
     navigation (wry ``with_back_forward_navigation_gestures``; default
     ``False``). Effective on Windows, macOS, and Linux.
+    ``default_context_menus=False`` hides the WebView2 page context menu
+    (Windows only; wry default ``True``). ``untrusted=True`` does **not**
+    flip it. Distinct from Tk window menus and from ``devtools=``.
 
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
@@ -455,6 +458,7 @@ class WebView(WebViewRpcMixin):
         autoplay: bool = True,
         hotkeys_zoom: bool = False,
         back_forward_gestures: bool = False,
+        default_context_menus: bool = True,
         background_color: tuple[int, int, int, int] | None = None,
         user_agent: str | None = None,
         initialization_script: str | None = None,
@@ -584,6 +588,7 @@ class WebView(WebViewRpcMixin):
         self._autoplay = bool(autoplay)
         self._hotkeys_zoom = bool(hotkeys_zoom)
         self._back_forward_gestures = bool(back_forward_gestures)
+        self._default_context_menus = bool(default_context_menus)
         self._background_color = background_color
         self._user_agent = user_agent
         self._initialization_script = initialization_script
@@ -911,6 +916,19 @@ class WebView(WebViewRpcMixin):
         """
         self._require_tk_thread()
         return self._back_forward_gestures
+
+    @property
+    def default_context_menus(self) -> bool:
+        """Create-time WebView page context menus (default ``True``).
+
+        Maps to wry ``with_default_context_menus`` (Windows / WebView2).
+        ``False`` disables Inspect / Back / Reload on the page menu; Tk
+        window chrome menus are unchanged. macOS / Linux ignore the engine
+        flag; this still records the constructor value.
+        ``untrusted=True`` does not change this default. Not ``devtools=``.
+        """
+        self._require_tk_thread()
+        return self._default_context_menus
 
     @property
     def navigation_allow(self) -> frozenset[str] | None:
@@ -3290,6 +3308,7 @@ class WebView(WebViewRpcMixin):
             "autoplay": self._autoplay,
             "hotkeys_zoom": self._hotkeys_zoom,
             "back_forward_gestures": self._back_forward_gestures,
+            "default_context_menus": self._default_context_menus,
             "focused": self._focused,
         }
         if self._background_color is not None:

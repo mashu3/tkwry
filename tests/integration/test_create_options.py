@@ -213,3 +213,14 @@ def test_back_forward_gestures_true_creates(tk_root) -> None:
     finally:
         web.destroy()
         frame.destroy()
+
+
+def test_default_context_menus_false_creates(tk_root) -> None:
+    frame = host_frame(tk_root)
+    web = WebView(frame, html=_PAGE, default_context_menus=False)
+    try:
+        assert web.default_context_menus is False
+        assert wait_until(tk_root, lambda: web.ready, steps=200)
+    finally:
+        web.destroy()
+        frame.destroy()

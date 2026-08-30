@@ -148,6 +148,20 @@ nothing on Runtime older than 92.0.902.0 (swipe stays on). **macOS:**
 WKWebView `allowsBackForwardNavigationGestures`. **Linux:** WebKitGTK
 `enable-back-forward-navigation-gestures`.
 
+## Default context menus
+
+`WebView(..., default_context_menus=False)` maps to wry
+`with_default_context_menus` (default **`True`**, same as WebView2).
+On **Windows** this hides the page context menu (Inspect, Back, Reload,
+Save as, …). Tk / Toplevel chrome menus are **not** affected.
+
+`untrusted=True` does **not** flip this. Pair `False` with viewer mode
+when you want a locked-down page. `devtools=True` / `open_devtools()`
+still work — they do not depend on the context menu.
+
+macOS / Linux: wry has no equivalent builder flag (constructor value is
+still stored). WKWebView / WebKitGTK keep their engine default menus.
+
 ## Clipboard (Web API opt-in)
 
 `WebView(..., clipboard=True)` → wry `with_clipboard(true)`. Default is

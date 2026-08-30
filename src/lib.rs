@@ -1433,6 +1433,7 @@ impl WebView {
         autoplay = true,
         hotkeys_zoom = false,
         back_forward_gestures = false,
+        default_context_menus = true,
         focused = true,
         background_color = None,
         user_agent = None,
@@ -1470,6 +1471,7 @@ impl WebView {
         autoplay: bool,
         hotkeys_zoom: bool,
         back_forward_gestures: bool,
+        default_context_menus: bool,
         focused: bool,
         background_color: Option<(u8, u8, u8, u8)>,
         user_agent: Option<String>,
@@ -1827,6 +1829,15 @@ WebViews that share a session must use the same app= root \
         builder = builder.with_autoplay(autoplay);
         builder = builder.with_hotkeys_zoom(hotkeys_zoom);
         builder = builder.with_back_forward_navigation_gestures(back_forward_gestures);
+        #[cfg(target_os = "windows")]
+        {
+            use wry::WebViewBuilderExtWindows;
+            builder = builder.with_default_context_menus(default_context_menus);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = default_context_menus;
+        }
         if has_permission_handler {
             let permission_cb_clone = permission_cb.clone();
             let permission_sync_pending_clone = permission_sync_pending.clone();

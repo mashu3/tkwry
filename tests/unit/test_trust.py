@@ -154,6 +154,8 @@ def test_untrusted_rejects_bridge_and_forces_ephemeral(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>view</p>", untrusted=True)
     assert web.untrusted is True
+    assert web.javascript_enabled is True
+    assert web.default_context_menus is True
     assert web._session is not None
     assert web._session.ephemeral is True
     with pytest.raises(ValueError, match="untrusted"):
