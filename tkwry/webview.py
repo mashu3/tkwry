@@ -573,6 +573,7 @@ class WebView(WebViewRpcMixin):
         self._sync_hook_queue: queue.SimpleQueue[_SyncHookItem] = queue.SimpleQueue()
         self._sync_hook_depth = 0
         self._tk_wakeup_write_fd: int | None = None
+        self._tk_wakeup_pipe_attached = False
         # Bumped on destroy so late WebKit-thread delivers are discarded.
         self._eval_epoch = 0
         content_sources = sum(x is not None for x in (url, html, app))
@@ -1212,12 +1213,7 @@ class WebView(WebViewRpcMixin):
         self._detach_from_host(unbind_events=True)
         had_native = self._webview is not None
         self._release_native_view(hide=True)
-        if self._tk_wakeup_write_fd is not None and sys.platform != "darwin":
-            self._tk_wakeup_write_fd = None
-            try:
-                _release_tk_wakeup_pipe(self._frame.winfo_toplevel())
-            except tk.TclError:
-                pass
+        self._release_tk_wakeup_pipe_registration()
         self._unregister_platform_webview()
         if sys.platform == "linux":
             GtkPump.detach(self._frame)
@@ -2587,22 +2583,40 @@ class WebView(WebViewRpcMixin):
         toplevel = self._frame.winfo_toplevel()
         write_fd = _toplevel_wakeup_write_fd(toplevel)
         if sys.platform != "darwin":
-            if write_fd is None:
-                read_fd, write_fd = os.pipe()
-                setattr(toplevel, "_tkwry_wake_read_fd", read_fd)
-                setattr(toplevel, "_tkwry_wake_write_fd", write_fd)
-                setattr(toplevel, "_tkwry_wake_pipe_users", 0)
-            setattr(
-                toplevel,
-                "_tkwry_wake_pipe_users",
-                getattr(toplevel, "_tkwry_wake_pipe_users", 0) + 1,
-            )
-            _ensure_tk_wakeup_fileevent(toplevel)
-            _register_sync_hook_webview(toplevel, self)
-        self._tk_wakeup_write_fd = write_fd
+            if self._tk_wakeup_pipe_attached:
+                if write_fd is not None:
+                    self._tk_wakeup_write_fd = write_fd
+            else:
+                if write_fd is None:
+                    read_fd, write_fd = os.pipe()
+                    setattr(toplevel, "_tkwry_wake_read_fd", read_fd)
+                    setattr(toplevel, "_tkwry_wake_write_fd", write_fd)
+                    setattr(toplevel, "_tkwry_wake_pipe_users", 0)
+                setattr(
+                    toplevel,
+                    "_tkwry_wake_pipe_users",
+                    getattr(toplevel, "_tkwry_wake_pipe_users", 0) + 1,
+                )
+                _ensure_tk_wakeup_fileevent(toplevel)
+                _register_sync_hook_webview(toplevel, self)
+                self._tk_wakeup_pipe_attached = True
+                self._tk_wakeup_write_fd = write_fd
+        else:
+            self._tk_wakeup_write_fd = write_fd
         native = self._webview
-        if native is not None and write_fd is not None:
-            native.set_mac_wakeup_write_fd(write_fd)
+        if native is not None and self._tk_wakeup_write_fd is not None:
+            native.set_mac_wakeup_write_fd(self._tk_wakeup_write_fd)
+
+    def _release_tk_wakeup_pipe_registration(self) -> None:
+        """Drop this WebView's share of the Win/Linux shared wakeup pipe (D24)."""
+        if sys.platform == "darwin" or not self._tk_wakeup_pipe_attached:
+            return
+        self._tk_wakeup_pipe_attached = False
+        self._tk_wakeup_write_fd = None
+        try:
+            _release_tk_wakeup_pipe(self._frame.winfo_toplevel())
+        except tk.TclError:
+            pass
 
     def _wake_tk_for_sync_hook(self) -> None:
         write_fd = self._tk_wakeup_write_fd
@@ -3160,7 +3174,6 @@ class WebView(WebViewRpcMixin):
             # is not doubled (unless_active no-ops).
             pump_gtk_unless_active(self._frame, bursts=20)
             self._attach_gtk_pump_for_native()
-            self._ensure_tk_wakeup_pipe()
 
         if sys.platform == "win32":
             from tkwry._win32 import (

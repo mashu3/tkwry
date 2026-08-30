@@ -383,3 +383,62 @@ def test_destroy_keeps_wakeup_pipe_while_other_users_remain(tk_root) -> None:
 
     web_b.destroy()
     assert not hasattr(tk_root, "_tkwry_wake_read_fd")
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="macOS uses a separate pipe")
+def test_wakeup_pipe_ensure_is_idempotent_per_webview(tk_root) -> None:
+    """D24 / T8: repeated _ensure_tk_wakeup_pipe must not inflate users."""
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+
+    web._ensure_tk_wakeup_pipe()
+    web._ensure_tk_wakeup_pipe()
+
+    assert tk_root._tkwry_wake_pipe_users == 1
+    assert web._tk_wakeup_pipe_attached is True
+
+    web.destroy()
+
+    assert not hasattr(tk_root, "_tkwry_wake_pipe_users")
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="macOS uses a separate pipe")
+def test_wakeup_pipe_setter_churn_does_not_inflate_users(tk_root) -> None:
+    """D24 / T8: set_on_navigation churn must not leak pipe users."""
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    web._ensure_tk_wakeup_pipe()
+
+    handler = lambda _url: True  # noqa: E731
+    for _ in range(5):
+        web.set_on_navigation(handler)
+
+    assert tk_root._tkwry_wake_pipe_users == 1
+
+    web.destroy()
+
+    assert not hasattr(tk_root, "_tkwry_wake_read_fd")
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="macOS uses a separate pipe")
+def test_wakeup_pipe_simulated_linux_double_create_path(tk_root) -> None:
+    """D24 / T8: old Linux _try_create double-ensure left users at 1 after destroy."""
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+
+    web._ensure_tk_wakeup_pipe()
+    web._ensure_tk_wakeup_pipe()
+
+    read_fd = tk_root._tkwry_wake_read_fd
+    write_fd = tk_root._tkwry_wake_write_fd
+
+    web.destroy()
+
+    assert not hasattr(tk_root, "_tkwry_wake_read_fd")
+    with pytest.raises(OSError):
+        os.fstat(read_fd)
+    with pytest.raises(OSError):
+        os.fstat(write_fd)
