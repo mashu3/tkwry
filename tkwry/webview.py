@@ -99,6 +99,7 @@ DragDropHandler: TypeAlias = Callable[[DragDropEvent, list[str], tuple[int, int]
 EvalCallback: TypeAlias = Callable[[str], None]
 EvalErrorHandler: TypeAlias = Callable[[Exception], None]
 CreationFailedHandler: TypeAlias = Callable[[BaseException], None]
+CallbackErrorHandler: TypeAlias = Callable[[BaseException, str], None]
 DownloadHandler: TypeAlias = Callable[[str, str], str | Path | bool | None]
 DownloadCompleteHandler: TypeAlias = Callable[[str, str | None, bool], None]
 _DANGEROUS_DOWNLOAD_SCHEMES = frozenset({"javascript", "vbscript", "mailto"})
@@ -351,6 +352,14 @@ class WebView(WebViewRpcMixin):
     navigations that occurred with no handler are **not** replayed when one is
     attached later.
 
+    **Callback exceptions:** lifecycle / IPC / page-load / title / DnD /
+    download-complete / ``when_ready`` / ``when_failed`` handlers that raise
+    are logged to stderr and do not stop event delivery. Optional provisional
+    ``on_callback_error=(exc, kind) -> None`` (and :meth:`set_on_callback_error`)
+    routes those failures to app code instead; ``kind`` names the hook
+    (e.g. ``"on_page_load"``, ``"ipc_handler"``). Not in ``__all__`` — may
+    change in 0.2.x.
+
     **JavaScript** (``eval_js`` / ``eval_js_with_callback``): ``eval_js`` is
     fire-and-forget (Tk idle, no return value). ``eval_js_with_callback`` is
     asynchronous; the callback receives the result string on the Tk main thread.
@@ -433,6 +442,7 @@ class WebView(WebViewRpcMixin):
         on_download: DownloadHandler | None = None,
         on_download_complete: DownloadCompleteHandler | None = None,
         on_creation_failed: CreationFailedHandler | None = None,
+        on_callback_error: CallbackErrorHandler | None = None,
     ) -> None:
         """Embed a WebView in *frame*.
 
@@ -539,6 +549,7 @@ class WebView(WebViewRpcMixin):
         self._drag_drop_handler = drag_drop_handler
         self._on_download = on_download
         self._on_download_complete = on_download_complete
+        self._on_callback_error = on_callback_error
         self._devtools = devtools
         self._clipboard = bool(clipboard)
         self._background_color = background_color
@@ -944,7 +955,7 @@ class WebView(WebViewRpcMixin):
             else:
                 evt = tk.Event()
                 evt.widget = _frame
-            self._invoke_callback(_func, evt)
+            self._invoke_callback(_func, evt, kind="bind")
 
         self._frame.after_idle(_deliver)
 
@@ -956,7 +967,7 @@ class WebView(WebViewRpcMixin):
             def _deliver() -> None:
                 if self._destroyed:
                     return
-                self._invoke_callback(callback)
+                self._invoke_callback(callback, kind="when_ready")
 
             self._frame.after_idle(_deliver)
         else:
@@ -976,7 +987,7 @@ class WebView(WebViewRpcMixin):
             def _deliver() -> None:
                 if self._destroyed:
                     return
-                self._invoke_callback(callback, err)
+                self._invoke_callback(callback, err, kind="on_creation_failed")
 
             self._frame.after_idle(_deliver)
             return
@@ -1947,6 +1958,19 @@ class WebView(WebViewRpcMixin):
             self._webview.set_download_complete_listening(True)
         self._ensure_event_poll()
 
+    def set_on_callback_error(
+        self, handler: CallbackErrorHandler | None
+    ) -> None:
+        """Register a provisional hook for exceptions in user callbacks.
+
+        *handler* receives ``(exc, kind)`` where ``kind`` names the failing
+        hook (e.g. ``"on_page_load"``, ``"ipc_handler"``). When unset,
+        failures are logged to stderr (default). Not part of the stable
+        public contract — may change in 0.2.x.
+        """
+        self._require_not_destroyed("set_on_callback_error")
+        self._on_callback_error = handler
+
     def _schedule_try_create(self, *, delay_ms: int | None = None) -> None:
         if (
             self._destroyed
@@ -2176,7 +2200,7 @@ class WebView(WebViewRpcMixin):
             callbacks = self._ready_callbacks
             self._ready_callbacks = []
             for callback in callbacks:
-                self._invoke_callback(callback)
+                self._invoke_callback(callback, kind="when_ready")
             if self._focus_when_ready:
                 self._focus_when_ready = False
                 if self._webview is not None:
@@ -2214,7 +2238,7 @@ class WebView(WebViewRpcMixin):
             if err is None:
                 return
             for callback in callbacks:
-                self._invoke_callback(callback, err)
+                self._invoke_callback(callback, err, kind="on_creation_failed")
 
         self._track_after(self._frame.after_idle(_deliver_failed))
 
@@ -2484,7 +2508,9 @@ class WebView(WebViewRpcMixin):
                 except (tk.TclError, RuntimeError):
                     pass
             if handler is not None:
-                self._invoke_callback(handler, url, dest, success)
+                self._invoke_callback(
+                    handler, url, dest, success, kind="on_download_complete"
+                )
 
     def _wake_async_events(self) -> None:
         """Drain wakeup-backed async queues without an idle native poll.
@@ -2541,11 +2567,23 @@ class WebView(WebViewRpcMixin):
         native.set_drag_drop_listening(self._drag_drop_handler is not None)
         native.set_download_complete_listening(True)
 
-    def _invoke_callback(self, callback: Callable[..., object], *args: object) -> None:
+    def _invoke_callback(
+        self,
+        callback: Callable[..., object],
+        *args: object,
+        kind: str = "callback",
+    ) -> None:
         try:
             callback(*args)
-        except Exception:
-            traceback.print_exc()
+        except Exception as exc:
+            error_handler = self._on_callback_error
+            if error_handler is None or callback is error_handler:
+                traceback.print_exception(type(exc), exc, exc.__traceback__)
+                return
+            try:
+                error_handler(exc, kind)
+            except Exception:
+                traceback.print_exc()
 
     def _ensure_tk_wakeup_pipe(self) -> None:
         toplevel = self._frame.winfo_toplevel()
@@ -2703,7 +2741,7 @@ class WebView(WebViewRpcMixin):
             except (tk.TclError, RuntimeError):
                 pass
         if on_error is not None:
-            self._invoke_callback(on_error, exc)
+            self._invoke_callback(on_error, exc, kind="eval_on_error")
             return
         if isinstance(exc, WebViewTimeoutError) or exc.__traceback__ is None:
             print(f"tkwry: {exc}", file=sys.stderr)
@@ -2766,7 +2804,7 @@ class WebView(WebViewRpcMixin):
         if handler is None or native is None:
             return
         for title in native.drain_title_events():
-            self._invoke_callback(handler, title)
+            self._invoke_callback(handler, title, kind="on_title_changed")
 
     def _deliver_drag_drop_events(self) -> None:
         handler = self._drag_drop_handler
@@ -2774,7 +2812,9 @@ class WebView(WebViewRpcMixin):
         if handler is None or native is None:
             return
         for event, paths, position in native.drain_drag_drop_events():
-            self._invoke_callback(handler, event, paths, position)
+            self._invoke_callback(
+                handler, event, paths, position, kind="drag_drop_handler"
+            )
 
     def _deliver_page_load_events(self) -> None:
         page_load = self._on_page_load
@@ -2783,7 +2823,7 @@ class WebView(WebViewRpcMixin):
             return
         pending = native.drain_page_load_events()
         for event, page_url in pending:
-            self._invoke_callback(page_load, event, page_url)
+            self._invoke_callback(page_load, event, page_url, kind="on_page_load")
 
     def _deliver_async_event_queues(self) -> None:
         """Drain native async queues into Python callbacks."""
@@ -2951,7 +2991,7 @@ class WebView(WebViewRpcMixin):
                     on_error=on_error,
                 )
                 continue
-            self._invoke_callback(expected_cb, result)
+            self._invoke_callback(expected_cb, result, kind="eval_js_with_callback")
 
     def _poll_events(self) -> None:
         self._in_poll_events = True

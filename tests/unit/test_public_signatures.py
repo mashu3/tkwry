@@ -50,6 +50,7 @@ WEBVIEW_INIT_KWONLY = (
     "on_download",
     "on_download_complete",
     "on_creation_failed",
+    "on_callback_error",
 )
 
 NATIVE_WEBVIEW_KWONLY = (

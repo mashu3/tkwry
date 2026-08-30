@@ -393,6 +393,10 @@ fields including `download_complete` and `rpc_stream`). The legacy
 `(ipc, page_load, title, drag_drop, eval, rpc)` remains for 0.1.x.
 
 Callback exceptions are printed to stderr and do not stop event delivery.
+Optional provisional ``on_callback_error=(exc, kind) -> None`` (or
+:meth:`WebView.set_on_callback_error`) routes those failures to app code;
+``kind`` names the hook (e.g. ``"on_page_load"``, ``"ipc_handler"``). Not
+in ``tkwry.__all__`` — may change in 0.2.x.
 
 Trust / download policy: [Trust boundaries](trust.md).
 

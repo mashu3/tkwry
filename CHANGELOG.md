@@ -40,6 +40,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   no idle ``_webview is not None`` poll latch)
 - Windows (and Tk without ``createfilehandler``): after-poll the shared wakeup
   pipe so handler-less download-complete still drains (D21 gap on Required)
+- Provisional ``on_callback_error=(exc, kind)`` / ``set_on_callback_error``
+  for lifecycle / IPC / page-load / title / DnD / download-complete /
+  ``when_ready`` / ``when_failed`` callback exceptions (default remains stderr)
 - Windows CI: run long-lived ``thread=True`` RPC stress tests
   (timeout / destroy-during-worker / JS cancel) in a separate pytest process
   so arm64 does not abort with ``0x80000003`` after a long ``test_content``

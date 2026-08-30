@@ -511,7 +511,7 @@ class WebViewRpcMixin:
                 continue
             handler = self._ipc_handler
             if handler is not None:
-                self._invoke_callback(handler, message)
+                self._invoke_callback(handler, message, kind="ipc_handler")
 
     def _handle_rpc_cancel(self, req_id: str) -> None:
         self._rpc_user_cancelled.add(req_id)
