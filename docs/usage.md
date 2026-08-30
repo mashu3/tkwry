@@ -364,7 +364,7 @@ web = WebView(
     on_download=lambda url, dest: unique_download_path(dest),
     on_download_complete=lambda url, dest, ok: print(ok, dest),
 )
-# also: last_download, <<WebViewDownloadComplete>> / <<WebViewDownloadFailed>>
+# also: last_download, in_flight_downloads, <<WebViewDownloadComplete>> / <<WebViewDownloadFailed>>
 ```
 
 `on_page_load` fires `PageLoadEvent.Started` and `PageLoadEvent.Finished`
@@ -545,7 +545,7 @@ Stability policy (0.2.0).
 | Appearance | `set_background_color`, `set_zoom` / `reset_zoom`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create); `devtools=`, `clipboard=`, `permission_handler=` |
 | Layout | `pack`, `grid`, `place`, `sync_bounds` (delegate to host `Frame` except `sync_bounds`) |
-| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `untrusted`, `clipboard`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
+| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `in_flight_downloads`, `untrusted`, `clipboard`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
 | Diagnostics | `take_queue_drop_stats` / `QueueDropCounts`, `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
@@ -559,7 +559,7 @@ plus the callback hooks above.
 Enums: `PageLoadEvent`, `NewWindowResponse`, `PermissionKind`,
 `PermissionResponse`, `DragDropEvent`, `WebViewPhase`.
 Types: `WebView`, `WebSession`, `Cookie` (``repr`` omits ``value`` — never log secrets),
-`QueueDropCounts`.
+`InFlightDownload`, `QueueDropCounts`.
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
 `WebViewTimeoutError`, `WebViewNavigationError`,
 `RpcTimeoutError`, `RpcCancelledError`, `RpcSerializationError`.

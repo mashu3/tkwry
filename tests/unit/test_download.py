@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from support.linux import noop_linux_runtime
 
-from tkwry import WebView, unique_download_path
+from tkwry import InFlightDownload, WebView, unique_download_path
 from tkwry._origin import normalize_download_allow
 
 
@@ -395,3 +395,53 @@ def test_on_download_can_use_unique_download_path(tk_root, tmp_path: Path) -> No
         assert path == str(tmp_path / "a (1).zip")
     finally:
         web.destroy()
+
+
+def test_in_flight_downloads_tracks_start_until_complete(
+    tk_root, tmp_path: Path
+) -> None:
+    dest = tmp_path / "file.bin"
+    web = _make_web(tk_root, on_download=lambda _url, _suggested: dest)
+    native = MagicMock()
+    native.drain_download_complete_events.return_value = [
+        ("https://example.com/a.zip", str(dest), True)
+    ]
+    web._webview = native
+    try:
+        assert web.in_flight_downloads == ()
+        assert web._native_download_started(
+            "https://example.com/a.zip", "/tmp/suggested.zip"
+        ) == (True, str(dest))
+        assert web.in_flight_downloads == (
+            InFlightDownload("https://example.com/a.zip", str(dest)),
+        )
+        web._wake_async_events()
+        assert web.in_flight_downloads == ()
+        assert web.last_download == ("https://example.com/a.zip", str(dest), True)
+    finally:
+        web._webview = None
+        web.destroy()
+
+
+def test_in_flight_downloads_omits_denied_start(tk_root) -> None:
+    web = _make_web(tk_root, on_download=lambda _url, _dest: False)
+    try:
+        assert web._native_download_started(
+            "https://example.com/a.zip", "/tmp/a.zip"
+        ) == (False, None)
+        assert web.in_flight_downloads == ()
+    finally:
+        web.destroy()
+
+
+def test_in_flight_downloads_cleared_on_destroy(tk_root, tmp_path: Path) -> None:
+    dest = tmp_path / "file.bin"
+    web = _make_web(tk_root, on_download=lambda _url, _suggested: dest)
+    try:
+        web._native_download_started("https://example.com/a.zip", "/tmp/a.zip")
+        assert web.in_flight_downloads
+        web.destroy()
+        assert web.in_flight_downloads == ()
+    finally:
+        if not web.destroyed:
+            web.destroy()

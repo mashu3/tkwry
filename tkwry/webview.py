@@ -180,6 +180,13 @@ class WebViewPhase(Enum):
     DESTROYED = "destroyed"
 
 
+class InFlightDownload(NamedTuple):
+    """A download allowed at start but not yet completed (no progress %)."""
+
+    url: str
+    dest: str | None
+
+
 class QueueDropCounts(NamedTuple):
     """Overflow drops since the last :meth:`~WebView.take_queue_drop_stats` call.
 
@@ -316,6 +323,8 @@ class WebView(WebViewRpcMixin):
     ``on_download_complete`` is notify-only. Finished downloads also set
     ``last_download`` and generate ``<<WebViewDownloadComplete>>`` or
     ``<<WebViewDownloadFailed>>`` (same ``(url, dest, success)`` tuple).
+    :attr:`in_flight_downloads` tracks policy-hook starts until complete
+    (no progress %).
 
     **Navigation hooks** (``on_navigation``, ``on_new_window``) and
     create-time ``permission_handler`` run on the **Tk main thread**, but
@@ -639,6 +648,7 @@ class WebView(WebViewRpcMixin):
         self._last_eval_error: BaseException | None = None
         self._last_navigation_error: BaseException | None = None
         self._last_download: tuple[str, str | None, bool] | None = None
+        self._in_flight_downloads: list[InFlightDownload] = []
         self._navigation_error_queue: queue.SimpleQueue[BaseException] = (
             queue.SimpleQueue()
         )
@@ -794,6 +804,18 @@ class WebView(WebViewRpcMixin):
         """
         self._require_tk_thread()
         return self._last_download
+
+    @property
+    def in_flight_downloads(self) -> tuple[InFlightDownload, ...]:
+        """Downloads allowed at start (policy hook) but not yet completed.
+
+        Populated only when :meth:`set_on_download` / ``download_allow`` /
+        ``on_download=`` is active — trusted default downloads without a start
+        hook do not appear here (see :attr:`last_download` on complete).
+        No progress percentage (wry does not expose it — §8.7).
+        """
+        self._require_tk_thread()
+        return tuple(self._in_flight_downloads)
 
     @property
     def native(self) -> NativeWebView | None:
@@ -1140,6 +1162,7 @@ class WebView(WebViewRpcMixin):
         self._eval_js_scheduled = False
         self._abort_sync_hooks()
         self._discard_navigation_error_queue()
+        self._in_flight_downloads.clear()
         if clear_ready:
             self._ready_delivered = False
             self._ready_pending = False
@@ -2473,16 +2496,36 @@ class WebView(WebViewRpcMixin):
             return False, None
         return self._coerce_download_decision(result, dest)
 
+    def _add_in_flight_download(
+        self, url: str, suggested: str, dest_override: str | None
+    ) -> None:
+        if self._destroyed:
+            return
+        raw = dest_override if dest_override is not None else suggested
+        resolved: str | None = raw or None
+        self._in_flight_downloads.append(InFlightDownload(url=url, dest=resolved))
+
+    def _remove_in_flight_download(self, url: str, dest: str | None) -> None:
+        for index, item in enumerate(self._in_flight_downloads):
+            if item.url != url:
+                continue
+            if dest is None or item.dest is None or item.dest == dest:
+                del self._in_flight_downloads[index]
+                return
+
     def _native_download_started(self, url: str, dest: str) -> tuple[bool, str | None]:
         if not self._download_policy_active():
             return True, None
         deny: tuple[bool, str | None] = (False, None)
-        return self._dispatch_sync_hook(
+        allowed, path = self._dispatch_sync_hook(
             lambda: self._invoke_download_handler(url, dest),
             default=deny,
             kind="on_download",
             detail=url,
         )
+        if allowed:
+            self._add_in_flight_download(url, dest, path)
+        return allowed, path
 
     def _deliver_download_complete_events(self) -> None:
         native = self._webview
@@ -2490,6 +2533,7 @@ class WebView(WebViewRpcMixin):
             return
         handler = self._on_download_complete
         for url, dest, success in native.drain_download_complete_events():
+            self._remove_in_flight_download(url, dest)
             self._last_download = (url, dest, success)
             sequence = (
                 "<<WebViewDownloadComplete>>"
