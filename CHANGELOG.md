@@ -34,6 +34,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Windows CI: isolate remaining ``thread=True`` RPC worker integration
   (``test_rpc_worker_thread_does_not_block_handler_thread_flag``) with the
   other worker-stress cases (``0x80000003`` under GC after ``test_content``)
+- Windows CI: reap leftover ``msedgewebview2.exe`` between pytest suites
+  (arm64 ``Tk.update()`` wedge after create/destroy); 25-minute step timeout
 
 ## [0.1.5] - 2026-08-30
 

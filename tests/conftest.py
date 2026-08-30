@@ -64,6 +64,13 @@ def _join_tkwry_rpc_threads(timeout: float = 2.0) -> None:
         thread.join(timeout=remaining)
 
 
+@pytest.fixture(autouse=True)
+def _log_gha_test_start(request: pytest.FixtureRequest) -> None:
+    """Print the node id when a test starts so a wedged ``Tk.update()`` is visible."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"START {request.node.nodeid}", flush=True)
+
+
 @pytest.fixture
 def tk_root():
     import tkinter as tk
