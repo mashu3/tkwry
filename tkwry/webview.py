@@ -1590,8 +1590,28 @@ class WebView(WebViewRpcMixin):
         success, cancel, or a PDF. There is no return value and no
         ``print_to_pdf``. Window title / icon / geometry belong on the host
         :class:`tkinter.Toplevel`, not this method.
+
+        For macOS margins, see :meth:`print_with_options`.
         """
         self._require_ready("print").print()
+
+    def print_with_options(
+        self,
+        *,
+        top: float = 0.0,
+        right: float = 0.0,
+        bottom: float = 0.0,
+        left: float = 0.0,
+    ) -> None:
+        """Open the print dialog with page margins (**macOS only**).
+
+        Wraps wry ``WebViewExtMacOS::print_with_options`` (margin points).
+        Still fire-and-forget — no PDF / success / cancel result. On Windows
+        and Linux raises :class:`OSError`; use :meth:`print` there.
+        """
+        self._require_ready("print_with_options").print_with_options(
+            top=top, right=right, bottom=bottom, left=left
+        )
 
     def set_zoom(self, scale: float) -> None:
         """Set the page zoom factor (``1.0`` = 100%).

@@ -182,6 +182,8 @@ web.load_url(
 )
 web.reload()
 web.print()  # system print dialog (no PDF, no success/fail result)
+# macOS only — margins; still no result. Win/Linux → OSError:
+# web.print_with_options(top=36, left=36)
 web.set_zoom(1.25)  # page zoom (1.0 = 100%); reset_zoom() → 1.0
 print(web.url)
 web.focus()
@@ -540,7 +542,7 @@ Stability policy (0.2.0).
 
 | Category | Members |
 |----------|---------|
-| Content | `load_url` (`headers=` this request only, http(s)), `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `print`, `url` |
+| Content | `load_url` (`headers=` this request only, http(s)), `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `print`, `print_with_options` (macOS margins), `url` |
 | Cookies / browsing data | `cookies`, `cookies_for_url`, `set_cookie`, `delete_cookie`, `clear_all_browsing_data`, `Cookie` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `last_eval_error`, `<<WebViewEvalFailed>>` |
 | IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `stream` / `cancel`) |

@@ -115,6 +115,10 @@ observational (starts that passed the policy hook until complete). See
 There is no PDF, no headless print, and no success / fail / cancel
 callback — the call is fire-and-forget. Do not add fake kwargs.
 
+**macOS only:** `web.print_with_options(top=…, right=…, bottom=…, left=…)`
+wraps wry `WebViewExtMacOS::print_with_options` (margin points). Still
+fire-and-forget. On Windows / Linux it raises `OSError` — use `print()`.
+
 ## Zoom (page, not window)
 
 `web.set_zoom(scale)` wraps wry `WebView::zoom` (`1.0` = 100%).

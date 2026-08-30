@@ -61,6 +61,7 @@ WEBVIEW_METHODS = (
     "can_go_back",
     "can_go_forward",
     "print",
+    "print_with_options",
     "set_zoom",
     "reset_zoom",
     "cookies",

@@ -2036,6 +2036,37 @@ WebViews that share a session must use the same app= root \
         })
     }
 
+    /// macOS-only margins for the system print dialog (wry ``WebViewExtMacOS``).
+    ///
+    /// Still fire-and-forget — no PDF / success / cancel result. On Windows and
+    /// Linux raises ``OSError``.
+    #[pyo3(signature = (*, top = 0.0, right = 0.0, bottom = 0.0, left = 0.0))]
+    fn print_with_options(&self, top: f32, right: f32, bottom: f32, left: f32) -> PyResult<()> {
+        with_webview(self, |wv| {
+            #[cfg(target_os = "macos")]
+            {
+                use wry::{PrintMargin, PrintOptions, WebViewExtMacOS};
+                wv.print_with_options(&PrintOptions {
+                    margins: PrintMargin {
+                        top,
+                        right,
+                        bottom,
+                        left,
+                    },
+                })
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = (wv, top, right, bottom, left);
+                Err(pyo3::exceptions::PyOSError::new_err(
+                    "print_with_options is only available on macOS \
+                     (wry WebViewExtMacOS); use print() on Windows / Linux",
+                ))
+            }
+        })
+    }
+
     /// Page zoom factor (`1.0` = 100%). Wraps wry `WebView::zoom`.
     ///
     /// Engine range is platform-defined (e.g. WebView2 typically `0.25`–`5.0`);

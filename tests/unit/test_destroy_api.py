@@ -33,6 +33,7 @@ POST_DESTROY_ACTIONS: dict[str, Callable[[WebView], object]] = {
     "can_go_back": lambda w: w.can_go_back(),
     "can_go_forward": lambda w: w.can_go_forward(),
     "print": lambda w: w.print(),
+    "print_with_options": lambda w: w.print_with_options(top=1.0),
     "set_zoom": lambda w: w.set_zoom(1.25),
     "reset_zoom": lambda w: w.reset_zoom(),
     "cookies": lambda w: w.cookies(),
