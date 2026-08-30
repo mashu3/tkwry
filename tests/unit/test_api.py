@@ -111,6 +111,7 @@ WEBVIEW_PROPERTIES = (
     "untrusted",
     "clipboard",
     "javascript_enabled",
+    "autoplay",
     "navigation_allow",
     "open_external",
     "download_allow",

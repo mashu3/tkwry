@@ -180,3 +180,14 @@ def test_javascript_enabled_false_creates(tk_root) -> None:
     finally:
         web.destroy()
         frame.destroy()
+
+
+def test_autoplay_false_creates(tk_root) -> None:
+    frame = host_frame(tk_root)
+    web = WebView(frame, html=_PAGE, autoplay=False)
+    try:
+        assert web.autoplay is False
+        assert wait_until(tk_root, lambda: web.ready, steps=200)
+    finally:
+        web.destroy()
+        frame.destroy()

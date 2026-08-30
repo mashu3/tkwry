@@ -340,6 +340,9 @@ class WebView(WebViewRpcMixin):
     WebView side is always-on — see platform notes). ``javascript_enabled=False``
     is a create-only break-glass (wry ``with_javascript_disabled``); default
     stays ``True`` and ``untrusted=True`` does **not** flip it.
+    ``autoplay=`` (default ``True``, wry) allows media without a user
+    gesture; ``False`` restores engine gesture requirements. Distinct from
+    :attr:`~tkwry.PermissionKind.Autoplay` on ``permission_handler``.
 
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
@@ -444,6 +447,7 @@ class WebView(WebViewRpcMixin):
         devtools: bool = False,
         clipboard: bool = False,
         javascript_enabled: bool = True,
+        autoplay: bool = True,
         background_color: tuple[int, int, int, int] | None = None,
         user_agent: str | None = None,
         initialization_script: str | None = None,
@@ -570,6 +574,7 @@ class WebView(WebViewRpcMixin):
         self._devtools = devtools
         self._clipboard = bool(clipboard)
         self._javascript_enabled = bool(javascript_enabled)
+        self._autoplay = bool(autoplay)
         self._background_color = background_color
         self._user_agent = user_agent
         self._initialization_script = initialization_script
@@ -864,6 +869,16 @@ class WebView(WebViewRpcMixin):
         """
         self._require_tk_thread()
         return self._javascript_enabled
+
+    @property
+    def autoplay(self) -> bool:
+        """Create-time media autoplay without user gesture (default ``True``).
+
+        Maps to wry ``with_autoplay``. ``False`` keeps the engine's
+        user-gesture requirement. Not :attr:`~tkwry.PermissionKind.Autoplay`.
+        """
+        self._require_tk_thread()
+        return self._autoplay
 
     @property
     def navigation_allow(self) -> frozenset[str] | None:
@@ -3240,6 +3255,7 @@ class WebView(WebViewRpcMixin):
             "devtools": self._devtools,
             "clipboard": self._clipboard,
             "javascript_enabled": self._javascript_enabled,
+            "autoplay": self._autoplay,
             "focused": self._focused,
         }
         if self._background_color is not None:

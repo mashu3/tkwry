@@ -127,6 +127,7 @@ class WebView:
         devtools: bool = False,
         clipboard: bool = False,
         javascript_enabled: bool = True,
+        autoplay: bool = True,
         focused: bool = True,
         background_color: tuple[int, int, int, int] | None = None,
         user_agent: str | None = None,

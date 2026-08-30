@@ -1430,6 +1430,7 @@ impl WebView {
         devtools = false,
         clipboard = false,
         javascript_enabled = true,
+        autoplay = true,
         focused = true,
         background_color = None,
         user_agent = None,
@@ -1464,6 +1465,7 @@ impl WebView {
         devtools: bool,
         clipboard: bool,
         javascript_enabled: bool,
+        autoplay: bool,
         focused: bool,
         background_color: Option<(u8, u8, u8, u8)>,
         user_agent: Option<String>,
@@ -1818,6 +1820,7 @@ WebViews that share a session must use the same app= root \
         if !javascript_enabled {
             builder = builder.with_javascript_disabled();
         }
+        builder = builder.with_autoplay(autoplay);
         if has_permission_handler {
             let permission_cb_clone = permission_cb.clone();
             let permission_sync_pending_clone = permission_sync_pending.clone();

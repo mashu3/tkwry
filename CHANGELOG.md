@@ -20,6 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``session.ephemeral``)
 - Create-time ``javascript_enabled=False`` (default ``True``) → wry
   ``with_javascript_disabled``; ``untrusted=True`` does not flip it
+- Create-time ``autoplay=`` (default ``True``, wry) — media without a
+  user gesture; ``False`` keeps engine gesture requirements (not
+  ``PermissionKind.Autoplay``)
 
 ## [0.1.5] - 2026-08-30
 

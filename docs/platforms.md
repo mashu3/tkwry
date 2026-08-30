@@ -144,6 +144,21 @@ does not toggle a platform switch. This is **not** a Tk↔Web paste bridge
 for untrusted pages, not the `untrusted=True` viewer preset (that flag
 does not turn JS off). Create-only; `eval_js` / init scripts need JS on.
 
+## Autoplay (create-time)
+
+`WebView(..., autoplay=True)` maps to wry `with_autoplay` (default
+**`True`**, same as wry 0.56). Media may start without a user gesture.
+`autoplay=False` keeps the engine's gesture requirement.
+
+This is **not** `permission_handler` / `PermissionKind.Autoplay` (a
+sync-hook for the page's autoplay *permission* prompt). The constructor
+flag is the engine policy.
+
+**Windows:** `True` adds WebView2
+`--autoplay-policy=no-user-gesture-required`. **macOS:** `True` sets
+`mediaTypesRequiringUserActionForPlayback` to none. **Linux:** `True`
+sets WebKitGTK `AutoplayPolicy::Allow`.
+
 ## Window chrome (Tk, not the WebView)
 
 Title, icon, geometry, min/max size, fullscreen, `-topmost`, and

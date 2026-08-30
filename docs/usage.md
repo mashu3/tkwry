@@ -209,6 +209,9 @@ web = WebView(frame, html="<textarea></textarea>", clipboard=True)
 # Break-glass: disable page JS (wry with_javascript_disabled). Default True.
 # untrusted=True does not flip this.
 web = WebView(frame, url="https://example.com", javascript_enabled=False)
+
+# Media without a user gesture (wry with_autoplay). Default True.
+web = WebView(frame, html="<video autoplay src='clip.mp4'></video>", autoplay=True)
 ```
 
 Rapid `load_url` / `load_html` calls are **coalesced (last-wins)** —
@@ -560,9 +563,9 @@ Stability policy (0.2.0).
 | IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `stream` / `cancel`) |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_complete`; create-only `permission_handler=` |
 | Appearance | `set_background_color`, `set_zoom` / `reset_zoom`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
-| Create-only | `set_user_agent`, `set_initialization_script` (raise after native create); `devtools=`, `clipboard=`, `javascript_enabled=`, `permission_handler=` |
+| Create-only | `set_user_agent`, `set_initialization_script` (raise after native create); `devtools=`, `clipboard=`, `javascript_enabled=`, `autoplay=`, `permission_handler=` |
 | Layout | `pack`, `grid`, `place`, `sync_bounds`, `bounds` (native geometry in ``set_bounds`` space) |
-| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `in_flight_downloads`, `untrusted`, `clipboard`, `javascript_enabled`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
+| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `in_flight_downloads`, `untrusted`, `clipboard`, `javascript_enabled`, `autoplay`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
 | Diagnostics | `take_queue_drop_stats` / `QueueDropCounts`, `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
@@ -570,7 +573,7 @@ Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
 `ephemeral` / `incognito` (alias of `ephemeral`),
 `untrusted`, `bridge_origins`, `bridge_allow`, `navigation_allow`,
 `open_external`, `download_allow`, `ipc_handler`, `rpc_traceback`, `devtools`,
-`clipboard`, `javascript_enabled`, `background_color`, `user_agent`,
+`clipboard`, `javascript_enabled`, `autoplay`, `background_color`, `user_agent`,
 `initialization_script`, `focused`,
 `permission_handler`, `on_download`, `on_download_complete`, `on_creation_failed`,
 plus the callback hooks above.
