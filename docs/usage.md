@@ -11,6 +11,7 @@ Contracts live elsewhere: [Trust boundaries](trust.md),
 | [Hidden hosts](#hidden-hosts) | Notebook / `pack_forget` vs `lift` overlap |
 | [User-Agent](#user-agent) | App identity — not a Chrome spoof |
 | [Observability](#observability) | ``WebViewPhase`` + ``take_queue_drop_stats()`` |
+| [Cleanup](#cleanup) | `destroy` / Frame / `WebSession.close` order |
 | [API stability](#api-stability) | Public vs Provisional (Alpha) |
 | [API summary](#api-summary) | Public surface table |
 
@@ -18,7 +19,8 @@ The constructor **does not raise** if the native view cannot be created
 (WebView2 missing, retries exhausted, …). Handle
 `<<WebViewCreateFailed>>` / `when_failed` / `on_creation_failed=`, or check
 `creation_failed` before treating the widget as live. Gated APIs still raise
-`WebViewCreationError`.
+`WebViewCreationError`. Windows Runtime install:
+[Platform notes — WebView2](platforms.md#webview2-runtime-probe-and-install).
 
 ## Minimal app
 
@@ -475,13 +477,43 @@ See [`examples/dnd_demo.py`](../examples/dnd_demo.py).
 
 ## Cleanup
 
+Tear down on the **Tk main thread**. Host `<Destroy>` already calls
+`web.destroy()`, so destroying the Frame or Toplevel is enough — explicit
+`destroy()` is for releasing the native view **while keeping** the Frame.
+
+| Order | Call | Why |
+|-------|------|-----|
+| 1 | `web.destroy()` (optional if the Frame is going away) | Unbinds host events, cancels in-flight RPC (~2s join), disposes native WebView, drops wakeup-pipe registration. Idempotent. |
+| 2 | Destroy the host `Frame` if you no longer need it | `<Destroy>` → `web.destroy()` if you skipped step 1. |
+| 3 | `session.close()` for a **shared** `WebSession` | Destroys any remaining views on the profile, then drops the native context. Idempotent. Run **after** views you still needed, or instead of per-view destroy at quit. |
+| 4 | `root.destroy()` / Toplevel last | Do not kill Tcl while native teardown is still in flight. |
+
 ```python
-web.destroy()   # release native webview; host Frame is kept
-# further commands raise WebViewDestroyedError (`destroy()` is idempotent;
-# snapshot properties and take_queue_drop_counts() stay readable)
-# or destroy the host Frame — both tear down the webview
-# in-flight RPC / streams are cancelled cooperatively (pool join ~2s)
+def on_quit():
+    session.close()  # destroys remaining WebViews, then the profile
+    root.destroy()
+
+root.protocol("WM_DELETE_WINDOW", on_quit)
 ```
+
+Do **not**:
+
+- Reuse a `WebView` after `destroy()` or after `creation_failed` — construct a new one.
+- Call `destroy` / `session.close` from a worker thread.
+- `session.close()` while another live view still needs that profile.
+- Close the Toplevel first and expect a later `web.destroy()` to be reliable.
+
+Owned sessions (`data_directory=` / `ephemeral=` with no `session=`) are
+not auto-`close()`d on `web.destroy()`; drop your last reference or call
+`close()` if you kept the session object.
+
+Further commands raise `WebViewDestroyedError` (`destroy()` is
+idempotent; snapshot properties and `take_queue_drop_stats()` stay
+readable). In-flight RPC / streams are cancelled cooperatively.
+
+See [`examples/browser_demo.py`](../examples/browser_demo.py) quit path.
+Regression: existing destroy / session tests (`tests/unit/test_destroy_api.py`,
+`tests/unit/test_session.py`).
 
 ## Observability
 

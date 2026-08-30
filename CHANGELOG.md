@@ -40,6 +40,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``{"socks5": "host:port"}`` (wry ``with_proxy_config``); credentials
   rejected and never logged; macOS 14+ (``mac-proxy`` feature)
 
+### Docs
+
+- Windows WebView2 probe + Evergreen install recipe (no silent download;
+  create-failed path stays the supported check)
+- Destroy / Frame / ``WebSession.close`` ordering checklist
+- Windows Tk-thread note: no COM STA cargo-cult unless a real HRESULT
+
 ### Tests
 
 - macOS: tabbing-disable off-main unit test patches ``current_thread``

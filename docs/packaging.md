@@ -60,6 +60,9 @@ icons, etc.). Use `--add-data` / `.spec` `datas` for static assets.
 **Windows:** document WebView2 installation for end users, or bundle Fixed
 Version WebView2 per Microsoft guidance. Missing WebView2 →
 `creation_failed` / `<<WebViewCreateFailed>>` (constructor does not raise).
+Probe + Evergreen install recipe (no silent download):
+[Platform notes — WebView2](platforms.md#webview2-runtime-probe-and-install).
+Tk main thread / COM: [Platform notes — Tk thread](platforms.md#tk-thread-com-apartment).
 
 **macOS:** sign and notarize the `.app`; WKWebView is system-provided.
 Import `tkwry` before other AppKit startup ([Platform notes — macOS](platforms.md#macos-embedding)).
@@ -97,4 +100,5 @@ GitHub issues with OS, freezer version, and traceback.
 - [Release provenance](provenance.md) — SHA-256 checksums and build attestations
 - [Usage — Cleanup](usage.md#cleanup)
 - [Usage — Observability](usage.md#observability)
+- [Platform notes — WebView2](platforms.md#webview2-runtime-probe-and-install)
 - [README — Known limitations](../README.md#-known-limitations)

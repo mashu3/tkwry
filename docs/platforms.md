@@ -23,6 +23,55 @@ raise. There is **no** fallback engine. The typed message is
 > WebView2 on Windows — there is no fallback engine. Install from
 > https://developer.microsoft.com/en-us/microsoft-edge/webview2/
 
+### WebView2 Runtime (probe and install)
+
+tkwry **never downloads** the Runtime. Install is the user's (or your
+installer UI's) job — no silent bootstrap from Python.
+
+**At create** tkwry already probes Evergreen via EdgeUpdate registry
+`pv`. Missing → `creation_failed` / `<<WebViewCreateFailed>>` /
+`when_failed` / `on_creation_failed=` with
+`WEBVIEW2_MISSING_MESSAGE` (constructor still does **not** raise).
+Unusual layouts (Fixed Version beside the exe, broken `pv`) can miss
+the registry check; native create then fails with the same typed error.
+
+After a failed create, **do not reuse** that `WebView`. Once the user
+has installed Evergreen, construct a **new** instance.
+
+```python
+from tkwry import WebView
+
+def on_failed(err):
+    # err message includes the Microsoft download URL.
+    # Show it in your UI; do not fetch the installer yourself.
+    print(err)
+
+web = WebView(frame, html="<p>hello</p>", on_creation_failed=on_failed)
+```
+
+**User install (Evergreen):** open
+[WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/),
+run Bootstrapper or Standalone (UAC). Then retry with a new `WebView`.
+
+**Frozen apps:** ship a “needs WebView2” note, or bundle **Fixed
+Version** per Microsoft redistribution rules — see
+[Packaging notes](packaging.md). Do not call a private `have_webview2`
+helper; the create-failed path is the supported probe.
+
+### Tk thread (COM apartment)
+
+All `WebView` APIs run on the **Tk main thread** (the thread that
+created `tk.Tk()` and runs `mainloop`). WebView2 uses that same UI
+thread. tkwry does **not** call `CoInitialize` / `CoInitializeEx`.
+
+A normal `tk.Tk()` app needs **no** extra STA flags
+(`sys.coinit_flags`, `pythoncom.CoInitialize`, …). Add those only if
+you already mix COM on that thread and hit a real HRESULT — not as
+default boilerplate.
+
+Do **not** create or drive a `WebView` from a worker. Do **not**
+`CoInitializeEx` **MTA** on the Tk thread (WebView2 create can fail).
+
 **DPI:** `set_bounds` uses **physical** pixels on Windows. After process DPI
 awareness (e.g. `tkface.win.enable_dpi_awareness()` before `tk.Tk()`), Tk
 `winfo_*` already reports physical sizes — passing them as wry `Logical`
