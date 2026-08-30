@@ -53,6 +53,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Tests
 
+- Dual ctor/setter equivalence for lifecycle handler APIs
+  (``test_dual_api_equivalence.py`` — Beta B3 partial)
 - Browser-essentials integration (local HTTP): ``load_url`` custom headers,
   ``Set-Cookie`` / ``set_cookie`` / ``delete_cookie`` /
   ``clear_all_browsing_data``, zoom + permission + clipboard smoke, and
