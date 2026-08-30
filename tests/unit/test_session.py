@@ -212,3 +212,38 @@ def test_webview_shared_session_rejects_mismatched_app(tk_root, tmp_path: Path) 
     web_a.destroy()
     frame_a.destroy()
     frame_b.destroy()
+
+
+def test_session_close_destroys_registered_webviews(tk_root) -> None:
+    import tkinter as tk
+
+    session = WebSession(ephemeral=True)
+    frame_a = tk.Frame(tk_root)
+    frame_b = tk.Frame(tk_root)
+    web_a = WebView(frame_a, html="<p>a</p>", session=session)
+    web_b = WebView(frame_b, html="<p>b</p>", session=session)
+
+    session.close()
+
+    assert session.closed is True
+    assert web_a.destroyed is True
+    assert web_b.destroyed is True
+    with pytest.raises(ValueError, match="closed"):
+        session.emit_all("ping")
+    with pytest.raises(ValueError, match="closed"):
+        _ = session.native
+    session.close()
+
+    frame_a.destroy()
+    frame_b.destroy()
+
+
+def test_session_close_rejects_new_webview(tk_root) -> None:
+    import tkinter as tk
+
+    session = WebSession(ephemeral=True)
+    session.close()
+    frame = tk.Frame(tk_root)
+    with pytest.raises(ValueError, match="closed"):
+        WebView(frame, html="<p>x</p>", session=session)
+    frame.destroy()

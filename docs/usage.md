@@ -155,11 +155,15 @@ left.set_cookie(
 )
 left.delete_cookie(Cookie("sid", "", domain="example.com", path="/"))
 left.clear_all_browsing_data()  # this WebView's store
+
+# App shutdown: tear down every live view on the profile, then release it.
+session.close()  # idempotent; run on the Tk main thread
 ```
 
 Convenience: `WebView(..., data_directory=...)` or `ephemeral=True`
-creates an owned session. Keep the `WebSession` alive while any WebView
-uses it (especially with `app=` on macOS). Isolation rules (same `app=`
+creates an owned session. Call :meth:`WebSession.close` when the profile
+is no longer needed (or destroy every WebView first). Keep the session open
+while any WebView uses it (especially with `app=` on macOS). Isolation rules (same `app=`
 root, do not share a persistent profile with untrusted sites):
 [Trust boundaries — Session isolation](trust.md#session-isolation).
 See also [`examples/browser_demo.py`](../examples/browser_demo.py).

@@ -68,11 +68,46 @@ class WebSession:
             from tkwry._core import ensure_gtk_init
 
             ensure_gtk_init()
-        self._native = NativeWebSession(data_directory=path, ephemeral=ephemeral)
+        self._native: NativeWebSession | None = NativeWebSession(
+            data_directory=path, ephemeral=ephemeral
+        )
         self._app_root: str | None = None
         self._webviews: weakref.WeakSet[WebView] = weakref.WeakSet()
+        self._closed = False
+        self._ephemeral = ephemeral
+        self._data_directory_resolved: Path | None = (
+            Path(path) if path is not None else None
+        )
+
+    def _require_open(self, action: str) -> None:
+        if self._closed:
+            raise ValueError(f"WebSession is closed; cannot {action}")
+
+    def close(self) -> None:
+        """Destroy live WebViews on this session and release the native profile.
+
+        Idempotent. Invokes :meth:`~tkwry.WebView.destroy` on each registered
+        view that is not already destroyed — run on the **Tk main thread** (same
+        requirement as those ``destroy`` calls). After close, new
+        :class:`~tkwry.WebView` instances cannot attach to this session and
+        :meth:`emit_all` / :attr:`native` raise :class:`ValueError`.
+        """
+        if self._closed:
+            return
+        for web in list(self._webviews):
+            if not web._destroyed:
+                web.destroy()
+        self._webviews = weakref.WeakSet()
+        self._native = None
+        self._closed = True
+
+    @property
+    def closed(self) -> bool:
+        """Whether :meth:`close` has been called."""
+        return self._closed
 
     def _register_webview(self, web: WebView) -> None:
+        self._require_open("register a WebView")
         self._webviews.add(web)
 
     def _unregister_webview(self, web: WebView) -> None:
@@ -102,6 +137,7 @@ class WebSession:
         (traceback to stderr); other views still receive the event. Returns
         how many views successfully received it.
         """
+        self._require_open("emit_all")
         if not event:
             raise ValueError("emit_all: event name must be non-empty")
         # Fail fast on non-JSON payloads before touching any WebView.
@@ -127,14 +163,14 @@ class WebSession:
 
     @property
     def data_directory(self) -> Path | None:
-        raw = self._native.data_directory
-        return Path(raw) if raw else None
+        return self._data_directory_resolved
 
     @property
     def ephemeral(self) -> bool:
-        return bool(self._native.ephemeral)
+        return self._ephemeral
 
     @property
     def native(self) -> NativeWebSession:
         """Underlying ``tkwry._core.WebSession`` (for WebView create)."""
+        self._require_open("access native")
         return self._native

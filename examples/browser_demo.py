@@ -375,6 +375,12 @@ def main() -> None:
     root.focus_set()
     root.update_idletasks()
     root.geometry("960x640")
+
+    def on_quit() -> None:
+        session.close()
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_quit)
     root.mainloop()
 
 
