@@ -153,7 +153,8 @@ for c in left.cookies_for_url("https://example.com/"):
 left.set_cookie(
     Cookie("sid", "…", domain="example.com", path="/", secure=True, http_only=True)
 )
-left.delete_cookie(Cookie("sid", "", domain="example.com", path="/"))
+left.delete_cookie("sid", "https://example.com/")
+# or: left.delete_cookie(Cookie("sid", "", domain="example.com", path="/"))
 left.clear_all_browsing_data()  # this WebView's store
 
 # App shutdown: tear down every live view on the profile, then release it.
@@ -545,7 +546,7 @@ Stability policy (0.2.0).
 | Category | Members |
 |----------|---------|
 | Content | `load_url` (`headers=` this request only, http(s)), `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `print`, `print_with_options` (macOS margins), `url` |
-| Cookies / browsing data | `cookies`, `cookies_for_url`, `set_cookie`, `delete_cookie`, `clear_all_browsing_data`, `Cookie` |
+| Cookies / browsing data | `cookies`, `cookies_for_url`, `set_cookie`, `delete_cookie` (`Cookie` or `name` + page `url`), `clear_all_browsing_data`, `Cookie` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `last_eval_error`, `<<WebViewEvalFailed>>` |
 | IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `stream` / `cancel`) |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_complete`; create-only `permission_handler=` |

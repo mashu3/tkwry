@@ -15,7 +15,8 @@ import weakref
 from collections.abc import Callable, Collection, Mapping
 from enum import Enum
 from pathlib import Path
-from typing import Literal, NamedTuple, TypeAlias, TypeVar, cast
+from typing import Literal, NamedTuple, TypeAlias, TypeVar, cast, overload
+from urllib.parse import urlparse
 
 from tkwry._app import resolve_app, resolve_app_csp, validate_app_isolation
 from tkwry._core import (
@@ -1659,13 +1660,37 @@ class WebView(WebViewRpcMixin):
         """
         self._require_ready("set_cookie").set_cookie(cookie)
 
-    def delete_cookie(self, cookie: Cookie) -> None:
+    @overload
+    def delete_cookie(self, cookie: Cookie) -> None: ...
+
+    @overload
+    def delete_cookie(self, cookie: str, url: str) -> None: ...
+
+    def delete_cookie(self, cookie: Cookie | str, url: str | None = None) -> None:
         """Delete a matching cookie from this WebView's engine jar.
 
-        Matching is engine-defined (typically name + domain + path).
-        Tk-thread only.
+        Pass a :class:`~tkwry.Cookie`, or a cookie *name* plus the page *url*
+        it belongs to. The name+url form builds ``Cookie(name, "", domain,
+        path)`` from the URL hostname and path (empty path → ``/``). Matching
+        is engine-defined (typically name + domain + path). Tk-thread only.
         """
-        self._require_ready("delete_cookie").delete_cookie(cookie)
+        native = self._require_ready("delete_cookie")
+        if url is not None:
+            if not isinstance(cookie, str):
+                raise TypeError(
+                    "delete_cookie(name, url) requires name as str; "
+                    "pass a Cookie as the only argument"
+                )
+            parsed = urlparse(url)
+            host = parsed.hostname
+            if not host:
+                raise ValueError("delete_cookie url must include a hostname")
+            path = parsed.path if parsed.path else "/"
+            native.delete_cookie(Cookie(cookie, "", domain=host, path=path))
+            return
+        if isinstance(cookie, str):
+            raise TypeError("delete_cookie(name, url) requires a url")
+        native.delete_cookie(cookie)
 
     def clear_all_browsing_data(self) -> None:
         """Clear browsing data for this WebView (cookies, cache, etc.).

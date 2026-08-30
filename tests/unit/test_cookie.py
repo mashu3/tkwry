@@ -45,6 +45,8 @@ def test_cookie_methods_require_ready(tk_root) -> None:
         with pytest.raises(WebViewNotReadyError):
             web.delete_cookie(Cookie("n", "v"))
         with pytest.raises(WebViewNotReadyError):
+            web.delete_cookie("n", "https://example.com/")
+        with pytest.raises(WebViewNotReadyError):
             web.clear_all_browsing_data()
     finally:
         web.destroy()
@@ -83,8 +85,36 @@ def test_cookie_methods_delegate_to_native(
         native.set_cookie.assert_called_once_with(sample)
         web.delete_cookie(sample)
         native.delete_cookie.assert_called_once_with(sample)
+        native.delete_cookie.reset_mock()
+        web.delete_cookie("sid", "https://example.com/app")
+        built = native.delete_cookie.call_args[0][0]
+        assert built.name == "sid"
+        assert built.value == ""
+        assert built.domain == "example.com"
+        assert built.path == "/app"
         web.clear_all_browsing_data()
         native.clear_all_browsing_data.assert_called_once_with()
+    finally:
+        web._webview = None
+        web.destroy()
+
+
+def test_delete_cookie_name_requires_url(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame)
+    native = MagicMock()
+    web._webview = native
+    monkeypatch.setattr(web, "_layout_ready", lambda: True)
+    try:
+        with pytest.raises(TypeError, match="requires a url"):
+            web.delete_cookie("sid")
+        with pytest.raises(ValueError, match="hostname"):
+            web.delete_cookie("sid", "not-a-url")
+        native.delete_cookie.assert_not_called()
     finally:
         web._webview = None
         web.destroy()

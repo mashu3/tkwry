@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (checksum verify, ``gh attestation verify``, optional ``cargo audit`` note)
 - ``WebView.bounds`` — read native ``(x, y, width, height)`` in ``set_bounds``
   space (wry ``bounds()`` wrap)
+- ``WebView.delete_cookie(name, url)`` — delete by cookie name and page URL
+  (hostname + path; empty path → ``/``); ``delete_cookie(Cookie)`` unchanged
 
 ## [0.1.5] - 2026-08-30
 
