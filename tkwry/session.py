@@ -173,4 +173,5 @@ class WebSession:
     def native(self) -> NativeWebSession:
         """Underlying ``tkwry._core.WebSession`` (for WebView create)."""
         self._require_open("access native")
+        assert self._native is not None
         return self._native
