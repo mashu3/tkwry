@@ -128,6 +128,13 @@ fire-and-forget. On Windows / Linux it raises `OSError` — use `print()`.
 WebKitGTK `zoom-level`). This is **page** content zoom. Tk window
 iconify / zoom / geometry stay on the host **Toplevel** (below).
 
+`WebView(..., hotkeys_zoom=True)` maps to wry `with_hotkeys_zoom` (default
+**`False`**, same as wry). On **Windows** this enables Ctrl+/- / Ctrl+wheel
+and pinch page zoom in WebView2. It does **not** change `set_zoom` /
+`reset_zoom`. macOS / Linux: wry ignores the flag (constructor value is
+still stored). WebView2 Runtime before 91.0.865.0 cannot disable pinch
+when the flag is `False`.
+
 ## Clipboard (Web API opt-in)
 
 `WebView(..., clipboard=True)` → wry `with_clipboard(true)`. Default is

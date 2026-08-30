@@ -112,6 +112,7 @@ WEBVIEW_PROPERTIES = (
     "clipboard",
     "javascript_enabled",
     "autoplay",
+    "hotkeys_zoom",
     "navigation_allow",
     "open_external",
     "download_allow",

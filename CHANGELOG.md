@@ -23,6 +23,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Create-time ``autoplay=`` (default ``True``, wry) — media without a
   user gesture; ``False`` keeps engine gesture requirements (not
   ``PermissionKind.Autoplay``)
+- Create-time ``hotkeys_zoom=True`` (default ``False``, wry) — WebView2
+  Ctrl+/- / Ctrl+wheel / pinch page zoom (Windows); not ``set_zoom``;
+  macOS / Linux ignore the engine flag
 
 ## [0.1.5] - 2026-08-30
 

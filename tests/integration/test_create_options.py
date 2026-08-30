@@ -191,3 +191,14 @@ def test_autoplay_false_creates(tk_root) -> None:
     finally:
         web.destroy()
         frame.destroy()
+
+
+def test_hotkeys_zoom_true_creates(tk_root) -> None:
+    frame = host_frame(tk_root)
+    web = WebView(frame, html=_PAGE, hotkeys_zoom=True)
+    try:
+        assert web.hotkeys_zoom is True
+        assert wait_until(tk_root, lambda: web.ready, steps=200)
+    finally:
+        web.destroy()
+        frame.destroy()

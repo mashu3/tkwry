@@ -87,6 +87,7 @@ POST_DESTROY_READABLE_PROPERTIES = frozenset(
         "clipboard",
         "javascript_enabled",
         "autoplay",
+        "hotkeys_zoom",
         "navigation_allow",
         "open_external",
         "download_allow",

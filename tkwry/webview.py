@@ -343,6 +343,8 @@ class WebView(WebViewRpcMixin):
     ``autoplay=`` (default ``True``, wry) allows media without a user
     gesture; ``False`` restores engine gesture requirements. Distinct from
     :attr:`~tkwry.PermissionKind.Autoplay` on ``permission_handler``.
+    ``hotkeys_zoom=True`` enables WebView2 Ctrl+/- / Ctrl+wheel / pinch zoom
+    (Windows only; wry default ``False``). Distinct from :meth:`set_zoom`.
 
     **Navigation** (``load_url`` / ``load_html``): rapid calls are coalesced
     (**last-wins**) — ``load(A); load(B); load(C)`` navigates to ``C`` only.
@@ -448,6 +450,7 @@ class WebView(WebViewRpcMixin):
         clipboard: bool = False,
         javascript_enabled: bool = True,
         autoplay: bool = True,
+        hotkeys_zoom: bool = False,
         background_color: tuple[int, int, int, int] | None = None,
         user_agent: str | None = None,
         initialization_script: str | None = None,
@@ -575,6 +578,7 @@ class WebView(WebViewRpcMixin):
         self._clipboard = bool(clipboard)
         self._javascript_enabled = bool(javascript_enabled)
         self._autoplay = bool(autoplay)
+        self._hotkeys_zoom = bool(hotkeys_zoom)
         self._background_color = background_color
         self._user_agent = user_agent
         self._initialization_script = initialization_script
@@ -879,6 +883,17 @@ class WebView(WebViewRpcMixin):
         """
         self._require_tk_thread()
         return self._autoplay
+
+    @property
+    def hotkeys_zoom(self) -> bool:
+        """Create-time page zoom via Ctrl+/- / Ctrl+wheel / pinch (default ``False``).
+
+        Maps to wry ``with_hotkeys_zoom``. Effective on **Windows** (WebView2).
+        macOS / Linux ignore the engine flag; this still records the
+        constructor value. Not :meth:`set_zoom` / :meth:`reset_zoom`.
+        """
+        self._require_tk_thread()
+        return self._hotkeys_zoom
 
     @property
     def navigation_allow(self) -> frozenset[str] | None:
@@ -3256,6 +3271,7 @@ class WebView(WebViewRpcMixin):
             "clipboard": self._clipboard,
             "javascript_enabled": self._javascript_enabled,
             "autoplay": self._autoplay,
+            "hotkeys_zoom": self._hotkeys_zoom,
             "focused": self._focused,
         }
         if self._background_color is not None:
