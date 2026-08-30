@@ -56,6 +56,17 @@ viewer = WebView(frame_web, url="https://example.com", untrusted=True)
 # viewer owns an ephemeral session — do not pass app_session
 ```
 
+## localhost / ASGI
+
+Loopback HTTP is a normal `http://127.0.0.1:<port>` origin — not
+`tkwry://`. Bind **`127.0.0.1` only**. `url=` infers `bridge_origins`
+from that origin (do not use `"*"`). `untrusted=True` if the server
+is not your UI.
+
+Prefer `app=` when you only need static files + RPC. tkwry does not
+run WSGI/ASGI in-process. Recipe:
+[Usage — Local HTTP / ASGI](usage.md#local-http--asgi-loopback).
+
 ## Session isolation
 
 A persistent ``WebSession`` / ``data_directory`` is a shared

@@ -300,6 +300,12 @@ Omitted kwargs are left unchanged. The WebView only follows its **Frame**
 via `sync_bounds()` — there is no `web.set_size` / `web.set_title` /
 `web.set_icon`. See [Usage — Layout / resize](usage.md#layout--resize).
 
+ttk themes, host dark/light chrome, extra DPI helpers, custom titlebar
+/ Acrylic / menus / tray belong in **tkface** (install it in the **app**,
+not as a tkwry dependency). Do not grow `configure_window` into a skin
+kit. Windows DPI: `tkface.win.enable_dpi_awareness()` before `tk.Tk()`
+(above) is that same split.
+
 ## Screenshot
 
 wry **0.56.1** has no `WebView` screenshot / capture method

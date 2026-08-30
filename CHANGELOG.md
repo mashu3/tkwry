@@ -46,6 +46,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   create-failed path stays the supported check)
 - Destroy / Frame / ``WebSession.close`` ordering checklist
 - Windows Tk-thread note: no COM STA cargo-cult unless a real HRESULT
+- Loopback HTTP / ASGI recipe next to ``app=`` (bind ``127.0.0.1``;
+  not in-process WSGI)
+- Tk host look / ttk / titlebar → **tkface** (app dep); ``configure_window``
+  stays a thin geometry helper
 
 ### Tests
 

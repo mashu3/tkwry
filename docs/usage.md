@@ -8,6 +8,7 @@ Contracts live elsewhere: [Trust boundaries](trust.md),
 | Start here | |
 |------------|--|
 | [Minimal app](#minimal-app) | First runnable window (`app=` or URL) |
+| [Local HTTP / ASGI](#local-http--asgi-loopback) | Loopback Flask/FastAPI — not in-process WSGI |
 | [Hidden hosts](#hidden-hosts) | Notebook / `pack_forget` vs `lift` overlap |
 | [User-Agent](#user-agent) | App identity — not a Chrome spoof |
 | [Observability](#observability) | ``WebViewPhase`` + ``take_queue_drop_stats()`` |
@@ -140,6 +141,43 @@ instead. macOS / Linux stay `tkwry://`. See
 [Platform notes — HTTPS scheme](platforms.md#https-scheme-windows-app).
 
 See [`examples/plotly_demo.py`](../examples/plotly_demo.py).
+Need a real HTTP/ASGI stack instead of static files?
+[Local HTTP / ASGI](#local-http--asgi-loopback).
+
+## Local HTTP / ASGI (loopback)
+
+Prefer [`app=`](#local-app-assets-app--tkwry) for static HTML/CSS/JS.
+Use a **loopback HTTP** (or ASGI) server when you already have Flask /
+FastAPI / Django, or need SSR / WebSocket / a real HTTP stack.
+
+tkwry does **not** embed WSGI/ASGI (no portless in-process Flask —
+that stays out of scope). The framework is **your** dependency
+(`pip install fastapi uvicorn`, …), not tkwry's.
+
+Bind **`127.0.0.1` only** (not `0.0.0.0`). Point the WebView at that
+origin. `bridge_origins` defaults to the `url=` origin, so RPC works
+without `"*"`. Treat loopback like any other http origin:
+[Trust boundaries](trust.md#localhost--asgi).
+
+```python
+import threading
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+httpd = ThreadingHTTPServer(("127.0.0.1", 0), SimpleHTTPRequestHandler)
+threading.Thread(target=httpd.serve_forever, daemon=True).start()
+port = httpd.server_address[1]
+web = WebView(frame, url=f"http://127.0.0.1:{port}/")
+
+
+def on_quit():
+    httpd.shutdown()
+    web.destroy()
+    root.destroy()
+```
+
+FastAPI/Uvicorn is the same shape: serve on `127.0.0.1`, start the
+server off the Tk thread, `url=http://127.0.0.1:<port>/`. Stop the
+server on quit ([Cleanup](#cleanup)).
 
 ## Shared session (`WebSession`)
 
@@ -280,6 +318,8 @@ only used **before** Tk reports a real size (`winfo_* <= 1`). Prefer passing
 [Platform notes — Window chrome](platforms.md#window-chrome-tk-not-the-webview).
 Use `configure_window(root, title=..., geometry=..., minsize=..., …)` for
 the common chrome kwargs; the WebView only follows its Frame (`sync_bounds`).
+ttk / dark host chrome / custom titlebar → **tkface** (app dependency),
+not tkwry.
 
 ## Hidden hosts
 
