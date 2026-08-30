@@ -107,20 +107,22 @@ jobs:
         run: |
           set -euo pipefail
           TAG_VERSION="${GITHUB_REF_NAME#v}"
-          python -m pip install --upgrade pip
-          pip install dist/*.whl
-          # Prefer installed metadata over a nearby Cargo.toml (see tkwry._version).
           SMOKE_DIR="${RUNNER_TEMP}/tkwry-wheel-smoke"
           mkdir -p "$SMOKE_DIR"
-          cd "$SMOKE_DIR"
           SMOKE_PY='import tkwry; import tkwry._core; assert tkwry.__version__ == "'"${TAG_VERSION}"'", tkwry.__version__; print("wheel smoke OK", tkwry.__version__)'
           if [ "${{ matrix.smoke }}" = "rosetta" ]; then
             if arch -x86_64 /usr/bin/true 2>/dev/null; then
+              arch -x86_64 python -m pip install --upgrade pip
+              arch -x86_64 pip install dist/*.whl
+              cd "$SMOKE_DIR"
               arch -x86_64 python -c "$SMOKE_PY"
             else
               echo "::warning::Rosetta unavailable; skipping x86_64 wheel import smoke on this runner"
             fi
           else
+            python -m pip install --upgrade pip
+            pip install dist/*.whl
+            cd "$SMOKE_DIR"
             python -c "$SMOKE_PY"
           fi
 
