@@ -70,45 +70,62 @@ def _toplevel_wakeup_write_fd(toplevel: tk.Misc) -> int | None:
 _WAKE_AFTER_POLL_MS = 16
 
 
-def _pump_toplevel_wakeup_pipe(toplevel: tk.Misc) -> None:
-    read_fd = _toplevel_wakeup_read_fd(toplevel)
-    if read_fd is None:
-        return
-    try:
-        import select
+def _wakeup_read_fd_readable(read_fd: int) -> bool:
+    """Return whether *read_fd* has buffered wakeup bytes (non-blocking)."""
+    if sys.platform == "win32":
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
 
-        while select.select([read_fd], [], [], 0)[0]:
-            if not os.read(read_fd, 64):
-                break
-    except (OSError, ValueError):
-        pass
-
-
-def _pump_shared_wake_read_fd(toplevel: tk.Misc) -> None:
-    """Pump the Win/Linux shared wakeup pipe (``_tkwry_wake_read_fd`` only)."""
-    read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
-    if read_fd is None:
-        return
-    try:
-        import select
-
-        while select.select([read_fd], [], [], 0)[0]:
-            if not os.read(read_fd, 64):
-                break
-    except (OSError, ValueError):
-        pass
-
-
-def _wakeup_pipe_readable(toplevel: tk.Misc) -> bool:
-    read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
-    if read_fd is None:
-        return False
+        handle = msvcrt.get_osfhandle(read_fd)
+        avail = wintypes.DWORD(0)
+        if not ctypes.windll.kernel32.PeekNamedPipe(
+            handle, None, 0, None, ctypes.byref(avail), None
+        ):
+            return False
+        return avail.value > 0
     try:
         import select
 
         return bool(select.select([read_fd], [], [], 0)[0])
     except (OSError, ValueError):
         return False
+
+
+def _drain_wakeup_read_fd(read_fd: int) -> bool:
+    """Drain wakeup bytes from *read_fd*; return True if any were read."""
+    read_any = False
+    try:
+        while _wakeup_read_fd_readable(read_fd):
+            chunk = os.read(read_fd, 64)
+            if not chunk:
+                break
+            read_any = True
+    except OSError:
+        pass
+    return read_any
+
+
+def _pump_toplevel_wakeup_pipe(toplevel: tk.Misc) -> None:
+    read_fd = _toplevel_wakeup_read_fd(toplevel)
+    if read_fd is None:
+        return
+    _drain_wakeup_read_fd(read_fd)
+
+
+def _pump_shared_wake_read_fd(toplevel: tk.Misc) -> bool:
+    """Pump the Win/Linux shared wakeup pipe (``_tkwry_wake_read_fd`` only)."""
+    read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
+    if read_fd is None:
+        return False
+    return _drain_wakeup_read_fd(read_fd)
+
+
+def _wakeup_pipe_readable(toplevel: tk.Misc) -> bool:
+    read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
+    if read_fd is None:
+        return False
+    return _wakeup_read_fd_readable(read_fd)
 
 
 def _service_toplevel_wakeup(toplevel: tk.Misc) -> None:
@@ -259,8 +276,9 @@ def _wakeup_after_poll_tick(toplevel: tk.Misc) -> None:
         _stop_wakeup_after_poll(toplevel)
         return
 
-    if _wakeup_pipe_readable(toplevel):
-        _service_toplevel_wakeup(toplevel)
+    read_fd = getattr(toplevel, "_tkwry_wake_read_fd", None)
+    if read_fd is not None and _drain_wakeup_read_fd(read_fd):
+        _drain_toplevel_sync_hooks(toplevel)
 
     try:
         toplevel.after(_WAKE_AFTER_POLL_MS, _wakeup_after_poll_tick, toplevel)

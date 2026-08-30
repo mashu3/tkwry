@@ -243,7 +243,7 @@ def test_ensure_tk_wakeup_fileevent_falls_back_without_createfilehandler(
     import tkwry._host as host
 
     monkeypatch.setattr(host.sys, "platform", "linux")
-    monkeypatch.setattr(tk_root, "createfilehandler", None)
+    monkeypatch.setattr(tk_root, "createfilehandler", None, raising=False)
 
     read_fd, write_fd = os.pipe()
     try:
