@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Release provenance: ``SHA256SUMS`` on GitHub Releases, artifact build
+  attestations in ``release.yml``, and [docs/provenance.md](docs/provenance.md)
+  (checksum verify, ``gh attestation verify``, optional ``cargo audit`` note)
+
 ## [0.1.5] - 2026-08-30
 
 Browser essentials (cookies, headers, zoom, permission, clipboard), 0.1.4

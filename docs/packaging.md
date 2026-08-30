@@ -94,6 +94,7 @@ GitHub issues with OS, freezer version, and traceback.
 
 ## Related
 
+- [Release provenance](provenance.md) — SHA-256 checksums and build attestations
 - [Usage — Cleanup](usage.md#cleanup)
 - [Usage — Observability](usage.md#observability)
 - [README — Known limitations](../README.md#-known-limitations)
