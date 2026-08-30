@@ -41,6 +41,7 @@ Pre-built **abi3** wheels ship for **Windows** and **macOS**. **Linux** is sourc
 | Trust boundaries (`untrusted`, `bridge_origins`, recipes) | [docs/trust.md](https://github.com/mashu3/tkwry/blob/main/docs/trust.md) |
 | IPC / RPC / emit (`expose`, `call` / `stream`, cancel, limits) | [docs/rpc.md](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md) |
 | Platform notes (Windows / macOS / Linux, print, window chrome) | [docs/platforms.md](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md) |
+| Packaging (PyInstaller / Nuitka notes — not CI-verified in 0.1.x) | [docs/packaging.md](https://github.com/mashu3/tkwry/blob/main/docs/packaging.md) |
 
 ---
 
