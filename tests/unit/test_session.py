@@ -29,6 +29,43 @@ def test_session_rejects_ephemeral_with_directory(tmp_path: Path) -> None:
         WebSession(data_directory=tmp_path, ephemeral=True)
 
 
+def test_session_incognito_is_ephemeral_alias() -> None:
+    session = WebSession(incognito=True)
+    assert session.ephemeral is True
+    assert session.data_directory is None
+    assert session.native is not None
+    assert session.native.ephemeral is True
+
+
+def test_session_rejects_incognito_with_directory(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="not both"):
+        WebSession(data_directory=tmp_path, incognito=True)
+
+
+def test_webview_incognito_owns_ephemeral_session(tk_root) -> None:
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>x</p>", incognito=True)
+    try:
+        assert web._owned_session is not None
+        assert web._session is web._owned_session
+        assert web._session.ephemeral is True
+    finally:
+        web.destroy()
+        frame.destroy()
+
+
+def test_webview_rejects_incognito_with_session(tk_root) -> None:
+    import tkinter as tk
+
+    session = WebSession(ephemeral=True)
+    frame = tk.Frame(tk_root)
+    with pytest.raises(ValueError, match="not both"):
+        WebView(frame, session=session, incognito=True)
+    frame.destroy()
+
+
 def test_native_session_exposed() -> None:
     session = WebSession(ephemeral=True)
     assert session.native is not None

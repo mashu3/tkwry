@@ -294,7 +294,8 @@ class WebView(WebViewRpcMixin):
     policy string). ``coop=True`` / ``corp=True`` add optional
     Cross-Origin-Opener-Policy / Cross-Origin-Resource-Policy.
 
-    **Sessions** (``session=`` / ``data_directory=`` / ``ephemeral=``): share a
+    **Sessions** (``session=`` / ``data_directory=`` / ``ephemeral=`` /
+    ``incognito=``): share a
     wry ``WebContext`` (cookies / cache / localStorage where the platform
     supports it) across WebViews. Prefer one :class:`~tkwry.WebSession` per
     profile. WebViews that share a **non-ephemeral** session must use the
@@ -424,6 +425,7 @@ class WebView(WebViewRpcMixin):
         session: WebSession | None = None,
         data_directory: str | Path | None = None,
         ephemeral: bool = False,
+        incognito: bool = False,
         untrusted: bool = False,
         bridge_origins: BridgeOrigins | None = None,
         bridge_allow: BridgeAllow | None = None,
@@ -463,13 +465,15 @@ class WebView(WebViewRpcMixin):
         require_tk_thread(frame)
         if background_color is not None:
             _validate_background_color(background_color)
+        ephemeral = ephemeral or incognito
         if session is not None and (data_directory is not None or ephemeral):
             raise ValueError(
-                "WebView: pass session= or data_directory=/ephemeral=, not both"
+                "WebView: pass session= or data_directory=/ephemeral=/incognito=, "
+                "not both"
             )
         if ephemeral and data_directory is not None:
             raise ValueError(
-                "WebView: pass data_directory= or ephemeral=True, not both"
+                "WebView: pass data_directory= or ephemeral=/incognito=, not both"
             )
         if untrusted:
             if app is not None:

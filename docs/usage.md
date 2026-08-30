@@ -162,7 +162,12 @@ session.close()  # idempotent; run on the Tk main thread
 ```
 
 Convenience: `WebView(..., data_directory=...)` or `ephemeral=True`
-creates an owned session. Call :meth:`WebSession.close` when the profile
+creates an owned session. **Incognito / private browsing** is that same
+flag: `WebSession(ephemeral=True)` maps to wry `with_incognito`.
+`incognito=True` is a constructor alias (`WebView` and `WebSession`);
+read the result with `session.ephemeral`. Not a second profile mode, and
+not a per-view override on a persistent session. Cookie sharing across
+views in an ephemeral session is best-effort by platform. Call :meth:`WebSession.close` when the profile
 is no longer needed (or destroy every WebView first). Keep the session open
 while any WebView uses it (especially with `app=` on macOS). Isolation rules (same `app=`
 root, do not share a persistent profile with untrusted sites):
@@ -557,7 +562,8 @@ Stability policy (0.2.0).
 | Diagnostics | `take_queue_drop_stats` / `QueueDropCounts`, `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
-`app_dev`, `csp` / `coop` / `corp`, `session` / `data_directory` / `ephemeral`,
+`app_dev`, `csp` / `coop` / `corp`, `session` / `data_directory` /
+`ephemeral` / `incognito` (alias of `ephemeral`),
 `untrusted`, `bridge_origins`, `bridge_allow`, `navigation_allow`,
 `open_external`, `download_allow`, `ipc_handler`, `rpc_traceback`, `devtools`,
 `clipboard`, `background_color`, `user_agent`, `initialization_script`, `focused`,

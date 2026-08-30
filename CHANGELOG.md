@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   space (wry ``bounds()`` wrap)
 - ``WebView.delete_cookie(name, url)`` — delete by cookie name and page URL
   (hostname + path; empty path → ``/``); ``delete_cookie(Cookie)`` unchanged
+- ``incognito=True`` constructor alias for ``ephemeral=True`` on
+  ``WebView`` / ``WebSession`` (wry ``with_incognito``; inspect
+  ``session.ephemeral``)
 
 ## [0.1.5] - 2026-08-30
 

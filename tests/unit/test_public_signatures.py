@@ -22,6 +22,7 @@ WEBVIEW_INIT_KWONLY = (
     "session",
     "data_directory",
     "ephemeral",
+    "incognito",
     "untrusted",
     "bridge_origins",
     "bridge_allow",
@@ -161,4 +162,4 @@ def test_native_session_stub_matches_rust_signature() -> None:
 
 
 def test_python_session_init_kwonly() -> None:
-    assert _kwonly(WebSession.__init__) == ("ephemeral",)
+    assert _kwonly(WebSession.__init__) == ("ephemeral", "incognito")

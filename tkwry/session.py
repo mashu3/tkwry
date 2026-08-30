@@ -39,10 +39,13 @@ class WebSession:
     ----------
     data_directory:
         Persistent profile directory. Created if missing. Mutually exclusive
-        with ``ephemeral=True``.
+        with ``ephemeral=True`` / ``incognito=True``.
     ephemeral:
-        Private / non-persistent browsing (``with_incognito``). Cookie sharing
-        across WebViews in an ephemeral session is best-effort by platform.
+        Private / non-persistent browsing (wry ``with_incognito``). Cookie
+        sharing across WebViews in an ephemeral session is best-effort by
+        platform. Inspect with :attr:`ephemeral`.
+    incognito:
+        Alias for ``ephemeral=True``. Same flag — not a second profile mode.
     """
 
     def __init__(
@@ -50,10 +53,12 @@ class WebSession:
         data_directory: str | Path | None = None,
         *,
         ephemeral: bool = False,
+        incognito: bool = False,
     ) -> None:
+        ephemeral = ephemeral or incognito
         if ephemeral and data_directory is not None:
             raise ValueError(
-                "WebSession: pass data_directory= or ephemeral=True, not both"
+                "WebSession: pass data_directory= or ephemeral=/incognito=, not both"
             )
         path: str | None = None
         if data_directory is not None:
