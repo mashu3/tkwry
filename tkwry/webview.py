@@ -1958,9 +1958,7 @@ class WebView(WebViewRpcMixin):
             self._webview.set_download_complete_listening(True)
         self._ensure_event_poll()
 
-    def set_on_callback_error(
-        self, handler: CallbackErrorHandler | None
-    ) -> None:
+    def set_on_callback_error(self, handler: CallbackErrorHandler | None) -> None:
         """Register a provisional hook for exceptions in user callbacks.
 
         *handler* receives ``(exc, kind)`` where ``kind`` names the failing
