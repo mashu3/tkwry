@@ -221,9 +221,11 @@ jobs:
     name: GitHub Release
     runs-on: ubuntu-latest
     # After PyPI so a tag cannot leave a GH release without a verified publish path.
-    needs: [publish]
+    needs: [check-version, publish]
     permissions:
+      attestations: write
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v5
 
@@ -241,6 +243,30 @@ jobs:
       - name: List dist
         shell: bash
         run: ls -la dist/
+
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum ./*.whl ./*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Collect dist artifact paths
+        id: dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "paths<<'EOF'"
+            ls -1 dist/*.whl dist/*.tar.gz
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ steps.dist.outputs.paths }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
