@@ -516,11 +516,13 @@ def _refocus_tk_widget(widget: tk.Misc) -> None:
 
 
 def _ensure_mac_wakeup_pipe(toplevel: tk.Misc, native: NativeWebViewType) -> None:
+    from tkwry._host import _open_wakeup_pipe
+
     if getattr(toplevel, "_tkwry_mac_wake_read_fd", None) is not None:
         native.set_mac_wakeup_write_fd(toplevel._tkwry_mac_wake_write_fd)
         return
 
-    read_fd, write_fd = os.pipe()
+    read_fd, write_fd = _open_wakeup_pipe()
     toplevel._tkwry_mac_wake_read_fd = read_fd
     toplevel._tkwry_mac_wake_write_fd = write_fd
     native.set_mac_wakeup_write_fd(write_fd)

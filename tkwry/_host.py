@@ -53,6 +53,23 @@ def _release_frame_host(frame: tk.Misc, web: WebView) -> None:
         del _frame_webview_refs[key]
 
 
+def _configure_wakeup_write_fd(write_fd: int) -> None:
+    """Mark the wakeup pipe write end non-blocking (D26)."""
+    if sys.platform == "win32":
+        return
+    import fcntl
+
+    flags = fcntl.fcntl(write_fd, fcntl.F_GETFL)
+    fcntl.fcntl(write_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+
+def _open_wakeup_pipe() -> tuple[int, int]:
+    """Create a wakeup pipe with a non-blocking write end."""
+    read_fd, write_fd = os.pipe()
+    _configure_wakeup_write_fd(write_fd)
+    return read_fd, write_fd
+
+
 def _toplevel_wakeup_read_fd(toplevel: tk.Misc) -> int | None:
     if sys.platform == "darwin":
         return getattr(toplevel, "_tkwry_mac_wake_read_fd", None)

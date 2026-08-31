@@ -35,6 +35,7 @@ from tkwry._host import (
     _drain_pending_destroy_webviews,
     _ensure_tk_wakeup_fileevent,
     _frame_webview_refs,
+    _open_wakeup_pipe,
     _pump_toplevel_wakeup_pipe,
     _register_sync_hook_webview,
     _release_frame_host,
@@ -2900,7 +2901,7 @@ class WebView(WebViewRpcMixin):
                     self._tk_wakeup_write_fd = write_fd
             else:
                 if write_fd is None:
-                    read_fd, write_fd = os.pipe()
+                    read_fd, write_fd = _open_wakeup_pipe()
                     setattr(toplevel, "_tkwry_wake_read_fd", read_fd)
                     setattr(toplevel, "_tkwry_wake_write_fd", write_fd)
                     setattr(toplevel, "_tkwry_wake_pipe_users", 0)

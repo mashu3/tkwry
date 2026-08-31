@@ -5,6 +5,7 @@ mod cookie_api;
 #[cfg(target_os = "macos")]
 mod macos;
 mod session;
+mod wakeup;
 
 use pyo3::prelude::*;
 use std::cell::Cell;
@@ -192,7 +193,7 @@ fn push_if_listening<T>(
     make_room_in_queue(&mut queue, max, dropped, label, &mut compact);
     queue.push_back(item);
     if let Some(fd) = wakeup {
-        notify_wakeup(fd);
+        wakeup::notify_wakeup(fd);
     }
     Ok(())
 }
@@ -218,22 +219,6 @@ fn push_eval_result(pending: &EvalResultPending, dropped: &AtomicU64, token: u64
         }
     }
     queue.push_back((token, Some(result)));
-}
-
-/// Wake the Tk main loop (pipe byte; drained by Python ``after`` pump).
-fn notify_wakeup(fd: &AtomicI32) {
-    let fd = fd.load(Ordering::SeqCst);
-    if fd < 0 {
-        return;
-    }
-    let byte = 1u8;
-    let wrote = unsafe { libc::write(fd, &byte as *const u8 as *const libc::c_void, 1) };
-    if wrote < 0 {
-        eprintln!(
-            "tkwry: wakeup pipe write failed: {}",
-            std::io::Error::last_os_error()
-        );
-    }
 }
 
 struct SyncHookSlot<T> {
@@ -295,7 +280,7 @@ fn wait_sync_hook<T>(
                 return default;
             }
             if let Some(fd) = wakeup {
-                notify_wakeup(fd);
+                wakeup::notify_wakeup(fd);
             }
             let wait_for = remaining.min(SYNC_HOOK_POLL_INTERVAL);
             let (next, _) = match slot.cvar.wait_timeout(guard, wait_for) {
@@ -1193,7 +1178,7 @@ fn push_title_event(
     }
     if queue.back() == Some(&item) {
         if let Some(fd) = wakeup {
-            notify_wakeup(fd);
+            wakeup::notify_wakeup(fd);
         }
         return Ok(());
     }
@@ -1206,7 +1191,7 @@ fn push_title_event(
     );
     queue.push_back(item);
     if let Some(fd) = wakeup {
-        notify_wakeup(fd);
+        wakeup::notify_wakeup(fd);
     }
     Ok(())
 }
@@ -1584,7 +1569,7 @@ impl WebView {
             if !enqueue_nav_sync_hook(&nav_sync_pending_clone, url, slot.clone()) {
                 return false;
             }
-            notify_wakeup(&wakeup_fd_clone);
+            wakeup::notify_wakeup(&wakeup_fd_clone);
             if Python::attach(|_py| python_thread_id().ok()) == Some(owner_thread_for_nav) {
                 drain_nav_sync_hooks(&nav_cb_clone, &nav_sync_pending_clone);
             }
@@ -1640,7 +1625,7 @@ impl WebView {
                 if !enqueue_newwin_sync_hook(&newwin_sync_pending_clone, url, slot.clone()) {
                     return wry::NewWindowResponse::Deny;
                 }
-                notify_wakeup(&wakeup_fd_for_newwin);
+                wakeup::notify_wakeup(&wakeup_fd_for_newwin);
                 if Python::attach(|_py| python_thread_id().ok()) == Some(owner_thread_for_newwin) {
                     drain_newwin_sync_hooks(&newwin_cb_clone, &newwin_sync_pending_clone);
                 }
@@ -1718,7 +1703,7 @@ impl WebView {
             ) {
                 return false;
             }
-            notify_wakeup(&wakeup_fd_for_download);
+            wakeup::notify_wakeup(&wakeup_fd_for_download);
             if Python::attach(|_py| python_thread_id().ok()) == Some(owner_thread_for_download) {
                 drain_download_sync_hooks(&download_cb_clone, &download_sync_pending_clone);
             }
@@ -1869,7 +1854,7 @@ WebViews that share a session must use the same app= root \
                 {
                     return wry::PermissionResponse::Deny;
                 }
-                notify_wakeup(&wakeup_fd_for_permission);
+                wakeup::notify_wakeup(&wakeup_fd_for_permission);
                 if Python::attach(|_py| python_thread_id().ok())
                     == Some(owner_thread_for_permission)
                 {
@@ -2566,6 +2551,7 @@ WebViews that share a session must use the same app= root \
 
     fn set_mac_wakeup_write_fd(&self, fd: i32) -> PyResult<()> {
         self.require_owner_thread()?;
+        wakeup::configure_wakeup_write_fd(fd);
         self.wakeup_write_fd.store(fd, Ordering::SeqCst);
         Ok(())
     }

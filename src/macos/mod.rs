@@ -4,8 +4,9 @@ mod document_url;
 mod focus;
 mod window;
 
+pub use crate::wakeup::notify_wakeup;
 pub use document_url::read_document_url;
-pub use focus::{hit_test_wry_point, install_focus_sync, notify_wakeup, FocusSyncGuard};
+pub use focus::{hit_test_wry_point, install_focus_sync, FocusSyncGuard};
 pub use window::{disable_process_automatic_window_tabbing, disable_window_tabbing};
 
 use std::ptr::NonNull;

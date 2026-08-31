@@ -43,6 +43,8 @@ use objc2_foundation::{NSNotification, NSNotificationCenter, NSOperationQueue, N
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::WebViewExtMacOS;
 
+use crate::wakeup;
+
 const TAB_KEY_CODE: u16 = 48;
 const ESCAPE_KEY_CODE: u16 = 53;
 
@@ -98,22 +100,6 @@ impl Drop for FocusSyncGuard {
                 map.remove(&self.window_key);
             }
         });
-    }
-}
-
-/// Wake the Tk main loop (pipe byte + flag; drained by Python ``after`` pump).
-pub fn notify_wakeup(fd: &AtomicI32) {
-    let fd = fd.load(Ordering::SeqCst);
-    if fd < 0 {
-        return;
-    }
-    let byte = 1u8;
-    let wrote = unsafe { libc::write(fd, &byte as *const u8 as *const libc::c_void, 1) };
-    if wrote < 0 {
-        eprintln!(
-            "tkwry: wakeup pipe write failed: {}",
-            std::io::Error::last_os_error()
-        );
     }
 }
 
@@ -328,7 +314,7 @@ fn handle_keydown(window: &NSWindow, entries: &[FocusEntry], event: &NSEvent, wa
             }
         }
         entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
-        notify_wakeup(wakeup);
+        wakeup::notify_wakeup(wakeup);
         return;
     }
 
@@ -340,12 +326,12 @@ fn handle_keydown(window: &NSWindow, entries: &[FocusEntry], event: &NSEvent, wa
 
     let Some(window_point) = current_window_point(window) else {
         entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
-        notify_wakeup(wakeup);
+        wakeup::notify_wakeup(wakeup);
         return;
     };
     if topmost_entry_index(window, entries, window_point) != Some(active_idx) {
         entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
-        notify_wakeup(wakeup);
+        wakeup::notify_wakeup(wakeup);
     }
 }
 
@@ -371,12 +357,12 @@ fn handle_keyup_or_flags(
 
     let Some(window_point) = current_window_point(window) else {
         entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
-        notify_wakeup(wakeup);
+        wakeup::notify_wakeup(wakeup);
         return;
     };
     if topmost_entry_index(window, entries, window_point) != Some(active_idx) {
         entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
-        notify_wakeup(wakeup);
+        wakeup::notify_wakeup(wakeup);
     }
 }
 
@@ -396,7 +382,7 @@ fn handle_window_became_key(window: &NSWindow, entries: &[FocusEntry], wakeup: &
             }
         }
         entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
-        notify_wakeup(wakeup);
+        wakeup::notify_wakeup(wakeup);
         return;
     };
 
@@ -408,7 +394,7 @@ fn handle_window_became_key(window: &NSWindow, entries: &[FocusEntry], wakeup: &
                 }
             }
             entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
-            notify_wakeup(wakeup);
+            wakeup::notify_wakeup(wakeup);
         }
         Some(idx) => activate_entry(entries, idx, wakeup),
         None => {
@@ -418,7 +404,7 @@ fn handle_window_became_key(window: &NSWindow, entries: &[FocusEntry], wakeup: &
                 }
             }
             entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
-            notify_wakeup(wakeup);
+            wakeup::notify_wakeup(wakeup);
         }
     }
 }
@@ -441,7 +427,7 @@ fn activate_entry(entries: &[FocusEntry], idx: usize, wakeup: &AtomicI32) {
             }
         }
     }
-    notify_wakeup(wakeup);
+    wakeup::notify_wakeup(wakeup);
 }
 
 fn release_all_web_focus(entries: &[FocusEntry], wakeup: &AtomicI32) {
@@ -457,7 +443,7 @@ fn release_all_web_focus(entries: &[FocusEntry], wakeup: &AtomicI32) {
         }
     }
     if any {
-        notify_wakeup(wakeup);
+        wakeup::notify_wakeup(wakeup);
     }
 }
 
