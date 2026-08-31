@@ -6,7 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-Named browser profiles, app-facing download helpers, RPC invoke sugar, and navigation policy events.
+Named browser profiles, app-facing download helpers, RPC invoke sugar,
+navigation policy events, and Tk context menus.
 
 ### Added
 
@@ -42,6 +43,14 @@ Named browser profiles, app-facing download helpers, RPC invoke sugar, and navig
   takes precedence when both are set
 - ``set_on_navigation`` handlers may receive ``NavigationEvent`` or legacy
   URL ``str``
+- ``set_context_menu`` / ``context_menu=`` — Tk ``Menu`` from
+  ``(label, callback)`` items (``None`` label = separator) via a JS
+  ``contextmenu`` bridge (``preventDefault`` + IPC)
+- ``set_context_menu_handler`` / ``on_context_menu=`` — host handler for
+  ``ContextMenuEvent`` (takes priority over ``set_context_menu``)
+- ``ContextMenuEvent`` — screen / page coords, optional ``link_url`` /
+  ``selected_text``; on Windows custom menus require
+  ``default_context_menus=False``
 
 ### Fixed
 
@@ -54,7 +63,8 @@ Named browser profiles, app-facing download helpers, RPC invoke sugar, and navig
   handler shapes; download started / failed callbacks and events; ``@web.rpc``
   / ``window.tkwry.invoke``
 - ``docs/rpc.md`` — ``invoke`` vs ``call``; ``@web.rpc`` decorator
-- ``docs/usage.md`` — ``NavigationEvent`` / ``set_navigation_policy`` recipes
+- ``docs/usage.md`` — ``NavigationEvent`` / ``set_navigation_policy`` recipes;
+  Tk context menu / ``ContextMenuEvent``
 
 ## [0.1.6] - 2026-08-31
 

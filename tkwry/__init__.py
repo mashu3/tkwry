@@ -54,6 +54,10 @@ try:
         PermissionKind,
         PermissionResponse,
     )
+    from tkwry.context_menu import (
+        ContextMenuEvent,
+        ContextMenuHandler,
+    )
     from tkwry.navigation import (
         NavigationEvent,
         NavigationHandler,
@@ -96,6 +100,8 @@ __all__ = [
     "BridgeAllow",
     "BridgeOrigins",
     "Cookie",
+    "ContextMenuEvent",
+    "ContextMenuHandler",
     "CreationFailedHandler",
     "Download",
     "DownloadCompleteHandler",

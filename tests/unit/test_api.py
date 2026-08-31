@@ -101,6 +101,8 @@ WEBVIEW_METHODS = (
     "set_on_download_started",
     "set_on_download_complete",
     "set_on_download_failed",
+    "set_context_menu",
+    "set_context_menu_handler",
     "sync_bounds",
     "take_queue_drop_counts",
     "take_queue_drop_stats",

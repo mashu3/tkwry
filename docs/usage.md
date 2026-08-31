@@ -461,6 +461,20 @@ web.set_navigation_policy(
     lambda event: event.url.startswith("https://example.com")
 )
 
+# Context menu (Tk Menu via JS preventDefault + IPC).
+# Windows: pass default_context_menus=False (or tkwry forces it before create).
+web = WebView(frame, html="<p>menu</p>", default_context_menus=False)
+web.set_context_menu(
+    [
+        ("Back", web.go_back),
+        ("Forward", web.go_forward),
+        (None, None),  # separator
+        ("Open DevTools", web.open_devtools),
+    ]
+)
+# Or handle yourself (takes priority over set_context_menu):
+# web.set_context_menu_handler(lambda e: print(e.link_url, e.x, e.y))
+
 # Downloads: untrusted=True denies unless on_download / download_allow permits.
 # on_download accepts Download (one arg) or legacy (url, suggested_dest).
 # Return download.save("./downloads"), an absolute path, True, or False.
@@ -686,7 +700,7 @@ Stability policy (0.2.0).
 | Cookies / browsing data | `cookies`, `cookies_for_url`, `set_cookie`, `delete_cookie` (`Cookie` or `name` + page `url`), `clear_all_browsing_data`, `Cookie` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `last_eval_error`, `<<WebViewEvalFailed>>` |
 | IPC / RPC / emit | `set_ipc_handler`, `expose` / `rpc` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `invoke` / `stream` / `cancel`) |
-| Callbacks | `set_on_navigation`, `set_navigation_policy`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_started`, `set_on_download_complete`, `set_on_download_failed`; create-only `permission_handler=` |
+| Callbacks | `set_on_navigation`, `set_navigation_policy`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_started`, `set_on_download_complete`, `set_on_download_failed`, `set_context_menu`, `set_context_menu_handler`; create-only `permission_handler=` |
 | Appearance | `set_background_color`, `set_zoom` / `reset_zoom`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create); `devtools=`, `clipboard=`, `javascript_enabled=`, `autoplay=`, `hotkeys_zoom=`, `back_forward_gestures=`, `default_context_menus=`, `https_scheme=`, `proxy=`, `permission_handler=` |
 | Layout | `pack`, `grid`, `place`, `sync_bounds`, `bounds` (native geometry in ``set_bounds`` space) |
@@ -704,13 +718,14 @@ Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
 `initialization_script`, `focused`,
 `permission_handler`, `on_navigation`, `navigation_policy`, `on_download`,
 `on_download_started`, `on_download_complete`, `on_download_failed`,
-`on_creation_failed`,
+`context_menu`, `on_context_menu`, `on_creation_failed`,
 plus the callback hooks above.
 
 Enums: `PageLoadEvent`, `NavigationType`, `NewWindowResponse`, `PermissionKind`,
 `PermissionResponse`, `DragDropEvent`, `WebViewPhase`.
 Types: `WebView`, `WebSession`, `Cookie` (``repr`` omits ``value`` — never log secrets),
-`Download`, `InFlightDownload`, `NavigationEvent`, `QueueDropCounts`.
+`Download`, `InFlightDownload`, `NavigationEvent`, `ContextMenuEvent`,
+`QueueDropCounts`.
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
 `WebViewTimeoutError`, `WebViewNavigationError`,
 `RpcTimeoutError`, `RpcCancelledError`, `RpcSerializationError`.
@@ -723,7 +738,7 @@ Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`,
 `EvalCallback`, `EvalErrorHandler`, `CreationFailedHandler`, `DownloadHandler`,
 `DownloadCompleteHandler`, `DownloadFailedHandler`, `DownloadHandler`,
 `DownloadStartedHandler`, `NavigationHandler`, `NavigationPolicyHandler`,
-`PermissionHandler`.
+`ContextMenuHandler`, `PermissionHandler`.
 
 ## Related
 

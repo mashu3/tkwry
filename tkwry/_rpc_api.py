@@ -24,6 +24,10 @@ from tkwry._app import (
     normalize_watch_suffixes,
     scan_app_mtime,
 )
+from tkwry.context_menu import (
+    CONTEXT_MENU_JS,
+    parse_context_menu_event,
+)
 from tkwry.exceptions import (
     RpcSerializationError,
     RpcTimeoutError,
@@ -360,13 +364,23 @@ class WebViewRpcMixin:
         self._schedule_app_watch(interval_ms)
 
     def _ipc_listening_wanted(self) -> bool:
-        return self._ipc_handler is not None or bool(self._rpc_methods)
+        return (
+            self._ipc_handler is not None
+            or bool(self._rpc_methods)
+            or self._context_menu_active()
+        )
+
+    def _context_menu_active(self) -> bool:
+        return (
+            getattr(self, "_context_menu_handler", None) is not None
+            or getattr(self, "_context_menu_items", None) is not None
+        )
 
     def _enable_rpc(self) -> None:
         """Turn on IPC listening and ensure the JS bridge bootstrap is present."""
         self._rpc_bridge_wanted = True
         if self._webview is not None:
-            if self._rpc_methods or self._ipc_handler is not None:
+            if self._ipc_listening_wanted():
                 self._webview.set_ipc_listening(True)
             if not self._rpc_bootstrap_injected:
                 try:
@@ -376,10 +390,28 @@ class WebViewRpcMixin:
                     traceback.print_exc()
         self._ensure_event_poll()
 
+    def _enable_context_menu_bridge(self) -> None:
+        """Ensure IPC listening and the context-menu JS hook are active."""
+        if self._webview is not None:
+            self._webview.set_ipc_listening(True)
+            if not getattr(self, "_context_menu_bridge_injected", False):
+                try:
+                    self._webview.eval_js(CONTEXT_MENU_JS)
+                    self._context_menu_bridge_injected = True
+                except Exception:
+                    traceback.print_exc()
+        self._ensure_event_poll()
+
     def _effective_initialization_script(self) -> str | None:
-        return merge_initialization_script(
+        from tkwry.context_menu import merge_context_menu_script
+
+        script = merge_initialization_script(
             self._initialization_script,
             rpc_enabled=bool(self._rpc_methods) or self._rpc_bridge_wanted,
+        )
+        return merge_context_menu_script(
+            script,
+            context_menu_enabled=self._context_menu_active(),
         )
 
     def _get_rpc_executor(self) -> ThreadPoolExecutor:
@@ -550,6 +582,12 @@ class WebViewRpcMixin:
                         )
                     continue
                 self._handle_rpc_request(request)
+                continue
+            context_event = parse_context_menu_event(message)
+            if context_event is not None:
+                if not self._bridge_origin_allowed(source_url):
+                    continue
+                self._deliver_context_menu_event(context_event)
                 continue
             if not self._bridge_origin_allowed(source_url):
                 continue

@@ -13,7 +13,7 @@ import traceback
 import warnings
 import weakref
 from collections import deque
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from enum import Enum
 from pathlib import Path
 from typing import Literal, NamedTuple, TypeAlias, TypeVar, cast, overload
@@ -69,6 +69,13 @@ from tkwry._parent import (
 )
 from tkwry._rpc_api import WebViewRpcMixin
 from tkwry._url import _normalize_load_headers, _normalize_url, _validate_url
+from tkwry.context_menu import (
+    ContextMenuCallback,
+    ContextMenuEvent,
+    ContextMenuHandler,
+    ContextMenuItem,
+    normalize_context_menu_items,
+)
 from tkwry.download import (
     Download,
     DownloadFailedHandler,
@@ -576,6 +583,8 @@ class WebView(WebViewRpcMixin):
         on_download_failed: DownloadFailedHandler | None = None,
         on_creation_failed: CreationFailedHandler | None = None,
         on_callback_error: CallbackErrorHandler | None = None,
+        context_menu: Sequence[ContextMenuItem] | None = None,
+        on_context_menu: ContextMenuHandler | None = None,
     ) -> None:
         """Embed a WebView in *frame*.
 
@@ -711,6 +720,10 @@ class WebView(WebViewRpcMixin):
         self._on_download_complete = on_download_complete
         self._on_download_failed = on_download_failed
         self._on_callback_error = on_callback_error
+        self._context_menu_items = normalize_context_menu_items(context_menu)
+        self._context_menu_handler = on_context_menu
+        self._context_menu_bridge_injected = False
+        self._context_menu_tk: tk.Menu | None = None
         self._devtools = devtools
         self._clipboard = bool(clipboard)
         self._javascript_enabled = bool(javascript_enabled)
@@ -718,6 +731,14 @@ class WebView(WebViewRpcMixin):
         self._hotkeys_zoom = bool(hotkeys_zoom)
         self._back_forward_gestures = bool(back_forward_gestures)
         self._default_context_menus = bool(default_context_menus)
+        if self._context_menu_active() and sys.platform == "win32":
+            if self._default_context_menus:
+                print(
+                    "tkwry: context_menu=/on_context_menu= requires "
+                    "default_context_menus=False on Windows; forcing False",
+                    file=sys.stderr,
+                )
+                self._default_context_menus = False
         self._https_scheme = bool(https_scheme)
         if proxy_norm is None:
             self._proxy: dict[str, str] | None = None
@@ -1510,6 +1531,9 @@ class WebView(WebViewRpcMixin):
         if self._destroyed:
             return
         self._destroyed = True
+        self._dispose_context_menu_tk()
+        self._context_menu_items = None
+        self._context_menu_handler = None
         if self._session is not None:
             self._session._unregister_webview(self)
         self._abort_inflight_rpc()
@@ -2362,6 +2386,118 @@ class WebView(WebViewRpcMixin):
                 "WebView native creation failed; cannot call set_on_download_failed()"
             ) from self._creation_error
         self._on_download_failed = handler
+
+    def set_context_menu(self, items: Sequence[ContextMenuItem] | None) -> None:
+        """Register a Tk context menu shown on page right-click.
+
+        *items* is a sequence of ``(label, callback)``; ``label is None``
+        inserts a separator. Uses a JavaScript ``contextmenu`` bridge
+        (``preventDefault`` + IPC). On Windows, requires
+        ``default_context_menus=False`` (auto-forced before native create).
+
+        Ignored when :meth:`set_context_menu_handler` is set — the handler
+        takes priority.
+        """
+        self._require_not_destroyed("set_context_menu")
+        if items is not None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call set_context_menu()"
+            ) from self._creation_error
+        self._context_menu_items = normalize_context_menu_items(items)
+        self._dispose_context_menu_tk()
+        if self._context_menu_active():
+            self._require_windows_context_menu_ready("set_context_menu")
+            self._enable_context_menu_bridge()
+        elif self._webview is not None:
+            self._webview.set_ipc_listening(self._ipc_listening_wanted())
+
+    def set_context_menu_handler(self, handler: ContextMenuHandler | None) -> None:
+        """Register a host handler for page context-menu events.
+
+        *handler* receives a :class:`~tkwry.ContextMenuEvent`. When set, it
+        takes priority over :meth:`set_context_menu`. Pass ``None`` to clear.
+        """
+        self._require_not_destroyed("set_context_menu_handler")
+        if handler is not None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call set_context_menu_handler()"
+            ) from self._creation_error
+        self._context_menu_handler = handler
+        self._dispose_context_menu_tk()
+        if self._context_menu_active():
+            self._require_windows_context_menu_ready("set_context_menu_handler")
+            self._enable_context_menu_bridge()
+        elif self._webview is not None:
+            self._webview.set_ipc_listening(self._ipc_listening_wanted())
+
+    def _require_windows_context_menu_ready(self, method: str) -> None:
+        if sys.platform != "win32":
+            return
+        if not self._default_context_menus:
+            return
+        if self._webview is None:
+            print(
+                f"tkwry: {method} requires default_context_menus=False on "
+                "Windows; forcing False before native create",
+                file=sys.stderr,
+            )
+            self._default_context_menus = False
+            return
+        raise ValueError(
+            f"{method}: on Windows pass default_context_menus=False at "
+            "construction (cannot disable after the native WebView exists)"
+        )
+
+    def _dispose_context_menu_tk(self) -> None:
+        menu = self._context_menu_tk
+        self._context_menu_tk = None
+        if menu is None:
+            return
+        try:
+            menu.destroy()
+        except tk.TclError:
+            pass
+
+    def _deliver_context_menu_event(self, event: ContextMenuEvent) -> None:
+        if self._destroyed:
+            return
+        handler = self._context_menu_handler
+        if handler is not None:
+            self._invoke_callback(handler, event, kind="on_context_menu")
+            return
+        items = self._context_menu_items
+        if items is None:
+            return
+        self._popup_context_menu(event, items)
+
+    def _popup_context_menu(
+        self, event: ContextMenuEvent, items: tuple[ContextMenuItem, ...]
+    ) -> None:
+        self._dispose_context_menu_tk()
+        try:
+            menu = tk.Menu(self._frame, tearoff=0)
+        except tk.TclError:
+            return
+        self._context_menu_tk = menu
+        for label, callback in items:
+            if label is None:
+                menu.add_separator()
+                continue
+            assert callback is not None
+
+            def _run(cb: ContextMenuCallback = callback) -> None:
+                self._invoke_callback(cb, kind="context_menu_item")
+
+            menu.add_command(label=label, command=_run)
+        try:
+            menu.tk_popup(event.x, event.y)
+        except tk.TclError:
+            self._dispose_context_menu_tk()
+        finally:
+            try:
+                menu.grab_release()
+            except tk.TclError:
+                pass
 
     def set_on_callback_error(self, handler: CallbackErrorHandler | None) -> None:
         """Register a provisional hook for exceptions in user callbacks.

@@ -34,6 +34,8 @@ def _snapshot(web: WebView) -> dict[str, Any]:
         "on_download": web._on_download is not None,
         "on_download_complete": web._on_download_complete is not None,
         "drag_drop": web._drag_drop_handler is not None,
+        "context_menu": web._context_menu_items is not None,
+        "on_context_menu": web._context_menu_handler is not None,
     }
 
 
@@ -77,6 +79,16 @@ def _equivalence_case(
             "drag_drop_handler",
             "set_drag_drop_handler",
             lambda _evt, _paths, _pos: None,
+        ),
+        _equivalence_case(
+            "context_menu",
+            "set_context_menu",
+            [("Back", lambda: None)],
+        ),
+        _equivalence_case(
+            "on_context_menu",
+            "set_context_menu_handler",
+            lambda _e: None,
         ),
     ],
 )
@@ -126,6 +138,14 @@ def test_handler_ctor_matches_setter(
         (
             "set_drag_drop_handler",
             lambda w: w.set_drag_drop_handler(lambda *_a: None),
+        ),
+        (
+            "set_context_menu",
+            lambda w: w.set_context_menu([("X", lambda: None)]),
+        ),
+        (
+            "set_context_menu_handler",
+            lambda w: w.set_context_menu_handler(lambda _e: None),
         ),
     ],
 )

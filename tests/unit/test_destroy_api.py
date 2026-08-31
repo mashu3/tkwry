@@ -71,6 +71,8 @@ POST_DESTROY_ACTIONS: dict[str, Callable[[WebView], object]] = {
     "set_on_download_complete": lambda w: w.set_on_download_complete(lambda *_a: None),
     "set_on_download_started": lambda w: w.set_on_download_started(lambda _d: None),
     "set_on_download_failed": lambda w: w.set_on_download_failed(lambda *_a: None),
+    "set_context_menu": lambda w: w.set_context_menu([("X", lambda: None)]),
+    "set_context_menu_handler": lambda w: w.set_context_menu_handler(lambda _e: None),
     "sync_bounds": lambda w: w.sync_bounds(),
     "pack": lambda w: w.pack(),
     "grid": lambda w: w.grid(),
