@@ -73,6 +73,9 @@ navigation policy events, Tk context menus, and script injection tiers.
 - ``docs/usage.md`` — ``NavigationEvent`` / ``set_navigation_policy`` recipes;
   Tk context menu / ``ContextMenuEvent``; script injection tiers
   (``inject_script`` / ``execute_script`` / ``add_init_script``)
+- Print / PDF honesty — no ``print_to_pdf`` under wry 0.56.1; system dialog
+  + macOS ``print_with_options`` only (``docs/platforms.md``, README,
+  ``usage.md``); upstream watch stays in maintainers §8.7
 
 ## [0.1.6] - 2026-08-31
 

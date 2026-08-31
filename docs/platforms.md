@@ -161,8 +161,16 @@ observational (starts that passed the policy hook until complete). See
 ## Print
 
 `web.print()` opens the **system** print dialog (wry `WebView::print`).
-There is no PDF, no headless print, and no success / fail / cancel
-callback — the call is fire-and-forget. Do not add fake kwargs.
+There is **no** `print_to_pdf`, no headless / silent print, and no
+success / fail / cancel callback — the call is fire-and-forget. Do not
+add fake kwargs or a shim that “prints” via `window.print()` / a PDF
+library and calls it a Capability.
+
+Upstream: wry still has no cross-platform PDF API (open ask
+[wry#707](https://github.com/tauri-apps/wry/issues/707); Windows-only
+`print_to` was declined in
+[wry#1167](https://github.com/tauri-apps/wry/pull/1167)). When wry ships
+one, tkwry will wrap it in the next open cut — see maintainers §8.7.
 
 **macOS only:** `web.print_with_options(top=…, right=…, bottom=…, left=…)`
 wraps wry `WebViewExtMacOS::print_with_options` (margin points). Still

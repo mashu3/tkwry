@@ -251,6 +251,7 @@ web.load_url(
 )
 web.reload()
 web.print()  # system print dialog (no PDF, no success/fail result)
+# There is no print_to_pdf — wry 0.56.1 has none (see platforms.md#print).
 # macOS only — margins; still no result. Win/Linux → OSError:
 # web.print_with_options(top=36, left=36)
 web.set_zoom(1.25)  # page zoom (1.0 = 100%); reset_zoom() → 1.0
