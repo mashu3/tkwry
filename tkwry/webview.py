@@ -722,7 +722,6 @@ class WebView(WebViewRpcMixin):
                 url = app_entry_url
         if self._session is not None:
             self._session._bind_app_root(self._app_root)
-            self._session._register_webview(self)
         if url is not None:
             url = _normalize_url(url)
             _validate_url(url)
@@ -777,23 +776,46 @@ class WebView(WebViewRpcMixin):
         self._deferred_after_ids: list[str] = []
         self._native_teardown_pending: NativeWebView | None = None
         self._native_teardown_attempts = 0
-
         self._frame_bind_ids: list[tuple[str, str]] = []
-        for sequence, handler in (
-            ("<Configure>", self._on_configure),
-            ("<Map>", self._on_map),
-            ("<Unmap>", self._on_unmap),
-            ("<Destroy>", self._on_destroy),
-        ):
-            funcid = self._frame.bind(sequence, handler, add="+")
-            self._frame_bind_ids.append((sequence, funcid))
-        if sys.platform == "darwin":
-            _register_macos_webview(self)
-        if self._needs_event_poll():
-            self._ensure_event_poll()
-        if self._creation_size() is not None or self._early_create:
-            self._schedule_try_create()
+
         _claim_frame_host(frame, self)
+        try:
+            if self._session is not None:
+                self._session._register_webview(self)
+
+            for sequence, handler in (
+                ("<Configure>", self._on_configure),
+                ("<Map>", self._on_map),
+                ("<Unmap>", self._on_unmap),
+                ("<Destroy>", self._on_destroy),
+            ):
+                funcid = self._frame.bind(sequence, handler, add="+")
+                self._frame_bind_ids.append((sequence, funcid))
+            if sys.platform == "darwin":
+                _register_macos_webview(self)
+            if self._needs_event_poll():
+                self._ensure_event_poll()
+            if self._creation_size() is not None or self._early_create:
+                self._schedule_try_create()
+        except Exception:
+            if self._session is not None:
+                try:
+                    self._session._unregister_webview(self)
+                except Exception:
+                    pass
+            try:
+                self._unbind_frame_events()
+            except Exception:
+                pass
+            self._cancel_deferred_callbacks()
+            self._disarm_event_poll()
+            if sys.platform == "darwin":
+                try:
+                    _unregister_macos_webview(self)
+                except Exception:
+                    pass
+            _release_frame_host(frame, self)
+            raise
 
     def pack(self, **kwargs) -> None:
         """``pack`` the host frame, then schedule bounds sync / native create."""
