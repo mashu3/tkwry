@@ -74,6 +74,31 @@ impl WebSessionState {
     }
 }
 
+/// Whether ``with_custom_protocol`` must be attached on this builder.
+///
+/// On Linux the scheme is registered once per shared ``WebContext`` after a
+/// successful create. ``registered_app_root`` is committed only after
+/// ``build_as_child`` succeeds so a failed first attempt can retry.
+pub(crate) fn should_attach_app_protocol(
+    registered_app_root: Option<&PathBuf>,
+    app_root: &PathBuf,
+) -> bool {
+    match registered_app_root {
+        None => true,
+        Some(existing) if existing == app_root => {
+            cfg!(any(target_os = "windows", target_os = "macos"))
+        }
+        Some(_) => false,
+    }
+}
+
+pub(crate) fn commit_registered_app_root(state: &mut WebSessionState, app_root: &Path) {
+    if state.ephemeral || state.registered_app_root.is_some() {
+        return;
+    }
+    state.registered_app_root = Some(app_root.to_path_buf());
+}
+
 /// Shared browser profile for one or more :class:`~tkwry.WebView` instances.
 ///
 /// Maps to wry's ``WebContext`` (cookies / cache / localStorage where the
@@ -150,5 +175,32 @@ mod tests {
         let c = data_store_id_for_path(Path::new("/tmp/other"));
         assert_eq!(a, b);
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn failed_create_retry_still_attaches_app_protocol_on_linux() {
+        let root = PathBuf::from("/tmp/tkwry-app");
+        assert!(should_attach_app_protocol(None, &root));
+        assert!(should_attach_app_protocol(None, &root));
+        let mut state = WebSessionState {
+            context: wry::WebContext::new(None),
+            ephemeral: false,
+            data_directory: None,
+            registered_app_root: None,
+            #[cfg(target_os = "macos")]
+            data_store_id: None,
+        };
+        commit_registered_app_root(&mut state, &root);
+        assert_eq!(state.registered_app_root.as_deref(), Some(root.as_path()));
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        assert!(!should_attach_app_protocol(
+            state.registered_app_root.as_ref(),
+            &root
+        ));
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        assert!(should_attach_app_protocol(
+            state.registered_app_root.as_ref(),
+            &root
+        ));
     }
 }

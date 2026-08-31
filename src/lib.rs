@@ -1767,27 +1767,21 @@ impl WebView {
             None => None,
         };
 
-        let register_app = match (&app_root_path, session_guard.as_mut()) {
-            (Some(root), Some(guard)) if !guard.ephemeral => match &guard.registered_app_root {
-                Some(existing) if existing != root => {
-                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "WebSession already has app root {}; cannot use {}. \
+        let register_app = match (&app_root_path, session_guard.as_ref()) {
+            (Some(root), Some(guard)) if !guard.ephemeral => {
+                if let Some(existing) = &guard.registered_app_root {
+                    if existing != root {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "WebSession already has app root {}; cannot use {}. \
 WebViews that share a session must use the same app= root \
 (Linux registers tkwry:// once per WebContext)",
-                        existing.display(),
-                        root.display()
-                    )));
+                            existing.display(),
+                            root.display()
+                        )));
+                    }
                 }
-                Some(_) => {
-                    // Linux registers once on the shared context; Windows/macOS
-                    // attach the scheme per WebView.
-                    cfg!(any(target_os = "windows", target_os = "macos"))
-                }
-                None => {
-                    guard.registered_app_root = Some(root.clone());
-                    true
-                }
-            },
+                session::should_attach_app_protocol(guard.registered_app_root.as_ref(), root)
+            }
             (Some(_), _) => true,
             (None, _) => false,
         };
@@ -1911,8 +1905,8 @@ WebViews that share a session must use the same app= root \
 
         if register_app {
             let root_for_protocol = {
-                let root = app_root_path.expect("register_app implies app_root");
-                root.canonicalize().unwrap_or(root)
+                let root = app_root_path.as_ref().expect("register_app implies app_root");
+                root.canonicalize().unwrap_or_else(|_| root.clone())
             };
             let serve_options = app_protocol::AppServeOptions {
                 spa_fallback,
@@ -1968,6 +1962,12 @@ WebViews that share a session must use the same app= root \
         let webview = builder
             .build_as_child(&window_handle)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+        if register_app {
+            if let (Some(root), Some(guard)) = (app_root_path.as_ref(), session_guard.as_mut()) {
+                session::commit_registered_app_root(guard, root);
+            }
+        }
 
         // Drop the session lock before storing Arc on Self.
         drop(session_guard);
