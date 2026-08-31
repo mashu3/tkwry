@@ -406,7 +406,7 @@ class WebViewRpcMixin:
         from tkwry.context_menu import merge_context_menu_script
 
         script = merge_initialization_script(
-            self._initialization_script,
+            self._user_initialization_script(),
             rpc_enabled=bool(self._rpc_methods) or self._rpc_bridge_wanted,
         )
         return merge_context_menu_script(

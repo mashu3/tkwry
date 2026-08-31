@@ -748,6 +748,8 @@ class WebView(WebViewRpcMixin):
         self._background_color = background_color
         self._user_agent = user_agent
         self._initialization_script = initialization_script
+        self._init_scripts: list[str] = []
+        self._inject_scripts: list[str] = []
         self._focus_when_ready = False
         if focused and sys.platform in ("darwin", "win32"):
             # macOS: child WKWebView + focused=True fights Tk for first responder
@@ -1534,6 +1536,7 @@ class WebView(WebViewRpcMixin):
         self._dispose_context_menu_tk()
         self._context_menu_items = None
         self._context_menu_handler = None
+        self._inject_scripts.clear()
         if self._session is not None:
             self._session._unregister_webview(self)
         self._abort_inflight_rpc()
@@ -1864,7 +1867,7 @@ class WebView(WebViewRpcMixin):
             self._track_after(self._frame.after_idle(self._run_deferred_reload))
             return
         native.reload()
-        if self._on_page_load is not None:
+        if self._page_load_listening_wanted():
             self._ensure_event_poll()
         self._finish_navigation()
 
@@ -1872,7 +1875,7 @@ class WebView(WebViewRpcMixin):
         """Go to the previous page in history."""
         native = self._require_ready("go_back")
         native.go_back()
-        if self._on_page_load is not None:
+        if self._page_load_listening_wanted():
             self._ensure_event_poll()
         self._finish_navigation()
 
@@ -1880,7 +1883,7 @@ class WebView(WebViewRpcMixin):
         """Go to the next page in history."""
         native = self._require_ready("go_forward")
         native.go_forward()
-        if self._on_page_load is not None:
+        if self._page_load_listening_wanted():
             self._ensure_event_poll()
         self._finish_navigation()
 
@@ -2018,7 +2021,7 @@ class WebView(WebViewRpcMixin):
         except Exception:
             traceback.print_exc()
             return
-        if self._on_page_load is not None:
+        if self._page_load_listening_wanted():
             self._ensure_event_poll()
         self._finish_navigation()
 
@@ -2113,7 +2116,12 @@ class WebView(WebViewRpcMixin):
         self._user_agent = user_agent
 
     def set_initialization_script(self, script: str | None) -> None:
-        """Set the initialization script applied when the native view is created."""
+        """Set the primary initialization script for native create.
+
+        Create-only. Prefer :meth:`add_init_script` to append additional
+        pre-load scripts, or :meth:`inject_script` / :meth:`execute_script`
+        for the named injection tiers.
+        """
         self._require_not_destroyed("set_initialization_script")
         if self._webview is not None:
             raise ValueError(
@@ -2121,6 +2129,84 @@ class WebView(WebViewRpcMixin):
                 "WebView is created"
             )
         self._initialization_script = script
+
+    def add_init_script(self, script: str) -> None:
+        """Append a pre-load script that runs on every navigation (create-time).
+
+        Combined with ``initialization_script=`` / :meth:`set_initialization_script`
+        when the native WebView is built (wry ``with_initialization_script``).
+        Raises if the native view already exists — wry cannot add init scripts
+        after create; use :meth:`inject_script` for post-create persistence.
+        """
+        self._require_not_destroyed("add_init_script")
+        if self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call add_init_script()"
+            ) from self._creation_error
+        if not isinstance(script, str) or not script.strip():
+            raise ValueError("add_init_script: script must be a non-empty str")
+        if self._webview is not None:
+            raise ValueError(
+                "add_init_script cannot be used after the native WebView is "
+                "created; use inject_script() for post-create injection"
+            )
+        self._init_scripts.append(script)
+
+    def execute_script(
+        self, script: str, *, on_error: EvalErrorHandler | None = None
+    ) -> None:
+        """Run JavaScript once in the current document (alias of :meth:`eval_js`).
+
+        Does not re-run on later navigations. For pre-load scripts use
+        :meth:`add_init_script`; for best-effort re-injection after create use
+        :meth:`inject_script`.
+        """
+        self._require_not_destroyed("execute_script")
+        self.eval_js(script, on_error=on_error)
+
+    def inject_script(self, script: str) -> None:
+        """Inject a script intended to persist across navigations.
+
+        - Before native create: same as :meth:`add_init_script` (engine
+          initialization script).
+        - After ready: runs immediately via :meth:`eval_js`, then re-runs on
+          each ``PageLoadEvent.Started`` (best-effort — not identical to wry
+          initialization scripts, which run before ``window.onload``).
+        """
+        self._require_not_destroyed("inject_script")
+        if self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call inject_script()"
+            ) from self._creation_error
+        if not isinstance(script, str) or not script.strip():
+            raise ValueError("inject_script: script must be a non-empty str")
+        if self._webview is None:
+            self.add_init_script(script)
+            return
+        self._require_ready("inject_script")
+        self._inject_scripts.append(script)
+        self._sync_page_load_listening()
+        self.eval_js(script)
+
+    def _user_initialization_script(self) -> str | None:
+        parts: list[str] = []
+        if self._initialization_script:
+            parts.append(self._initialization_script)
+        parts.extend(self._init_scripts)
+        if not parts:
+            return None
+        return "\n".join(parts)
+
+    def _page_load_listening_wanted(self) -> bool:
+        return self._on_page_load is not None or bool(self._inject_scripts)
+
+    def _sync_page_load_listening(self) -> None:
+        if self._webview is None:
+            return
+        wanted = self._page_load_listening_wanted()
+        self._webview.set_page_load_listening(wanted)
+        if wanted:
+            self._ensure_event_poll()
 
     def open_devtools(self) -> None:
         """Open the platform DevTools / inspector (private APIs on macOS)."""
@@ -2187,10 +2273,8 @@ class WebView(WebViewRpcMixin):
                 "WebView native creation failed; cannot call set_on_page_load()"
             ) from self._creation_error
         self._on_page_load = handler
-        if self._webview is not None:
-            self._webview.set_page_load_listening(handler is not None)
-        if handler is not None:
-            self._ensure_event_poll()
+        self._sync_page_load_listening()
+        if self._page_load_listening_wanted():
             self._deliver_page_load_events()
 
     def sync_bounds(self) -> None:
@@ -2790,6 +2874,7 @@ class WebView(WebViewRpcMixin):
                 self._navigation_policy_active(),
                 self._new_window_policy_active(),
                 self._on_page_load is not None,
+                bool(self._inject_scripts),
                 self._on_title_changed is not None,
                 self._drag_drop_handler is not None,
                 self._download_policy_active(),
@@ -3163,7 +3248,7 @@ class WebView(WebViewRpcMixin):
         if native is None:
             return
         native.set_ipc_listening(self._ipc_listening_wanted())
-        native.set_page_load_listening(self._on_page_load is not None)
+        native.set_page_load_listening(self._page_load_listening_wanted())
         native.set_title_listening(self._on_title_changed is not None)
         native.set_drag_drop_listening(self._drag_drop_handler is not None)
         native.set_download_complete_listening(True)
@@ -3463,11 +3548,20 @@ class WebView(WebViewRpcMixin):
     def _deliver_page_load_events(self) -> None:
         page_load = self._on_page_load
         native = self._webview
-        if native is None or page_load is None:
+        if native is None:
+            return
+        if page_load is None and not self._inject_scripts:
             return
         pending = native.drain_page_load_events()
         for event, page_url in pending:
-            self._invoke_callback(page_load, event, page_url, kind="on_page_load")
+            if event == PageLoadEvent.Started and self._inject_scripts:
+                for script in list(self._inject_scripts):
+                    try:
+                        self.eval_js(script)
+                    except Exception:
+                        traceback.print_exc()
+            if page_load is not None:
+                self._invoke_callback(page_load, event, page_url, kind="on_page_load")
 
     def _deliver_async_event_queues(self) -> None:
         """Drain native async queues into Python callbacks."""
@@ -3797,7 +3891,7 @@ class WebView(WebViewRpcMixin):
             kwargs["on_new_window"] = self._native_new_window
         if self._permission_handler is not None:
             kwargs["on_permission"] = self._native_permission
-        kwargs["page_load_listening"] = self._on_page_load is not None
+        kwargs["page_load_listening"] = self._page_load_listening_wanted()
         kwargs["ipc_listening"] = self._ipc_listening_wanted()
         kwargs["title_listening"] = self._on_title_changed is not None
         kwargs["drag_drop_listening"] = self._drag_drop_handler is not None
@@ -4053,7 +4147,7 @@ class WebView(WebViewRpcMixin):
             return
         self._sync_bounds()
         self._finish_navigation()
-        if self._on_page_load is not None:
+        if self._page_load_listening_wanted():
             self._ensure_event_poll()
         self._clear_initial_load()
 
@@ -4090,7 +4184,7 @@ class WebView(WebViewRpcMixin):
         self._clear_initial_load()
         self._sync_bounds()
         self._finish_navigation()
-        if self._on_page_load is not None:
+        if self._page_load_listening_wanted():
             self._ensure_event_poll()
 
     def _bounds_size(self) -> tuple[int, int] | None:

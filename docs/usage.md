@@ -241,6 +241,7 @@ See also [`examples/browser_demo.py`](../examples/browser_demo.py).
 ```python
 web.load_html("<h1>Hello</h1>")
 web.eval_js("document.title = 'Hi'")  # fire-and-forget (Tk idle, no return value)
+web.execute_script("document.body.dataset.x = '1'")  # alias of eval_js (one-shot)
 web.eval_js("bad()", on_error=lambda exc: print("eval failed:", exc))
 web.eval_js_with_callback("document.title", print)  # async; callback on Tk main thread
 web.load_url("https://example.com")
@@ -255,6 +256,23 @@ web.print()  # system print dialog (no PDF, no success/fail result)
 web.set_zoom(1.25)  # page zoom (1.0 = 100%); reset_zoom() → 1.0
 print(web.url)
 web.focus()
+```
+
+**Script injection tiers** (vs create-only `initialization_script=`):
+
+| Method | When | Persistence |
+|--------|------|-------------|
+| `add_init_script(js)` | Before native create only | Engine init script (every navigation) |
+| `initialization_script=` / `set_initialization_script` | Create-only primary script | Same engine path; merged with `add_init_script` |
+| `execute_script(js)` | After ready | One-shot (`eval_js` alias) |
+| `inject_script(js)` | Before create → like `add_init_script`; after ready → `eval_js` now | After ready: best-effort re-run on each `PageLoadEvent.Started` (wry cannot add true init scripts post-create) |
+
+```python
+web = WebView(frame, html="<h1>Hi</h1>", initialization_script="window.__boot = 1;")
+web.add_init_script("window.__extra = 2;")  # before create
+# after ready:
+web.inject_script("window.__sticky = 3;")  # re-runs on later navigations
+web.execute_script("window.__once = 4;")  # this document only
 ```
 
 DevTools need `devtools=True` at construction, then `open_devtools()`
@@ -698,11 +716,11 @@ Stability policy (0.2.0).
 |----------|---------|
 | Content | `load_url` (`headers=` this request only, http(s)), `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `print`, `print_with_options` (macOS margins), `url` |
 | Cookies / browsing data | `cookies`, `cookies_for_url`, `set_cookie`, `delete_cookie` (`Cookie` or `name` + page `url`), `clear_all_browsing_data`, `Cookie` |
-| JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `last_eval_error`, `<<WebViewEvalFailed>>` |
+| JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `execute_script` (alias), `inject_script`, `add_init_script`, `last_eval_error`, `<<WebViewEvalFailed>>` |
 | IPC / RPC / emit | `set_ipc_handler`, `expose` / `rpc` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `invoke` / `stream` / `cancel`) |
 | Callbacks | `set_on_navigation`, `set_navigation_policy`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_started`, `set_on_download_complete`, `set_on_download_failed`, `set_context_menu`, `set_context_menu_handler`; create-only `permission_handler=` |
 | Appearance | `set_background_color`, `set_zoom` / `reset_zoom`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
-| Create-only | `set_user_agent`, `set_initialization_script` (raise after native create); `devtools=`, `clipboard=`, `javascript_enabled=`, `autoplay=`, `hotkeys_zoom=`, `back_forward_gestures=`, `default_context_menus=`, `https_scheme=`, `proxy=`, `permission_handler=` |
+| Create-only | `set_user_agent`, `set_initialization_script`, `add_init_script` (raise after native create); `devtools=`, `clipboard=`, `javascript_enabled=`, `autoplay=`, `hotkeys_zoom=`, `back_forward_gestures=`, `default_context_menus=`, `https_scheme=`, `proxy=`, `permission_handler=` |
 | Layout | `pack`, `grid`, `place`, `sync_bounds`, `bounds` (native geometry in ``set_bounds`` space) |
 | Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadStarted>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `last_started_download`, `in_flight_downloads`, `profile`, `untrusted`, `clipboard`, `javascript_enabled`, `autoplay`, `hotkeys_zoom`, `back_forward_gestures`, `default_context_menus`, `https_scheme`, `proxy`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
 | Diagnostics | `take_queue_drop_stats` / `QueueDropCounts`, `take_queue_drop_counts` |

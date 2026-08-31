@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 Named browser profiles, app-facing download helpers, RPC invoke sugar,
-navigation policy events, and Tk context menus.
+navigation policy events, Tk context menus, and script injection tiers.
 
 ### Added
 
@@ -51,6 +51,13 @@ navigation policy events, and Tk context menus.
 - ``ContextMenuEvent`` — screen / page coords, optional ``link_url`` /
   ``selected_text``; on Windows custom menus require
   ``default_context_menus=False``
+- ``add_init_script`` — append create-time pre-load scripts (merged with
+  ``initialization_script=`` / ``set_initialization_script``)
+- ``execute_script`` — one-shot alias of ``eval_js`` (does not re-run on
+  navigation)
+- ``inject_script`` — before create acts like ``add_init_script``; after
+  ready runs now and re-injects on each ``PageLoadEvent.Started``
+  (best-effort persistence; wry has no post-create init-script API)
 
 ### Fixed
 
@@ -64,7 +71,8 @@ navigation policy events, and Tk context menus.
   / ``window.tkwry.invoke``
 - ``docs/rpc.md`` — ``invoke`` vs ``call``; ``@web.rpc`` decorator
 - ``docs/usage.md`` — ``NavigationEvent`` / ``set_navigation_policy`` recipes;
-  Tk context menu / ``ContextMenuEvent``
+  Tk context menu / ``ContextMenuEvent``; script injection tiers
+  (``inject_script`` / ``execute_script`` / ``add_init_script``)
 
 ## [0.1.6] - 2026-08-31
 
