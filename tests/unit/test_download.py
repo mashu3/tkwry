@@ -505,12 +505,8 @@ def test_download_failed_handler(tk_root) -> None:
     web._webview = native
     failed: list[tuple[str, str | None]] = []
     complete: list[bool] = []
-    web.set_on_download_failed(
-        lambda url, dest: failed.append((url, dest))
-    )
-    web.set_on_download_complete(
-        lambda _url, _dest, success: complete.append(success)
-    )
+    web.set_on_download_failed(lambda url, dest: failed.append((url, dest)))
+    web.set_on_download_complete(lambda _url, _dest, success: complete.append(success))
     try:
         web._deliver_download_complete_events()
         assert failed == [("https://example.com/a.zip", "/tmp/a.zip")]

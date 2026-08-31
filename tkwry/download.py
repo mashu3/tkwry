@@ -12,8 +12,7 @@ from tkwry._origin import unique_download_path
 
 DownloadDecision: TypeAlias = str | Path | bool | None
 DownloadHandler: TypeAlias = (
-    Callable[["Download"], DownloadDecision]
-    | Callable[[str, str], DownloadDecision]
+    Callable[["Download"], DownloadDecision] | Callable[[str, str], DownloadDecision]
 )
 DownloadStartedHandler: TypeAlias = Callable[["Download"], None]
 DownloadFailedHandler: TypeAlias = Callable[[str, str | None], None]

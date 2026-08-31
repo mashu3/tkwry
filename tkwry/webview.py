@@ -2283,9 +2283,7 @@ class WebView(WebViewRpcMixin):
             self._ensure_tk_wakeup_pipe()
             self._ensure_event_poll()
 
-    def set_on_download_started(
-        self, handler: DownloadStartedHandler | None
-    ) -> None:
+    def set_on_download_started(self, handler: DownloadStartedHandler | None) -> None:
         """Register a notify-only handler when a download is allowed to start.
 
         Also generates ``<<WebViewDownloadStarted>>``. Inspect
