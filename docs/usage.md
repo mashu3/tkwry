@@ -618,12 +618,34 @@ not auto-`close()`d on `web.destroy()`; drop your last reference or call
 `close()` if you kept the session object.
 
 Further commands raise `WebViewDestroyedError` (`destroy()` is
-idempotent; snapshot properties and `take_queue_drop_stats()` stay
-readable). In-flight RPC / streams are cancelled cooperatively.
+idempotent; snapshot properties, `get_state()`, and
+`take_queue_drop_stats()` stay readable). In-flight RPC / streams are
+cancelled cooperatively.
 
 See [`examples/browser_demo.py`](../examples/browser_demo.py) quit path.
 Regression: existing destroy / session tests (`tests/unit/test_destroy_api.py`,
 `tests/unit/test_session.py`).
+
+## Toolbar state (`get_state`)
+
+For back/forward buttons and a URL/title label, poll a snapshot instead of
+wiring every getter separately:
+
+```python
+from tkwry import WebViewState
+
+def refresh_chrome() -> None:
+    s: WebViewState = web.get_state()
+    back_btn["state"] = "normal" if s.can_go_back else "disabled"
+    fwd_btn["state"] = "normal" if s.can_go_forward else "disabled"
+    url_var.set(s.url or "")
+    title_var.set(s.title or "")
+    # s.loading — page-load Started…Finished (after first get_state)
+    # s.zoom — last set_zoom / reset_zoom (not Ctrl+/- hotkeys_zoom)
+```
+
+`get_state` is Tk-thread only and remains readable after `destroy`
+(`destroyed=True`). The first call turns on title / page-load listening.
 
 ## Observability
 
@@ -736,7 +758,7 @@ Stability policy (0.2.0).
 | Appearance | `set_background_color`, `set_zoom` / `reset_zoom`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script`, `add_init_script` (raise after native create); `devtools=`, `clipboard=`, `javascript_enabled=`, `autoplay=`, `hotkeys_zoom=`, `back_forward_gestures=`, `default_context_menus=`, `https_scheme=`, `proxy=`, `permission_handler=` |
 | Layout | `pack`, `grid`, `place`, `sync_bounds`, `bounds` (native geometry in ``set_bounds`` space) |
-| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadStarted>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `last_started_download`, `in_flight_downloads`, `profile`, `untrusted`, `clipboard`, `javascript_enabled`, `autoplay`, `hotkeys_zoom`, `back_forward_gestures`, `default_context_menus`, `https_scheme`, `proxy`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
+| Lifecycle | `ready`, `phase` / `WebViewPhase`, `get_state` / `WebViewState`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadStarted>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `last_started_download`, `in_flight_downloads`, `profile`, `untrusted`, `clipboard`, `javascript_enabled`, `autoplay`, `hotkeys_zoom`, `back_forward_gestures`, `default_context_menus`, `https_scheme`, `proxy`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
 | Diagnostics | `take_queue_drop_stats` / `QueueDropCounts`, `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
@@ -757,7 +779,7 @@ Enums: `PageLoadEvent`, `NavigationType`, `NewWindowResponse`, `PermissionKind`,
 `PermissionResponse`, `DragDropEvent`, `WebViewPhase`.
 Types: `WebView`, `WebSession`, `Cookie` (``repr`` omits ``value`` — never log secrets),
 `Download`, `InFlightDownload`, `NavigationEvent`, `ContextMenuEvent`,
-`QueueDropCounts`.
+`WebViewState`, `QueueDropCounts`.
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
 `WebViewTimeoutError`, `WebViewNavigationError`,
 `RpcTimeoutError`, `RpcCancelledError`, `RpcSerializationError`.

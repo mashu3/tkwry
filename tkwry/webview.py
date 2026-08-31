@@ -298,6 +298,30 @@ class QueueDropCounts(NamedTuple):
     rpc_stream: int
 
 
+class WebViewState(NamedTuple):
+    """Snapshot from :meth:`~WebView.get_state` for Tk toolbar binding.
+
+    ``title`` is the last document title observed via the engine title
+    listener (``None`` until one arrives). ``loading`` tracks
+    :class:`~tkwry.PageLoadEvent` Started→Finished when listening is on.
+    ``zoom`` is the last value from :meth:`~WebView.set_zoom` /
+    :meth:`~WebView.reset_zoom` (default ``1.0``) — engine Ctrl+/- via
+    ``hotkeys_zoom`` is not reflected. ``devtools_open`` follows
+    :meth:`~WebView.is_devtools_open` quirks on Windows.
+    """
+
+    url: str | None
+    title: str | None
+    loading: bool
+    can_go_back: bool
+    can_go_forward: bool
+    zoom: float
+    ready: bool
+    phase: WebViewPhase
+    destroyed: bool
+    devtools_open: bool
+
+
 class WebView(WebViewRpcMixin):
     """Embed a system WebView (wry) inside an existing Tk ``Frame``.
 
@@ -750,6 +774,10 @@ class WebView(WebViewRpcMixin):
         self._initialization_script = initialization_script
         self._init_scripts: list[str] = []
         self._inject_scripts: list[str] = []
+        self._document_title: str | None = None
+        self._loading = False
+        self._zoom = 1.0
+        self._state_wanted = False
         self._focus_when_ready = False
         if focused and sys.platform in ("darwin", "win32"):
             # macOS: child WKWebView + focused=True fights Tk for first responder
@@ -1520,6 +1548,7 @@ class WebView(WebViewRpcMixin):
         if you need another embedded view. Further APIs raise
         :exc:`~tkwry.WebViewDestroyedError` except snapshot properties
         (``destroyed``, ``phase``, ``last_*``, …),
+        :meth:`get_state`,
         :meth:`take_queue_drop_counts` / :meth:`take_queue_drop_stats`, and a
         second ``destroy()``
         (idempotent). :meth:`wait_until_ready` after destroy raises; if
@@ -1944,10 +1973,63 @@ class WebView(WebViewRpcMixin):
         if not math.isfinite(scale_f):
             raise ValueError("scale must be a finite float")
         self._require_ready("set_zoom").set_zoom(scale_f)
+        self._zoom = scale_f
 
     def reset_zoom(self) -> None:
         """Reset page zoom to ``1.0`` (same as ``set_zoom(1.0)``)."""
         self._require_ready("reset_zoom").set_zoom(1.0)
+        self._zoom = 1.0
+
+    def get_state(self) -> WebViewState:
+        """Return a toolbar-oriented snapshot of navigation / lifecycle flags.
+
+        Tk-thread only. Safe after :meth:`destroy` (``destroyed=True``).
+        Enables title / page-load listening on first use so ``title`` and
+        ``loading`` can populate; call periodically or after user actions.
+        See :class:`WebViewState` for field honesty notes.
+        """
+        self._require_tk_thread()
+        if not self._destroyed:
+            self._state_wanted = True
+            if self._webview is not None:
+                self._webview.set_title_listening(True)
+                self._webview.set_page_load_listening(True)
+                self._ensure_event_poll()
+                self._deliver_title_events()
+                self._deliver_page_load_events()
+        ready = self.ready
+        phase = self.phase
+        destroyed = self._destroyed
+        url: str | None = None
+        can_back = False
+        can_forward = False
+        devtools_open = False
+        if not destroyed and self._webview is not None and ready:
+            try:
+                url = self.url
+            except Exception:
+                url = None
+            try:
+                can_back = bool(self._webview.can_go_back())
+                can_forward = bool(self._webview.can_go_forward())
+            except Exception:
+                pass
+            try:
+                devtools_open = bool(self._webview.is_devtools_open())
+            except Exception:
+                pass
+        return WebViewState(
+            url=url,
+            title=self._document_title,
+            loading=self._loading,
+            can_go_back=can_back,
+            can_go_forward=can_forward,
+            zoom=self._zoom,
+            ready=ready,
+            phase=phase,
+            destroyed=destroyed,
+            devtools_open=devtools_open,
+        )
 
     def cookies(self) -> list[Cookie]:
         """Return all cookies known to this WebView's engine store.
@@ -2199,7 +2281,14 @@ class WebView(WebViewRpcMixin):
         return "\n".join(parts)
 
     def _page_load_listening_wanted(self) -> bool:
-        return self._on_page_load is not None or bool(self._inject_scripts)
+        return (
+            self._on_page_load is not None
+            or bool(self._inject_scripts)
+            or self._state_wanted
+        )
+
+    def _title_listening_wanted(self) -> bool:
+        return self._on_title_changed is not None or self._state_wanted
 
     def _sync_page_load_listening(self) -> None:
         if self._webview is None:
@@ -2379,9 +2468,10 @@ class WebView(WebViewRpcMixin):
             ) from self._creation_error
         self._on_title_changed = handler
         if self._webview is not None:
-            self._webview.set_title_listening(handler is not None)
-        if handler is not None:
+            self._webview.set_title_listening(self._title_listening_wanted())
+        if self._title_listening_wanted():
             self._ensure_event_poll()
+            self._deliver_title_events()
 
     def set_on_new_window(self, handler: NewWindowHandler | None) -> None:
         """Register a new-window hook (Tk main thread; WebKit waits for a response)."""
@@ -2890,6 +2980,7 @@ class WebView(WebViewRpcMixin):
                 self._new_window_policy_active(),
                 self._on_page_load is not None,
                 bool(self._inject_scripts),
+                self._state_wanted,
                 self._on_title_changed is not None,
                 self._drag_drop_handler is not None,
                 self._download_policy_active(),
@@ -3264,7 +3355,7 @@ class WebView(WebViewRpcMixin):
             return
         native.set_ipc_listening(self._ipc_listening_wanted())
         native.set_page_load_listening(self._page_load_listening_wanted())
-        native.set_title_listening(self._on_title_changed is not None)
+        native.set_title_listening(self._title_listening_wanted())
         native.set_drag_drop_listening(self._drag_drop_handler is not None)
         native.set_download_complete_listening(True)
 
@@ -3545,10 +3636,14 @@ class WebView(WebViewRpcMixin):
     def _deliver_title_events(self) -> None:
         handler = self._on_title_changed
         native = self._webview
-        if handler is None or native is None:
+        if native is None:
+            return
+        if handler is None and not self._state_wanted:
             return
         for title in native.drain_title_events():
-            self._invoke_callback(handler, title, kind="on_title_changed")
+            self._document_title = title
+            if handler is not None:
+                self._invoke_callback(handler, title, kind="on_title_changed")
 
     def _deliver_drag_drop_events(self) -> None:
         handler = self._drag_drop_handler
@@ -3565,10 +3660,14 @@ class WebView(WebViewRpcMixin):
         native = self._webview
         if native is None:
             return
-        if page_load is None and not self._inject_scripts:
+        if page_load is None and not self._inject_scripts and not self._state_wanted:
             return
         pending = native.drain_page_load_events()
         for event, page_url in pending:
+            if event == PageLoadEvent.Started:
+                self._loading = True
+            elif event == PageLoadEvent.Finished:
+                self._loading = False
             if event == PageLoadEvent.Started and self._inject_scripts:
                 for script in list(self._inject_scripts):
                     try:
@@ -3589,7 +3688,7 @@ class WebView(WebViewRpcMixin):
             self._deliver_ipc_messages()
         self._drain_rpc_futures()
         self._deliver_page_load_events()
-        if self._on_title_changed is not None:
+        if self._title_listening_wanted():
             self._deliver_title_events()
         if self._drag_drop_handler is not None:
             self._deliver_drag_drop_events()
@@ -3797,7 +3896,7 @@ class WebView(WebViewRpcMixin):
 
         self._deliver_page_load_events()
 
-        if self._on_title_changed is not None:
+        if self._title_listening_wanted():
             self._deliver_title_events()
 
         if self._drag_drop_handler is not None:
@@ -3908,7 +4007,7 @@ class WebView(WebViewRpcMixin):
             kwargs["on_permission"] = self._native_permission
         kwargs["page_load_listening"] = self._page_load_listening_wanted()
         kwargs["ipc_listening"] = self._ipc_listening_wanted()
-        kwargs["title_listening"] = self._on_title_changed is not None
+        kwargs["title_listening"] = self._title_listening_wanted()
         kwargs["drag_drop_listening"] = self._drag_drop_handler is not None
         if self._download_policy_active():
             kwargs["on_download_started"] = self._native_download_started

@@ -86,7 +86,7 @@ POST_DESTROY_ACTIONS: dict[str, Callable[[WebView], object]] = {
 }
 
 POST_DESTROY_ALLOWED = frozenset(
-    {"destroy", "take_queue_drop_counts", "take_queue_drop_stats"}
+    {"destroy", "get_state", "take_queue_drop_counts", "take_queue_drop_stats"}
 )
 
 POST_DESTROY_READABLE_PROPERTIES = frozenset(

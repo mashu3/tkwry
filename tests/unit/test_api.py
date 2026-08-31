@@ -107,6 +107,7 @@ WEBVIEW_METHODS = (
     "set_context_menu",
     "set_context_menu_handler",
     "sync_bounds",
+    "get_state",
     "take_queue_drop_counts",
     "take_queue_drop_stats",
     "pack",
@@ -174,6 +175,7 @@ def test_public_exports() -> None:
     assert PermissionKind is not None
     assert PermissionResponse is not None
     assert WebViewPhase is not None
+    assert tkwry.WebViewState is not None
     assert tkwry.QueueDropCounts is not None
     assert tkwry.InFlightDownload is not None
     assert tkwry.Download is not None

@@ -7,7 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 Named browser profiles, app-facing download helpers, RPC invoke sugar,
-navigation policy events, Tk context menus, and script injection tiers.
+navigation policy events, Tk context menus, script injection tiers, and
+``WebView.get_state`` snapshots.
 
 ### Added
 
@@ -58,6 +59,11 @@ navigation policy events, Tk context menus, and script injection tiers.
 - ``inject_script`` — before create acts like ``add_init_script``; after
   ready runs now and re-injects on each ``PageLoadEvent.Started``
   (best-effort persistence; wry has no post-create init-script API)
+- ``WebView.get_state()`` → ``WebViewState`` snapshot for Tk toolbars
+  (``url``, ``title``, ``loading``, ``can_go_back`` / ``can_go_forward``,
+  ``zoom``, ``ready``, ``phase``, ``destroyed``, ``devtools_open``);
+  readable after ``destroy``; ``zoom`` is last ``set_zoom`` (not engine
+  hotkeys); ``title`` / ``loading`` from engine events after first call
 
 ### Fixed
 
@@ -81,6 +87,7 @@ navigation policy events, Tk context menus, and script injection tiers.
   ``usage.md``); Windows WebView2 close/query limits documented
 - Find in page honesty — no ``find`` / ``find_next`` under wry 0.56.1
   (``docs/platforms.md``, README); upstream watch stays in maintainers §8.7
+- ``docs/usage.md`` — ``get_state`` / ``WebViewState`` for toolbar binding
 
 ## [0.1.6] - 2026-08-31
 

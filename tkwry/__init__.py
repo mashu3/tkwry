@@ -86,6 +86,7 @@ try:
         TitleChangedHandler,
         WebView,
         WebViewPhase,
+        WebViewState,
     )
 except ImportError as exc:
     _reraise_linux_core_build_hint(exc)
@@ -146,5 +147,6 @@ __all__ = [
     "WebViewNotReadyError",
     "WebViewTimeoutError",
     "WebViewPhase",
+    "WebViewState",
     "__version__",
 ]
