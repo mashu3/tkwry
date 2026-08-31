@@ -68,6 +68,13 @@ from tkwry._parent import (
 )
 from tkwry._rpc_api import WebViewRpcMixin
 from tkwry._url import _normalize_load_headers, _normalize_url, _validate_url
+from tkwry.download import (
+    Download,
+    DownloadFailedHandler,
+    DownloadHandler,
+    DownloadStartedHandler,
+    call_download_handler,
+)
 from tkwry.exceptions import (
     TkwrySecurityWarning,
     WebViewCreationError,
@@ -102,7 +109,6 @@ EvalCallback: TypeAlias = Callable[[str], None]
 EvalErrorHandler: TypeAlias = Callable[[Exception], None]
 CreationFailedHandler: TypeAlias = Callable[[BaseException], None]
 CallbackErrorHandler: TypeAlias = Callable[[BaseException, str], None]
-DownloadHandler: TypeAlias = Callable[[str, str], str | Path | bool | None]
 DownloadCompleteHandler: TypeAlias = Callable[[str, str | None, bool], None]
 _DANGEROUS_DOWNLOAD_SCHEMES = frozenset({"javascript", "vbscript", "mailto"})
 _PendingLoad: TypeAlias = (
@@ -395,7 +401,8 @@ class WebView(WebViewRpcMixin):
     to cancel (relative dests are denied). Use
     :func:`~tkwry.unique_download_path` to avoid overwriting an existing file.
     ``on_download_complete`` is notify-only. Finished downloads also set
-    ``last_download`` and generate ``<<WebViewDownloadComplete>>`` or
+    ``last_download`` and generate ``<<WebViewDownloadStarted>>``,
+    ``<<WebViewDownloadComplete>>`` or
     ``<<WebViewDownloadFailed>>`` (same ``(url, dest, success)`` tuple).
     :attr:`in_flight_downloads` tracks policy-hook starts until complete
     (no progress %).
@@ -556,7 +563,9 @@ class WebView(WebViewRpcMixin):
         permission_handler: PermissionHandler | None = None,
         drag_drop_handler: DragDropHandler | None = None,
         on_download: DownloadHandler | None = None,
+        on_download_started: DownloadStartedHandler | None = None,
         on_download_complete: DownloadCompleteHandler | None = None,
+        on_download_failed: DownloadFailedHandler | None = None,
         on_creation_failed: CreationFailedHandler | None = None,
         on_callback_error: CallbackErrorHandler | None = None,
     ) -> None:
@@ -689,7 +698,9 @@ class WebView(WebViewRpcMixin):
         self._permission_handler = permission_handler
         self._drag_drop_handler = drag_drop_handler
         self._on_download = on_download
+        self._on_download_started = on_download_started
         self._on_download_complete = on_download_complete
+        self._on_download_failed = on_download_failed
         self._on_callback_error = on_callback_error
         self._devtools = devtools
         self._clipboard = bool(clipboard)
@@ -789,6 +800,7 @@ class WebView(WebViewRpcMixin):
         self._last_eval_error: BaseException | None = None
         self._last_navigation_error: BaseException | None = None
         self._last_download: tuple[str, str | None, bool] | None = None
+        self._last_started_download: Download | None = None
         self._in_flight_downloads: list[InFlightDownload] = []
         self._navigation_error_queue: queue.SimpleQueue[BaseException] = (
             queue.SimpleQueue()
@@ -968,6 +980,15 @@ class WebView(WebViewRpcMixin):
         """
         self._require_tk_thread()
         return self._last_download
+
+    @property
+    def last_started_download(self) -> Download | None:
+        """Most recent download allowed at start.
+
+        See ``<<WebViewDownloadStarted>>``.
+        """
+        self._require_tk_thread()
+        return self._last_started_download
 
     @property
     def in_flight_downloads(self) -> tuple[InFlightDownload, ...]:
@@ -2239,11 +2260,13 @@ class WebView(WebViewRpcMixin):
     def set_on_download(self, handler: DownloadHandler | None) -> None:
         """Register a download start hook (Tk main thread; WebKit waits).
 
-        *handler* receives ``(url, suggested_dest)`` and may return ``True``
-        (allow suggested path), ``False`` / ``None`` (cancel), or an **absolute**
-        ``str`` / ``Path`` save location. Relative dests are denied. Use
-        :func:`~tkwry.unique_download_path` when the suggested name already
-        exists; tkwry does not pick an overwrite policy.
+        *handler* receives a :class:`~tkwry.Download` when it accepts one
+        argument, or legacy ``(url, suggested_dest)``. It may return ``True``
+        (allow suggested path), ``False`` / ``None`` (cancel), an **absolute**
+        ``str`` / ``Path`` save location, or ``download.save(directory)``.
+        Relative dests are denied. Use :func:`~tkwry.unique_download_path`
+        when the suggested name already exists; tkwry does not pick an
+        overwrite policy.
         """
         self._require_not_destroyed("set_on_download")
         if handler is not None and self._creation_error is not None:
@@ -2259,6 +2282,21 @@ class WebView(WebViewRpcMixin):
         if self._download_policy_active():
             self._ensure_tk_wakeup_pipe()
             self._ensure_event_poll()
+
+    def set_on_download_started(
+        self, handler: DownloadStartedHandler | None
+    ) -> None:
+        """Register a notify-only handler when a download is allowed to start.
+
+        Also generates ``<<WebViewDownloadStarted>>``. Inspect
+        :attr:`last_started_download` or the ``Download`` argument.
+        """
+        self._require_not_destroyed("set_on_download_started")
+        if handler is not None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call set_on_download_started()"
+            ) from self._creation_error
+        self._on_download_started = handler
 
     def set_on_download_complete(self, handler: DownloadCompleteHandler | None) -> None:
         """Register a download-finished handler (Tk main thread; notify-only).
@@ -2276,6 +2314,19 @@ class WebView(WebViewRpcMixin):
         if self._webview is not None:
             self._webview.set_download_complete_listening(True)
         self._ensure_event_poll()
+
+    def set_on_download_failed(self, handler: DownloadFailedHandler | None) -> None:
+        """Register a notify-only handler when a download finishes unsuccessfully.
+
+        Also generates ``<<WebViewDownloadFailed>>``. :attr:`last_download`
+        still receives ``(url, dest, success=False)``.
+        """
+        self._require_not_destroyed("set_on_download_failed")
+        if handler is not None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call set_on_download_failed()"
+            ) from self._creation_error
+        self._on_download_failed = handler
 
     def set_on_callback_error(self, handler: CallbackErrorHandler | None) -> None:
         """Register a provisional hook for exceptions in user callbacks.
@@ -2789,12 +2840,27 @@ class WebView(WebViewRpcMixin):
         handler = self._on_download
         if handler is None:
             return self._default_download_allowed(url), None
+        download = Download(url=url, suggested_dest=dest)
         try:
-            result = handler(url, dest)
+            result = call_download_handler(
+                handler, download, url=url, suggested_dest=dest
+            )
         except Exception:
             traceback.print_exc()
             return False, None
         return self._coerce_download_decision(result, dest)
+
+    def _deliver_download_started(self, download: Download) -> None:
+        if self._destroyed:
+            return
+        self._last_started_download = download
+        try:
+            self._frame.event_generate("<<WebViewDownloadStarted>>")
+        except (tk.TclError, RuntimeError):
+            pass
+        handler = self._on_download_started
+        if handler is not None:
+            self._invoke_callback(handler, download, kind="on_download_started")
 
     def _add_in_flight_download(
         self, url: str, suggested: str, dest_override: str | None
@@ -2804,6 +2870,9 @@ class WebView(WebViewRpcMixin):
         raw = dest_override if dest_override is not None else suggested
         resolved: str | None = raw or None
         self._in_flight_downloads.append(InFlightDownload(url=url, dest=resolved))
+        self._deliver_download_started(
+            Download(url=url, suggested_dest=suggested, dest=resolved)
+        )
 
     def _remove_in_flight_download(self, url: str, dest: str | None) -> None:
         for index, item in enumerate(self._in_flight_downloads):
@@ -2832,6 +2901,7 @@ class WebView(WebViewRpcMixin):
         if native is None:
             return
         handler = self._on_download_complete
+        failed_handler = self._on_download_failed
         for url, dest, success in native.drain_download_complete_events():
             self._remove_in_flight_download(url, dest)
             self._last_download = (url, dest, success)
@@ -2845,6 +2915,10 @@ class WebView(WebViewRpcMixin):
                     self._frame.event_generate(sequence)
                 except (tk.TclError, RuntimeError):
                     pass
+            if not success and failed_handler is not None:
+                self._invoke_callback(
+                    failed_handler, url, dest, kind="on_download_failed"
+                )
             if handler is not None:
                 self._invoke_callback(
                     handler, url, dest, success, kind="on_download_complete"

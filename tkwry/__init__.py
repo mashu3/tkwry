@@ -18,6 +18,7 @@ from tkwry.exceptions import (
 )
 from tkwry.ipc import rpc_cancel_event, rpc_cancelled
 from tkwry.profile import close_profile, set_profiles_base
+from tkwry.window import configure_window
 
 _LINUX_CORE_BUILD_HINT = (
     "tkwry publishes pre-built wheels for Windows and macOS only. "
@@ -58,8 +59,11 @@ try:
         BridgeAllow,
         BridgeOrigins,
         CreationFailedHandler,
+        Download,
         DownloadCompleteHandler,
+        DownloadFailedHandler,
         DownloadHandler,
+        DownloadStartedHandler,
         DragDropHandler,
         EvalCallback,
         EvalErrorHandler,
@@ -88,8 +92,11 @@ __all__ = [
     "BridgeOrigins",
     "Cookie",
     "CreationFailedHandler",
+    "Download",
     "DownloadCompleteHandler",
+    "DownloadFailedHandler",
     "DownloadHandler",
+    "DownloadStartedHandler",
     "DragDropEvent",
     "DragDropHandler",
     "EvalCallback",

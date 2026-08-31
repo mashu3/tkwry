@@ -10,6 +10,7 @@ from support.linux import noop_linux_runtime
 
 from tkwry import InFlightDownload, WebView, unique_download_path
 from tkwry._origin import normalize_download_allow
+from tkwry.download import Download, call_download_handler
 
 
 @pytest.fixture(autouse=True)
@@ -445,3 +446,91 @@ def test_in_flight_downloads_cleared_on_destroy(tk_root, tmp_path: Path) -> None
     finally:
         if not web.destroyed:
             web.destroy()
+
+
+def test_download_save_returns_absolute_path(tmp_path: Path) -> None:
+    download = Download(
+        url="https://example.com/report.pdf",
+        suggested_dest="/tmp/report.pdf",
+    )
+    saved = download.save(tmp_path / "downloads")
+    assert saved == str((tmp_path / "downloads" / "report.pdf").resolve())
+    assert (tmp_path / "downloads").is_dir()
+
+
+def test_on_download_accepts_download_object(tk_root, tmp_path: Path) -> None:
+    seen: list[Download] = []
+
+    def handler(download: Download) -> str:
+        seen.append(download)
+        return download.save(tmp_path / "out")
+
+    web = _make_web(tk_root, on_download=handler)
+    try:
+        allowed, path = web._invoke_download_handler(
+            "https://example.com/a.zip", "/tmp/a.zip"
+        )
+        assert allowed is True
+        assert path == str((tmp_path / "out" / "a.zip").resolve())
+        assert seen[0].url == "https://example.com/a.zip"
+    finally:
+        web.destroy()
+
+
+def test_download_started_event_and_handler(tk_root, tmp_path: Path) -> None:
+    dest = tmp_path / "file.bin"
+    started: list[Download] = []
+    web = _make_web(
+        tk_root,
+        on_download=lambda _url, _suggested: dest,
+        on_download_started=lambda item: started.append(item),
+    )
+    fired: list[str] = []
+    web.bind("<<WebViewDownloadStarted>>", lambda _evt: fired.append("started"))
+    try:
+        web._native_download_started("https://example.com/a.zip", "/tmp/a.zip")
+        assert fired == ["started"]
+        assert started[0].dest == str(dest)
+        assert web.last_started_download == started[0]
+    finally:
+        web.destroy()
+
+
+def test_download_failed_handler(tk_root) -> None:
+    web = _make_web(tk_root)
+    native = MagicMock()
+    native.drain_download_complete_events.return_value = [
+        ("https://example.com/a.zip", "/tmp/a.zip", False)
+    ]
+    web._webview = native
+    failed: list[tuple[str, str | None]] = []
+    complete: list[bool] = []
+    web.set_on_download_failed(
+        lambda url, dest: failed.append((url, dest))
+    )
+    web.set_on_download_complete(
+        lambda _url, _dest, success: complete.append(success)
+    )
+    try:
+        web._deliver_download_complete_events()
+        assert failed == [("https://example.com/a.zip", "/tmp/a.zip")]
+        assert complete == [False]
+    finally:
+        web._webview = None
+        web.destroy()
+
+
+def test_call_download_handler_legacy_two_arg() -> None:
+    def legacy(url: str, suggested: str) -> bool:
+        return url.endswith(".zip") and suggested.endswith(".zip")
+
+    download = Download(url="https://x/a.zip", suggested_dest="/tmp/a.zip")
+    assert (
+        call_download_handler(
+            legacy,
+            download,
+            url=download.url,
+            suggested_dest=download.suggested_dest,
+        )
+        is True
+    )

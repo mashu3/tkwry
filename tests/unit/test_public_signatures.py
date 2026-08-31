@@ -58,7 +58,9 @@ WEBVIEW_INIT_KWONLY = (
     "permission_handler",
     "drag_drop_handler",
     "on_download",
+    "on_download_started",
     "on_download_complete",
+    "on_download_failed",
     "on_creation_failed",
     "on_callback_error",
 )

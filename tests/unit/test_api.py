@@ -12,7 +12,9 @@ from tkwry import (
     Cookie,
     CreationFailedHandler,
     DownloadCompleteHandler,
+    DownloadFailedHandler,
     DownloadHandler,
+    DownloadStartedHandler,
     DragDropEvent,
     DragDropHandler,
     EvalCallback,
@@ -38,7 +40,9 @@ PUBLIC_TYPE_ALIASES = (
     BridgeOrigins,
     CreationFailedHandler,
     DownloadCompleteHandler,
+    DownloadFailedHandler,
     DownloadHandler,
+    DownloadStartedHandler,
     DragDropHandler,
     EvalCallback,
     EvalErrorHandler,
@@ -92,7 +96,9 @@ WEBVIEW_METHODS = (
     "set_on_new_window",
     "set_drag_drop_handler",
     "set_on_download",
+    "set_on_download_started",
     "set_on_download_complete",
+    "set_on_download_failed",
     "sync_bounds",
     "take_queue_drop_counts",
     "take_queue_drop_stats",
@@ -163,6 +169,7 @@ def test_public_exports() -> None:
     assert WebViewPhase is not None
     assert tkwry.QueueDropCounts is not None
     assert tkwry.InFlightDownload is not None
+    assert tkwry.Download is not None
     assert tkwry.WebViewNotReadyError is not None
     assert tkwry.WebViewCreationError is not None
     assert tkwry.WebViewDestroyedError is not None
