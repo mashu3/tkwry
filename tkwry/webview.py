@@ -366,8 +366,8 @@ class WebView(WebViewRpcMixin):
     policy string). ``coop=True`` / ``corp=True`` add optional
     Cross-Origin-Opener-Policy / Cross-Origin-Resource-Policy.
 
-    **Sessions** (``session=`` / ``data_directory=`` / ``ephemeral=`` /
-    ``incognito=``): share a
+    **Sessions** (``session=`` / ``profile=`` / ``user_data_dir=`` /
+    ``data_directory=`` / ``ephemeral=`` / ``incognito=``): share a
     wry ``WebContext`` (cookies / cache / localStorage where the platform
     supports it) across WebViews. Prefer one :class:`~tkwry.WebSession` per
     profile. WebViews that share a **non-ephemeral** session must use the
@@ -518,6 +518,8 @@ class WebView(WebViewRpcMixin):
         html: str | None = None,
         app: str | Path | None = None,
         session: WebSession | None = None,
+        profile: str | None = None,
+        user_data_dir: str | Path | None = None,
         data_directory: str | Path | None = None,
         ephemeral: bool = False,
         incognito: bool = False,
@@ -569,15 +571,36 @@ class WebView(WebViewRpcMixin):
             _validate_background_color(background_color)
         proxy_norm = _normalize_proxy(proxy)
         ephemeral = ephemeral or incognito
-        if session is not None and (data_directory is not None or ephemeral):
+        profile_name: str | None = profile
+        if user_data_dir is not None and data_directory is not None:
             raise ValueError(
-                "WebView: pass session= or data_directory=/ephemeral=/incognito=, "
-                "not both"
+                "WebView: pass user_data_dir= or data_directory=, not both"
             )
-        if ephemeral and data_directory is not None:
+        if user_data_dir is not None:
+            data_directory = user_data_dir
+        if (
+            sum(
+                (
+                    session is not None,
+                    profile_name is not None,
+                    data_directory is not None,
+                    ephemeral,
+                )
+            )
+            > 1
+        ):
             raise ValueError(
-                "WebView: pass data_directory= or ephemeral=/incognito=, not both"
+                "WebView: pass only one of session=, profile=, "
+                "user_data_dir=/data_directory=, or ephemeral=/incognito="
             )
+        if profile_name is not None:
+            if untrusted:
+                raise ValueError(
+                    "WebView: untrusted=True cannot be combined with profile="
+                )
+            from tkwry.profile import get_profile_session
+
+            session = get_profile_session(profile_name)
         if untrusted:
             if app is not None:
                 raise ValueError("WebView: untrusted=True cannot be combined with app=")
@@ -609,6 +632,7 @@ class WebView(WebViewRpcMixin):
             )
             session = owned_session
         self._owned_session = owned_session
+        self._profile_name = profile_name
         self._session = session
         self._frame = frame
         self._toplevel: tk.Misc
@@ -974,6 +998,12 @@ class WebView(WebViewRpcMixin):
         """``True`` when this WebView was created with ``untrusted=True``."""
         self._require_tk_thread()
         return self._untrusted
+
+    @property
+    def profile(self) -> str | None:
+        """Named profile passed as ``profile=`` at construction, if any."""
+        self._require_tk_thread()
+        return self._profile_name
 
     @property
     def clipboard(self) -> bool:

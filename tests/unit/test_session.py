@@ -61,7 +61,7 @@ def test_webview_rejects_incognito_with_session(tk_root) -> None:
 
     session = WebSession(ephemeral=True)
     frame = tk.Frame(tk_root)
-    with pytest.raises(ValueError, match="not both"):
+    with pytest.raises(ValueError, match="only one of"):
         WebView(frame, session=session, incognito=True)
     frame.destroy()
 

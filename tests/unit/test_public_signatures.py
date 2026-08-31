@@ -20,6 +20,8 @@ WEBVIEW_INIT_KWONLY = (
     "html",
     "app",
     "session",
+    "profile",
+    "user_data_dir",
     "data_directory",
     "ephemeral",
     "incognito",

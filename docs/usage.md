@@ -207,7 +207,24 @@ session.close()  # idempotent; run on the Tk main thread
 ```
 
 Convenience: `WebView(..., data_directory=...)` or `ephemeral=True`
-creates an owned session. **Incognito / private browsing** is that same
+creates an owned session. **`user_data_dir=`** is an alias for
+``data_directory=`` (Electron-style naming). **`profile="name"`** opens a
+named persistent profile under ``~/.tkwry/profiles/<name>`` (override the
+root with :func:`~tkwry.set_profiles_base` or ``TKWRY_PROFILES_DIR``); every
+WebView with the same name shares one :class:`~tkwry.WebSession` in-process.
+Call :func:`~tkwry.close_profile` to tear down a named profile at quit.
+
+```python
+from tkwry import WebView, close_profile, set_profiles_base
+
+set_profiles_base("./browser_data")  # optional; before first profile=
+a = WebView(frame_a, url="https://example.com", profile="account_a")
+b = WebView(frame_b, url="https://other.example", profile="account_b")
+# ...
+close_profile("account_a")  # optional; destroys views on that profile
+```
+
+**Incognito / private browsing** is that same
 flag: `WebSession(ephemeral=True)` maps to wry `with_incognito`.
 `incognito=True` is a constructor alias (`WebView` and `WebSession`);
 read the result with `session.ephemeral`. Not a second profile mode, and
@@ -666,12 +683,12 @@ Stability policy (0.2.0).
 | Appearance | `set_background_color`, `set_zoom` / `reset_zoom`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create); `devtools=`, `clipboard=`, `javascript_enabled=`, `autoplay=`, `hotkeys_zoom=`, `back_forward_gestures=`, `default_context_menus=`, `https_scheme=`, `proxy=`, `permission_handler=` |
 | Layout | `pack`, `grid`, `place`, `sync_bounds`, `bounds` (native geometry in ``set_bounds`` space) |
-| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `in_flight_downloads`, `untrusted`, `clipboard`, `javascript_enabled`, `autoplay`, `hotkeys_zoom`, `back_forward_gestures`, `default_context_menus`, `https_scheme`, `proxy`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
+| Lifecycle | `ready`, `phase` / `WebViewPhase`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `in_flight_downloads`, `profile`, `untrusted`, `clipboard`, `javascript_enabled`, `autoplay`, `hotkeys_zoom`, `back_forward_gestures`, `default_context_menus`, `https_scheme`, `proxy`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
 | Diagnostics | `take_queue_drop_stats` / `QueueDropCounts`, `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
-`app_dev`, `csp` / `coop` / `corp`, `session` / `data_directory` /
-`ephemeral` / `incognito` (alias of `ephemeral`),
+`app_dev`, `csp` / `coop` / `corp`, `session` / `profile` / `user_data_dir` /
+`data_directory` / `ephemeral` / `incognito` (alias of `ephemeral`),
 `untrusted`, `bridge_origins`, `bridge_allow`, `navigation_allow`,
 `open_external`, `download_allow`, `ipc_handler`, `rpc_traceback`, `devtools`,
 `clipboard`, `javascript_enabled`, `autoplay`, `hotkeys_zoom`,
@@ -688,7 +705,8 @@ Types: `WebView`, `WebSession`, `Cookie` (``repr`` omits ``value`` — never log
 Exceptions: `WebViewNotReadyError`, `WebViewCreationError`, `WebViewDestroyedError`,
 `WebViewTimeoutError`, `WebViewNavigationError`,
 `RpcTimeoutError`, `RpcCancelledError`, `RpcSerializationError`.
-Warning: `TkwrySecurityWarning`. Helpers: `configure_window`, `rpc_cancelled`,
+Warning: `TkwrySecurityWarning`. Helpers: `configure_window`, `close_profile`,
+`set_profiles_base`, `rpc_cancelled`,
 `rpc_cancel_event`, `open_in_browser`, `unique_download_path`, `DEFAULT_CSP`.
 
 Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`,

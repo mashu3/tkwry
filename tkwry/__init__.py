@@ -17,7 +17,7 @@ from tkwry.exceptions import (
     WebViewTimeoutError,
 )
 from tkwry.ipc import rpc_cancel_event, rpc_cancelled
-from tkwry.window import configure_window
+from tkwry.profile import close_profile, set_profiles_base
 
 _LINUX_CORE_BUILD_HINT = (
     "tkwry publishes pre-built wheels for Windows and macOS only. "
@@ -111,6 +111,8 @@ __all__ = [
     "RpcTimeoutError",
     "TkwrySecurityWarning",
     "configure_window",
+    "close_profile",
+    "set_profiles_base",
     "open_in_browser",
     "unique_download_path",
     "rpc_cancel_event",
