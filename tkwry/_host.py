@@ -54,8 +54,22 @@ def _release_frame_host(frame: tk.Misc, web: WebView) -> None:
 
 
 def _configure_wakeup_write_fd(write_fd: int) -> None:
-    """Mark the wakeup pipe write end non-blocking (D26)."""
+    """Mark the wakeup pipe write end non-blocking (D26/D27)."""
     if sys.platform == "win32":
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        handle = msvcrt.get_osfhandle(write_fd)
+        if handle == -1:
+            return
+        pipe_nowait = wintypes.DWORD(0x00000001)
+        ctypes.windll.kernel32.SetNamedPipeHandleState(
+            wintypes.HANDLE(handle),
+            ctypes.byref(pipe_nowait),
+            None,
+            None,
+        )
         return
     import fcntl
 

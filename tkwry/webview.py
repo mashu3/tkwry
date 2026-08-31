@@ -2936,7 +2936,8 @@ class WebView(WebViewRpcMixin):
         if write_fd is None:
             return
         try:
-            os.write(write_fd, b"\x01")
+            if os.write(write_fd, b"\x01") != 1:
+                return
         except OSError:
             pass
 
