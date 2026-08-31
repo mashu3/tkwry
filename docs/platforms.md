@@ -343,6 +343,21 @@ tkwry does **not** add `screenshot()` / `capture()`, and does not ship a
 JS visible-region helper. When wry exposes capture, wrap it the same way as
 `print()`.
 
+## Find in page
+
+wry **0.56.1** has no find-in-page API
+([wry#585](https://github.com/tauri-apps/wry/issues/585);
+[PR #593](https://github.com/tauri-apps/wry/pull/593) did not ship).
+tkwry does **not** add `find` / `find_next` / `find_previous` /
+`clear_find`, and does not wrap `window.find` as a Capability.
+
+**Windows:** WebView2 may show a **native** find UI on Ctrl+F when browser
+accelerator keys are enabled (engine chrome — not a tkwry API).
+**macOS / Linux:** no portable wry surface yet.
+
+When wry ships a cross-platform find API, wrap it in the next open cut
+(maintainers §8.7).
+
 ## Related
 
 - [Usage](usage.md)

@@ -338,6 +338,7 @@ generate `<<WebViewEvalFailed>>`, and set `last_eval_error`
 printed to stderr.
 
 Print honesty: [Platform notes — Print](platforms.md#print).
+Find in page: [Platform notes — Find in page](platforms.md#find-in-page) (no API yet).
 Page zoom: [Platform notes — Zoom](platforms.md#zoom-page-not-window).
 Swipe history: [Platform notes — Back / forward gestures](platforms.md#back--forward-gestures-swipe).
 Context menus: [Platform notes — Default context menus](platforms.md#default-context-menus).

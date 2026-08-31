@@ -79,6 +79,8 @@ navigation policy events, Tk context menus, and script injection tiers.
 - DevTools formalization — ``open_devtools`` / ``close_devtools`` /
   ``is_devtools_open`` + ``devtools=`` parity table (``docs/platforms.md``,
   ``usage.md``); Windows WebView2 close/query limits documented
+- Find in page honesty — no ``find`` / ``find_next`` under wry 0.56.1
+  (``docs/platforms.md``, README); upstream watch stays in maintainers §8.7
 
 ## [0.1.6] - 2026-08-31
 

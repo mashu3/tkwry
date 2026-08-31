@@ -75,3 +75,9 @@ def test_print_with_options_raises_off_macos_when_native_rejects(
 def test_no_print_to_pdf_api() -> None:
     """F21: do not ship a fake print_to_pdf while wry lacks PDF export."""
     assert not hasattr(WebView, "print_to_pdf")
+
+
+def test_no_find_in_page_api() -> None:
+    """F23: do not ship fake find APIs while wry lacks find-in-page."""
+    for name in ("find", "find_next", "find_previous", "clear_find"):
+        assert not hasattr(WebView, name)

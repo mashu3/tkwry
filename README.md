@@ -161,6 +161,7 @@ Short checklist — **details live in [Platform notes](https://github.com/mashu3
 - **Eval / navigation timeout** — `eval_js_with_callback` timeout (30s) is `WebViewTimeoutError` (`on_error`, `<<WebViewEvalFailed>>`, `last_eval_error`); `on_navigation` / `on_new_window` timeout still returns the default deny and signals `WebViewNavigationError` (`<<WebViewNavigationFailed>>`, `last_navigation_error`) — not raised on the WebKit thread
 - **Drag & drop** — WebView area only (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
 - **Screenshot** — no `WebView` capture API; wry 0.56.1 does not expose one yet ([wry#1674](https://github.com/tauri-apps/wry/pull/1674)). tkwry will wrap it when upstream ships; no JS fallback (see [Platform notes](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#screenshot))
+- **Find in page** — no `find` / `find_next` / `find_previous` / `clear_find`; wry has none ([wry#585](https://github.com/tauri-apps/wry/issues/585)). Do not treat `window.find` as a Capability. See [Platform notes — Find in page](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#find-in-page)
 
 See [CHANGELOG.md](https://github.com/mashu3/tkwry/blob/main/CHANGELOG.md) for release history.
 
