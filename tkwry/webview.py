@@ -437,7 +437,9 @@ class WebView(WebViewRpcMixin):
     Before the native view exists, the last pending load is applied at creation
     (``load_html`` overrides a pending URL). If more than one of ``url``,
     ``html``, and ``app`` is passed to the constructor, precedence is
-    ``html`` > ``app`` > ``url`` (a warning is printed to stderr).
+    ``html`` > ``app`` > ``url`` (a warning is printed to stderr). When
+    ``html=`` wins, ``app=`` is ignored for load, ``tkwry://`` serving,
+    navigation lock, CSP/COOP/CORP, and bridge origins.
 
     **Ready** (``<<WebViewReady>>`` / :meth:`when_ready`): fires once per
     instance when the native view first becomes laid out; unmap/remap does not
@@ -716,11 +718,10 @@ class WebView(WebViewRpcMixin):
                 file=sys.stderr,
             )
         self._app_root: str | None = None
-        if app is not None:
+        if app is not None and html is None:
             app_root, app_entry_url = resolve_app(app)
             self._app_root = app_root
-            if html is None:
-                url = app_entry_url
+            url = app_entry_url
         if self._session is not None:
             self._session._bind_app_root(self._app_root)
         if url is not None:
