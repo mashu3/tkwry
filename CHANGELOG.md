@@ -6,11 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-08-31
+
+Last Alpha slice before Beta prep: wry builder wraps, session/download/print
+deferrals, release provenance, and lifecycle leak / routing fixes.
+
 ### Added
 
 - Release provenance: ``SHA256SUMS`` on GitHub Releases, artifact build
   attestations in ``release.yml``, and [docs/provenance.md](docs/provenance.md)
   (checksum verify, ``gh attestation verify``, optional ``cargo audit`` note)
+- ``WebSession.close()`` — tear down a shared profile when no WebViews remain
+  (``closed`` flag; usage + ``browser_demo`` quit path)
+- ``InFlightDownload`` / ``in_flight_downloads`` — active download metadata
+  from policy-hook starts through complete (no progress % — §8.7)
+- ``print_with_options`` (macOS) — page margins via wry; no PDF / print result
+  on any platform
 - ``WebView.bounds`` — read native ``(x, y, width, height)`` in ``set_bounds``
   space (wry ``bounds()`` wrap)
 - ``WebView.delete_cookie(name, url)`` — delete by cookie name and page URL
@@ -40,6 +51,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``{"socks5": "host:port"}`` (wry ``with_proxy_config``); credentials
   rejected and never logged; macOS 14+ (``mac-proxy`` feature)
 
+### Fixed
+
+- Idempotent per-WebView Tk wakeup pipe registration (D24); Linux no longer
+  double-increments on create; setter churn does not leak FDs / handlers
+- Claim frame host before WebView ctor side effects; rollback partial binds on
+  failed create (D25)
+- Nonblocking wakeup pipe writes when saturated (D26 Unix ``O_NONBLOCK``,
+  D27 Windows ``PIPE_NOWAIT``)
+- Linux ``registered_app_root`` committed only after successful
+  ``build_as_child``; failed create retries still attach ``app=`` protocol
+  (D28)
+- macOS multi-WebView focus coordinator refreshes wakeup fd when a sibling
+  WebView is destroyed (D29)
+- RPC envelope routing parses the top-level ``__tkwry`` JSON key instead of
+  substring scan (D30)
+- When ``html=`` is given at construction, ``app=`` is not resolved — no
+  ``_app_root``, nav lock, or app CSP / bridge origins (D31)
+
 ### Docs
 
 - Windows WebView2 probe + Evergreen install recipe (no silent download;
@@ -50,6 +79,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   not in-process WSGI)
 - Tk host look / ttk / titlebar → **tkface** (app dep); ``configure_window``
   stays a thin geometry helper
+- Observability recipe: ``WebViewPhase`` + ``take_queue_drop_stats()``;
+  Provisional API table in ``usage.md``
+- Packaging notes for PyInstaller / Nuitka ([docs/packaging.md](docs/packaging.md))
+- Download cancel documented as start-deny only (no mid-flight abort)
 
 ### Tests
 
@@ -60,6 +93,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   other worker-stress cases (``0x80000003`` under GC after ``test_content``)
 - Windows CI: reap leftover ``msedgewebview2.exe`` between pytest suites
   (arm64 ``Tk.update()`` wedge after create/destroy); 25-minute step timeout
+- Frame host claim (T9), wakeup pipe saturation (T10), Linux app-root commit
+  (T11), macOS focus wakeup fd (T12), RPC envelope routing (T13), ``html=``
+  precedence (T14)
 
 ## [0.1.5] - 2026-08-30
 
@@ -644,6 +680,7 @@ eval, macOS IME / import-order / DevTools private APIs, Notebook `ready`≠map.
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.1.6]: https://github.com/mashu3/tkwry/releases/tag/v0.1.6
 [0.1.5]: https://github.com/mashu3/tkwry/releases/tag/v0.1.5
 [0.1.4]: https://github.com/mashu3/tkwry/releases/tag/v0.1.4
 [0.1.3]: https://github.com/mashu3/tkwry/releases/tag/v0.1.3
