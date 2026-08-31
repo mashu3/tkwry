@@ -1905,7 +1905,9 @@ WebViews that share a session must use the same app= root \
 
         if register_app {
             let root_for_protocol = {
-                let root = app_root_path.as_ref().expect("register_app implies app_root");
+                let root = app_root_path
+                    .as_ref()
+                    .expect("register_app implies app_root");
                 root.canonicalize().unwrap_or_else(|_| root.clone())
             };
             let serve_options = app_protocol::AppServeOptions {

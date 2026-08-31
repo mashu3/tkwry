@@ -54,6 +54,7 @@ struct FocusEntry {
     web_wants_keyboard: Arc<AtomicBool>,
     mac_tk_unfocus: Arc<AtomicBool>,
     parent_ns_view: NonNull<NSView>,
+    wakeup_write_fd: Arc<AtomicI32>,
 }
 
 struct FocusMonitors {
@@ -82,6 +83,15 @@ fn window_key(window: &NSWindow) -> isize {
     window as *const NSWindow as isize
 }
 
+fn select_wakeup_write_fd(entries: &[FocusEntry], fallback: &Arc<AtomicI32>) -> Arc<AtomicI32> {
+    for entry in entries {
+        if entry.wakeup_write_fd.load(Ordering::SeqCst) >= 0 {
+            return entry.wakeup_write_fd.clone();
+        }
+    }
+    fallback.clone()
+}
+
 pub struct FocusSyncGuard {
     window_key: isize,
     entry_id: u64,
@@ -98,6 +108,8 @@ impl Drop for FocusSyncGuard {
             if coord.entries.is_empty() {
                 coord.remove_monitors();
                 map.remove(&self.window_key);
+            } else {
+                coord.refresh_wakeup_write_fd();
             }
         });
     }
@@ -123,6 +135,7 @@ pub fn install_focus_sync(
         web_wants_keyboard,
         mac_tk_unfocus,
         parent_ns_view,
+        wakeup_write_fd: wakeup_write_fd.clone(),
     };
 
     let key = window_key(&ns_window);
@@ -135,6 +148,7 @@ pub fn install_focus_sync(
             monitors: None,
         });
         coord.entries.push(entry);
+        coord.refresh_wakeup_write_fd();
         if coord.monitors.is_none() {
             coord.install_monitors()?;
         }
@@ -146,18 +160,25 @@ pub fn install_focus_sync(
 }
 
 impl WindowFocusCoordinator {
+    fn refresh_wakeup_write_fd(&mut self) {
+        self.wakeup_write_fd = select_wakeup_write_fd(&self.entries, &self.wakeup_write_fd);
+    }
+
     fn install_monitors(&mut self) -> Result<(), String> {
         let window = self.window.clone();
-        let wakeup = self.wakeup_write_fd.clone();
 
         let click_block = {
             let window = window.clone();
-            let wakeup = wakeup.clone();
             RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
                 let event_ref = unsafe { event.as_ref() };
                 let window_point = event_ref.locationInWindow();
                 with_coordinator(&window, |coord| {
-                    handle_click(&window, &coord.entries, window_point, &wakeup);
+                    handle_click(
+                        &window,
+                        &coord.entries,
+                        window_point,
+                        &coord.wakeup_write_fd,
+                    );
                 });
                 event.as_ptr()
             })
@@ -172,11 +193,10 @@ impl WindowFocusCoordinator {
 
         let keydown_block = {
             let window = window.clone();
-            let wakeup = wakeup.clone();
             RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
                 let event_ref = unsafe { event.as_ref() };
                 with_coordinator(&window, |coord| {
-                    handle_keydown(&window, &coord.entries, event_ref, &wakeup);
+                    handle_keydown(&window, &coord.entries, event_ref, &coord.wakeup_write_fd);
                 });
                 event.as_ptr()
             })
@@ -190,10 +210,14 @@ impl WindowFocusCoordinator {
 
         let keyup_block = {
             let window = window.clone();
-            let wakeup = wakeup.clone();
             RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
                 with_coordinator(&window, |coord| {
-                    handle_keyup_or_flags(&window, &coord.entries, &wakeup, "focus on keyup");
+                    handle_keyup_or_flags(
+                        &window,
+                        &coord.entries,
+                        &coord.wakeup_write_fd,
+                        "focus on keyup",
+                    );
                 });
                 event.as_ptr()
             })
@@ -207,7 +231,6 @@ impl WindowFocusCoordinator {
 
         let flags_block = {
             let window = window.clone();
-            let wakeup = wakeup.clone();
             RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
                 let event_ref = unsafe { event.as_ref() };
                 if event_ref.keyCode() == TAB_KEY_CODE {
@@ -217,7 +240,7 @@ impl WindowFocusCoordinator {
                     handle_keyup_or_flags(
                         &window,
                         &coord.entries,
-                        &wakeup,
+                        &coord.wakeup_write_fd,
                         "focus on flags changed",
                     );
                 });
@@ -233,10 +256,9 @@ impl WindowFocusCoordinator {
 
         let key_block = {
             let window = window.clone();
-            let wakeup = wakeup.clone();
             RcBlock::new(move |_notification: NonNull<NSNotification>| {
                 with_coordinator(&window, |coord| {
-                    handle_window_became_key(&window, &coord.entries, &wakeup);
+                    handle_window_became_key(&window, &coord.entries, &coord.wakeup_write_fd);
                 });
             })
         };
@@ -567,6 +589,32 @@ mod tests {
             && point.y >= rect.origin.y
             && point.x < rect.origin.x + rect.size.width
             && point.y < rect.origin.y + rect.size.height
+    }
+
+    #[test]
+    fn select_wakeup_write_fd_prefers_live_sibling() {
+        let dead = Arc::new(AtomicI32::new(-1));
+        let alive = Arc::new(AtomicI32::new(7));
+        let entries = [
+            FocusEntry {
+                id: 1,
+                inner: Arc::new(Mutex::new(None)),
+                web_wants_keyboard: Arc::new(AtomicBool::new(false)),
+                mac_tk_unfocus: Arc::new(AtomicBool::new(false)),
+                parent_ns_view: NonNull::dangling(),
+                wakeup_write_fd: dead.clone(),
+            },
+            FocusEntry {
+                id: 2,
+                inner: Arc::new(Mutex::new(None)),
+                web_wants_keyboard: Arc::new(AtomicBool::new(false)),
+                mac_tk_unfocus: Arc::new(AtomicBool::new(false)),
+                parent_ns_view: NonNull::dangling(),
+                wakeup_write_fd: alive.clone(),
+            },
+        ];
+        let picked = select_wakeup_write_fd(&entries, &dead);
+        assert!(Arc::ptr_eq(&picked, &alive));
     }
 
     #[test]
