@@ -4,6 +4,7 @@ mod app_protocol;
 mod cookie_api;
 #[cfg(target_os = "macos")]
 mod macos;
+mod rpc_envelope;
 mod session;
 mod wakeup;
 
@@ -935,26 +936,6 @@ fn is_dangerous_nav_url(url: &str) -> bool {
     )
 }
 
-/// True when *body* looks like a tkwry RPC envelope (``{"__tkwry":"rpc",...}``).
-///
-/// Used only to pick the dedicated RPC queue so IPC overflow cannot drop
-/// in-flight ``window.tkwry.call`` requests. Python still parses the envelope.
-fn is_rpc_envelope(body: &str) -> bool {
-    let s = body.trim_start();
-    if !s.starts_with('{') {
-        return false;
-    }
-    let Some(key_at) = s.find("\"__tkwry\"") else {
-        return false;
-    };
-    let after_key = &s[key_at + "\"__tkwry\"".len()..];
-    let after_colon = after_key.trim_start();
-    let Some(rest) = after_colon.strip_prefix(':') else {
-        return false;
-    };
-    rest.trim_start().starts_with("\"rpc\"")
-}
-
 fn json_escape_string(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for ch in value.chars() {
@@ -1030,7 +1011,7 @@ fn enqueue_window_ipc_body(
     source_url: String,
     wakeup: Option<&Arc<AtomicI32>>,
 ) -> Result<(), ()> {
-    let rpc = is_rpc_envelope(&body);
+    let rpc = rpc_envelope::is_rpc_envelope(&body);
     let limit = if rpc {
         MAX_RPC_MESSAGE_BYTES
     } else {
@@ -1092,7 +1073,7 @@ fn push_window_ipc_body(
     wakeup: Option<&Arc<AtomicI32>>,
 ) -> Result<(), ()> {
     let envelope = (source_url, body);
-    if is_rpc_envelope(&envelope.1) {
+    if rpc_envelope::is_rpc_envelope(&envelope.1) {
         push_if_listening(
             listening,
             rpc_pending,
@@ -2405,7 +2386,7 @@ WebViews that share a session must use the same app= root \
     fn _enqueue_ipc_message(&self, message: String, source_url: Option<String>) -> PyResult<()> {
         self.require_owner_thread()?;
         let source_url = source_url.unwrap_or_default();
-        if is_rpc_envelope(&message) && message.len() > MAX_RPC_MESSAGE_BYTES {
+        if rpc_envelope::is_rpc_envelope(&message) && message.len() > MAX_RPC_MESSAGE_BYTES {
             if let Some(id) = extract_rpc_request_id(&message) {
                 let envelope = rpc_reject_envelope(
                     id,
@@ -2928,19 +2909,6 @@ mod tests {
         let mut queue = VecDeque::from(["a".into(), "a".into(), "b".into()]);
         assert!(try_compact_title_queue(&mut queue));
         assert_eq!(queue, VecDeque::from(["a".to_string(), "b".to_string()]));
-    }
-
-    #[test]
-    fn is_rpc_envelope_accepts_compact_and_spaced_json() {
-        assert!(is_rpc_envelope(
-            r#"{"__tkwry":"rpc","id":"r1","method":"ping","params":[]}"#
-        ));
-        assert!(is_rpc_envelope(
-            r#"{ "__tkwry": "rpc", "id": "r1", "method": "ping" }"#
-        ));
-        assert!(!is_rpc_envelope(r#"{"action":"increment"}"#));
-        assert!(!is_rpc_envelope("not-json"));
-        assert!(!is_rpc_envelope(r#"{"__tkwry":"event"}"#));
     }
 
     #[test]
