@@ -5,7 +5,8 @@ Roles:
 - **IPC** — fire-and-forget JS → Python via ``window.ipc.postMessage`` /
   :meth:`~tkwry.WebView.set_ipc_handler` (raw string).
 - **RPC** — request/response JS → Python via ``window.tkwry.call`` /
-  :meth:`~tkwry.WebView.expose` (Promise + JSON result or structured error).
+  ``window.tkwry.invoke`` / :meth:`~tkwry.WebView.expose` (Promise + JSON
+  result or structured error).
 - **Emit** — fire-and-forget Python → JS via :meth:`~tkwry.WebView.emit` /
   ``window.tkwry.on``.
 
@@ -56,8 +57,8 @@ RPC_STREAM_DONE = object()
 # Injected before user initialization_script / via eval_js after create.
 RPC_BOOTSTRAP_JS = """\
 (function () {
-  if (window.tkwry && window.tkwry.call && window.tkwry.stream
-      && window.tkwry.on) return;
+  if (window.tkwry && window.tkwry.call && window.tkwry.invoke
+      && window.tkwry.stream && window.tkwry.on) return;
   var seq = 0;
   var pending = Object.create(null);
   var listeners = Object.create(null);
@@ -146,6 +147,36 @@ RPC_BOOTSTRAP_JS = """\
       promise.id = id;
       promise.cancel = function () { window.tkwry.cancel(id); };
       return promise;
+    },
+    invoke: function (method, data, options) {
+      if (arguments.length <= 1) {
+        return window.tkwry.call(method);
+      }
+      if (arguments.length === 2) {
+        if (data === undefined || data === null) {
+          return window.tkwry.call(method);
+        }
+        if (isCallOptions(data)) {
+          return window.tkwry.call(method, data);
+        }
+        if (typeof data === "object" && !Array.isArray(data)) {
+          return window.tkwry.call(method, { kwargs: data });
+        }
+        return window.tkwry.call(method, data);
+      }
+      var opts = (options && typeof options === "object" && !Array.isArray(options))
+        ? Object.assign({}, options) : {};
+      if (data !== undefined && data !== null) {
+        if (typeof data === "object" && !Array.isArray(data)) {
+          opts.kwargs = data;
+          return window.tkwry.call(method, opts);
+        }
+        return window.tkwry.call(method, data, options);
+      }
+      if (options !== undefined) {
+        return window.tkwry.call(method, options);
+      }
+      return window.tkwry.call(method);
     },
     stream: function (method) {
       var params = Array.prototype.slice.call(arguments, 1);

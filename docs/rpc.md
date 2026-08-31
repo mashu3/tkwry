@@ -8,6 +8,7 @@ execution model, cancel contract, streaming, and limits.
 |-----------|------|--------|------------|
 | JS → Python | IPC (event) | `set_ipc_handler` / `ipc_handler=` | `window.ipc.postMessage(str)` |
 | JS → Python | RPC (call) | `@web.expose` | `await window.tkwry.call(name, ...)` |
+| JS → Python | RPC (invoke) | `@web.rpc("name")` | `await window.tkwry.invoke(name, { ... })` |
 | JS → Python | RPC (stream) | sync generator `@web.expose` | `for await (const x of window.tkwry.stream(name, ...))` |
 | Python → JS | Emit (event) | `web.emit(event, data)` | `window.tkwry.on(event, handler)` |
 
@@ -30,7 +31,7 @@ web = WebView(
 )
 ```
 
-## RPC (`expose` / `window.tkwry.call`)
+## RPC (`expose` / `window.tkwry.call` / `invoke`)
 
 Expose callables and await them from JS:
 
@@ -40,6 +41,10 @@ web = WebView(frame, html=HTML)
 @web.expose
 def greet(name: str) -> str:
     return f"hello {name}"
+
+@web.rpc("get_data")
+def get_data(*, id: int) -> dict:
+    return {"id": id}
 
 # Heavy I/O / CPU — run off the Tk thread so the UI stays responsive
 @web.expose(thread=True, timeout=30.0)
@@ -54,6 +59,8 @@ def heavy_task(data: dict) -> dict:
 
 ```js
 const text = await window.tkwry.call("greet", "Ada");
+// single object → Python kwargs:
+const row = await window.tkwry.invoke("get_data", { id: 123 });
 // optional JS-side timeout (ms) and Python kwargs:
 await window.tkwry.call("heavy_task", payload, {
   timeout: 5000,
@@ -63,6 +70,11 @@ const pending = window.tkwry.call("heavy_task", payload);
 // pending.id / pending.cancel() / window.tkwry.cancel(pending.id)
 pending.cancel();
 ```
+
+``@web.rpc("name")`` is sugar for ``@web.expose(name="name")``.
+``window.tkwry.invoke(method, data)`` is sugar for
+``window.tkwry.call(method, { kwargs: data })`` when *data* is a plain
+object. ``call`` remains the full positional / kwargs / timeout surface.
 
 ### Execution model
 

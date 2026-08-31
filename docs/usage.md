@@ -44,7 +44,7 @@ myapp/
     <button id="ping">Ping Python</button>
     <script>
       document.getElementById("ping").onclick = async () => {
-        const n = await window.tkwry.call("ping");
+        const n = await window.tkwry.invoke("ping", {});
         document.getElementById("t").textContent = "pong " + n;
       };
     </script>
@@ -76,7 +76,7 @@ web = WebView(
 web.when_failed(lambda exc: print("create failed:", exc))
 
 
-@web.expose
+@web.rpc("ping")
 def ping() -> int:
     return 1
 
@@ -680,7 +680,7 @@ Stability policy (0.2.0).
 | Content | `load_url` (`headers=` this request only, http(s)), `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `print`, `print_with_options` (macOS margins), `url` |
 | Cookies / browsing data | `cookies`, `cookies_for_url`, `set_cookie`, `delete_cookie` (`Cookie` or `name` + page `url`), `clear_all_browsing_data`, `Cookie` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `last_eval_error`, `<<WebViewEvalFailed>>` |
-| IPC / RPC / emit | `set_ipc_handler`, `expose` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `stream` / `cancel`) |
+| IPC / RPC / emit | `set_ipc_handler`, `expose` / `rpc` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `invoke` / `stream` / `cancel`) |
 | Callbacks | `set_on_navigation`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_started`, `set_on_download_complete`, `set_on_download_failed`; create-only `permission_handler=` |
 | Appearance | `set_background_color`, `set_zoom` / `reset_zoom`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script` (raise after native create); `devtools=`, `clipboard=`, `javascript_enabled=`, `autoplay=`, `hotkeys_zoom=`, `back_forward_gestures=`, `default_context_menus=`, `https_scheme=`, `proxy=`, `permission_handler=` |

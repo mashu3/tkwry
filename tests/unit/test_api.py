@@ -88,6 +88,7 @@ WEBVIEW_METHODS = (
     "set_bridge_origins",
     "set_bridge_allow",
     "expose",
+    "rpc",
     "unexpose",
     "watch_app",
     "set_on_navigation",
@@ -257,6 +258,7 @@ def test_installed_package_ships_typing_and_rpc_bootstrap() -> None:
     assert (root / "py.typed").is_file()
     assert (root / "_core.pyi").is_file()
     assert "window.tkwry.call" in RPC_BOOTSTRAP_JS
+    assert "window.tkwry.invoke" in RPC_BOOTSTRAP_JS
     assert "window.tkwry.stream" in RPC_BOOTSTRAP_JS
     assert "window.tkwry.on" in RPC_BOOTSTRAP_JS
 

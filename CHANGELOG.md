@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+Named browser profiles, app-facing download helpers, and RPC invoke sugar.
+
+### Added
+
+- ``WebView(..., profile="name")`` — named persistent profiles under
+  ``~/.tkwry/profiles/<name>`` (override root with ``set_profiles_base`` or
+  ``TKWRY_PROFILES_DIR``); views on the same name share one in-process
+  ``WebSession``
+- ``WebView(..., user_data_dir=...)`` — alias for ``data_directory=``
+  (Electron-style naming); ``profile=``, ``session=``, and ``user_data_dir=``
+  / ``data_directory=`` stay mutually exclusive
+- ``WebView.profile`` — read back the ``profile=`` name after construction
+- ``set_profiles_base`` / ``close_profile`` — configure the profile root and
+  tear down a named profile at quit
+- ``Download`` object for ``on_download`` — ``save(directory)`` returns a
+  collision-free absolute path via ``unique_download_path``; ``save_as(path)``;
+  ``suggested_filename``; handlers may use one-arg ``Download`` or legacy
+  ``(url, suggested_dest)``
+- ``set_on_download_started`` / ``on_download_started=`` — notification when a
+  download is allowed and starts; ``last_started_download`` snapshot
+- ``set_on_download_failed`` / ``on_download_failed=`` — explicit
+  failed-download callback (alongside ``<<WebViewDownloadFailed>>``)
+- ``<<WebViewDownloadStarted>>`` virtual event
+- Public types: ``Download``, ``DownloadStartedHandler``,
+  ``DownloadFailedHandler``
+- ``WebView.rpc`` — decorator sugar for ``@web.expose(name=...)``; use
+  ``@web.rpc("get_data")`` or ``@web.rpc`` (function name)
+- ``window.tkwry.invoke(method, data)`` — pass a single object as Python
+  keyword arguments (maps to ``call`` with ``{ kwargs: data }``)
+
+### Docs
+
+- ``docs/usage.md`` — profile / ``user_data_dir`` recipes; ``Download``
+  handler shapes; download started / failed callbacks and events; ``@web.rpc``
+  / ``window.tkwry.invoke``
+- ``docs/rpc.md`` — ``invoke`` vs ``call``; ``@web.rpc`` decorator
+
 ## [0.1.6] - 2026-08-31
 
 Last Alpha slice before Beta prep: wry builder wraps, session/download/print

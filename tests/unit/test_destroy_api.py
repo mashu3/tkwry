@@ -56,6 +56,7 @@ POST_DESTROY_ACTIONS: dict[str, Callable[[WebView], object]] = {
     "set_bridge_origins": lambda w: w.set_bridge_origins(["https://example.com"]),
     "set_bridge_allow": lambda w: w.set_bridge_allow(lambda _u: True),
     "expose": lambda w: w.expose(_ping),
+    "rpc": lambda w: w.rpc(_ping),
     "unexpose": lambda w: w.unexpose("ping"),
     "watch_app": lambda w: w.watch_app(),
     "set_on_navigation": lambda w: w.set_on_navigation(lambda _u: True),

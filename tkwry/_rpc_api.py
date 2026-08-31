@@ -204,6 +204,49 @@ class WebViewRpcMixin:
             return register(fn)
         return register
 
+    def rpc(
+        self,
+        name_or_fn: RpcHandler | str | None = None,
+        /,
+        *,
+        name: str | None = None,
+        thread: bool = False,
+        run_in: RpcRunIn | None = None,
+        timeout: float | None = None,
+        replace: bool = False,
+        allow_any_origin: bool = False,
+    ) -> RpcHandler | Callable[[RpcHandler], RpcHandler]:
+        """Register an RPC handler under an explicit method name.
+
+        Sugar for :meth:`expose` — use ``@web.rpc("get_data")`` or ``@web.rpc``
+        (method name defaults to the function name). From JavaScript, prefer
+        ``await window.tkwry.invoke("get_data", {id: 123})`` to pass a single
+        object as Python keyword arguments.
+        """
+        expose_kwargs = {
+            "thread": thread,
+            "run_in": run_in,
+            "timeout": timeout,
+            "replace": replace,
+            "allow_any_origin": allow_any_origin,
+        }
+
+        if callable(name_or_fn):
+            method = name if name is not None else name_or_fn.__name__
+            return self.expose(name_or_fn, name=method, **expose_kwargs)
+        if isinstance(name_or_fn, str):
+
+            def register(handler: RpcHandler) -> RpcHandler:
+                return self.expose(handler, name=name_or_fn, **expose_kwargs)
+
+            return register
+
+        def register(handler: RpcHandler) -> RpcHandler:
+            method = name if name is not None else handler.__name__
+            return self.expose(handler, name=method, **expose_kwargs)
+
+        return register
+
     def unexpose(self, name: str) -> bool:
         """Remove an exposed RPC method. Returns whether it was registered."""
         self._require_not_destroyed("unexpose")
