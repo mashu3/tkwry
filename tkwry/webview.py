@@ -12,6 +12,7 @@ import tkinter as tk
 import traceback
 import warnings
 import weakref
+from collections import deque
 from collections.abc import Callable, Collection, Mapping
 from enum import Enum
 from pathlib import Path
@@ -135,6 +136,7 @@ _EVAL_CALLBACK_TIMEOUT_S = 30.0
 _SYNC_HOOK_TIMEOUT_S = 30.0
 _SYNC_HOOK_HANDLER_TIMEOUT_S = 30.0
 _SYNC_HOOK_MAX_WAIT_S = _SYNC_HOOK_TIMEOUT_S + _SYNC_HOOK_HANDLER_TIMEOUT_S
+_SYNC_HOOK_EVENT_POOL_SIZE = 4
 _MIN_LAYOUT_DIMENSION = 2
 _CREATE_MAX_ATTEMPTS = 30
 _FLUSH_LOAD_MAX_ATTEMPTS = 3
@@ -742,6 +744,10 @@ class WebView(WebViewRpcMixin):
         self._native_eval_wait: dict[int, _NativeEvalWait] = {}
         self._sync_hook_queue: queue.SimpleQueue[_SyncHookItem] = queue.SimpleQueue()
         self._sync_hook_depth = 0
+        self._sync_hook_event_pool: deque[threading.Event] = deque(
+            threading.Event() for _ in range(_SYNC_HOOK_EVENT_POOL_SIZE)
+        )
+        self._sync_hook_event_pool_lock = threading.Lock()
         self._tk_wakeup_write_fd: int | None = None
         self._tk_wakeup_pipe_attached = False
         # Bumped on destroy so late WebKit-thread delivers are discarded.
@@ -3093,6 +3099,22 @@ class WebView(WebViewRpcMixin):
         except OSError:
             pass
 
+    def _borrow_sync_hook_event(self) -> threading.Event:
+        """Reuse preallocated events — avoid ``threading.Event()`` during worker GC."""
+        with self._sync_hook_event_pool_lock:
+            event = (
+                self._sync_hook_event_pool.popleft()
+                if self._sync_hook_event_pool
+                else threading.Event()
+            )
+        event.clear()
+        return event
+
+    def _return_sync_hook_event(self, event: threading.Event) -> None:
+        with self._sync_hook_event_pool_lock:
+            if len(self._sync_hook_event_pool) < _SYNC_HOOK_EVENT_POOL_SIZE * 2:
+                self._sync_hook_event_pool.append(event)
+
     def _schedule_sync_hook_drain(self) -> None:
         """Ask the Tk thread to drain Python-side sync hooks."""
         self._wake_tk_for_sync_hook()
@@ -3114,66 +3136,74 @@ class WebView(WebViewRpcMixin):
         if threading.get_ident() == self._tk_thread_id:
             return self._run_sync_hook_invoke(invoke, default)
 
-        done = threading.Event()
-        result: list[object] = [default]
-        cancelled = [False]
-        started = [False]
-        handler_started_at = [0.0]
-        self._sync_hook_queue.put(
-            (
-                invoke,
-                result,
-                default,
-                done,
-                cancelled,
-                started,
-                handler_started_at,
-            )
-        )
-        self._ensure_event_poll()
-        self._schedule_sync_hook_drain()
-        enqueued_at = time.monotonic()
-        deadline = enqueued_at + _SYNC_HOOK_TIMEOUT_S
-        absolute_deadline = enqueued_at + _SYNC_HOOK_MAX_WAIT_S
-        suffix = f" ({detail})" if detail else ""
-
-        def _timeout_msg(prefix: str) -> None:
-            print(f"tkwry: {prefix}{suffix}", file=sys.stderr)
-
-        def _on_timeout(prefix: str) -> None:
-            _timeout_msg(prefix)
-            if kind in ("on_navigation", "on_new_window"):
-                self._queue_navigation_error(
-                    WebViewNavigationError(f"{prefix}{suffix}")
+        done = self._borrow_sync_hook_event()
+        try:
+            result: list[object] = [default]
+            cancelled = [False]
+            started = [False]
+            handler_started_at = [0.0]
+            self._sync_hook_queue.put(
+                (
+                    invoke,
+                    result,
+                    default,
+                    done,
+                    cancelled,
+                    started,
+                    handler_started_at,
                 )
-
-        while not done.is_set():
-            if not started[0]:
-                remaining = min(deadline, absolute_deadline) - time.monotonic()
-                if remaining <= 0:
-                    cancelled[0] = True
-                    _on_timeout(f"{kind} timed out after {_SYNC_HOOK_TIMEOUT_S:g}s")
-                    return default
-                done.wait(timeout=min(0.05, remaining))
-            else:
-                handler_deadline = handler_started_at[0] + _SYNC_HOOK_HANDLER_TIMEOUT_S
-                remaining = min(handler_deadline, absolute_deadline) - time.monotonic()
-                if remaining <= 0:
-                    cancelled[0] = True
-                    if time.monotonic() >= absolute_deadline:
-                        _on_timeout(
-                            f"{kind} timed out after {_SYNC_HOOK_MAX_WAIT_S:g}s total"
-                        )
-                    else:
-                        _on_timeout(
-                            f"{kind} handler timed out after "
-                            f"{_SYNC_HOOK_HANDLER_TIMEOUT_S:g}s"
-                        )
-                    return default
-                done.wait(timeout=min(0.05, remaining))
-            # Wake the Tk thread; native/Python drains run on the owner thread only.
+            )
+            self._ensure_event_poll()
             self._schedule_sync_hook_drain()
-        return cast(_T, result[0])
+            enqueued_at = time.monotonic()
+            deadline = enqueued_at + _SYNC_HOOK_TIMEOUT_S
+            absolute_deadline = enqueued_at + _SYNC_HOOK_MAX_WAIT_S
+            suffix = f" ({detail})" if detail else ""
+
+            def _timeout_msg(prefix: str) -> None:
+                print(f"tkwry: {prefix}{suffix}", file=sys.stderr)
+
+            def _on_timeout(prefix: str) -> None:
+                _timeout_msg(prefix)
+                if kind in ("on_navigation", "on_new_window"):
+                    self._queue_navigation_error(
+                        WebViewNavigationError(f"{prefix}{suffix}")
+                    )
+
+            while not done.is_set():
+                if not started[0]:
+                    remaining = min(deadline, absolute_deadline) - time.monotonic()
+                    if remaining <= 0:
+                        cancelled[0] = True
+                        _on_timeout(f"{kind} timed out after {_SYNC_HOOK_TIMEOUT_S:g}s")
+                        return default
+                    done.wait(timeout=min(0.05, remaining))
+                else:
+                    handler_deadline = (
+                        handler_started_at[0] + _SYNC_HOOK_HANDLER_TIMEOUT_S
+                    )
+                    remaining = (
+                        min(handler_deadline, absolute_deadline) - time.monotonic()
+                    )
+                    if remaining <= 0:
+                        cancelled[0] = True
+                        if time.monotonic() >= absolute_deadline:
+                            _on_timeout(
+                                f"{kind} timed out after "
+                                f"{_SYNC_HOOK_MAX_WAIT_S:g}s total"
+                            )
+                        else:
+                            _on_timeout(
+                                f"{kind} handler timed out after "
+                                f"{_SYNC_HOOK_HANDLER_TIMEOUT_S:g}s"
+                            )
+                        return default
+                    done.wait(timeout=min(0.05, remaining))
+                # Wake the Tk thread; native/Python drains run on the owner thread only.
+                self._schedule_sync_hook_drain()
+            return cast(_T, result[0])
+        finally:
+            self._return_sync_hook_event(done)
 
     def _discard_navigation_error_queue(self) -> None:
         q = self._navigation_error_queue

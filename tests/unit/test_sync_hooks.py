@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import threading
 from unittest.mock import MagicMock
 
@@ -14,6 +15,12 @@ from tkwry import NewWindowResponse, WebView, WebViewNavigationError
 @pytest.fixture(autouse=True)
 def _noop_linux_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     noop_linux_runtime(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def _collect_garbage_after_sync_hook_test() -> None:
+    yield
+    gc.collect()
 
 
 def _make_web(tk_root):
@@ -288,6 +295,8 @@ def test_sync_hook_timeout_only_before_handler_starts(
     deadline = time.monotonic() + 2.0
     while thread.is_alive() and time.monotonic() < deadline:
         web._drain_sync_hooks()
+        tk_root.update_idletasks()
+        tk_root.update()
         time.sleep(0.01)
 
     thread.join(timeout=2.0)

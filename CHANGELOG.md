@@ -43,6 +43,11 @@ Named browser profiles, app-facing download helpers, RPC invoke sugar, and navig
 - ``set_on_navigation`` handlers may receive ``NavigationEvent`` or legacy
   URL ``str``
 
+### Fixed
+
+- Off-thread sync hooks reuse preallocated ``threading.Event`` objects so
+  Linux CI no longer aborts when GC runs during ``test_sync_hooks``
+
 ### Docs
 
 - ``docs/usage.md`` — profile / ``user_data_dir`` recipes; ``Download``
