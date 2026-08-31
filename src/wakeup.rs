@@ -21,7 +21,7 @@ fn set_write_fd_nonblocking(fd: i32) {
     }
     const PIPE_NOWAIT: u32 = 0x0000_0001;
     unsafe {
-        let handle = libc::_get_osfhandle(fd);
+        let handle = libc::get_osfhandle(fd);
         if handle == -1 {
             return;
         }

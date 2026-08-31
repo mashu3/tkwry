@@ -2,9 +2,7 @@
 
 #[cfg(any(target_os = "macos", test))]
 use std::hash::{Hash, Hasher};
-#[cfg(any(target_os = "macos", test))]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
