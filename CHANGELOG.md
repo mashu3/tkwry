@@ -76,6 +76,9 @@ navigation policy events, Tk context menus, and script injection tiers.
 - Print / PDF honesty — no ``print_to_pdf`` under wry 0.56.1; system dialog
   + macOS ``print_with_options`` only (``docs/platforms.md``, README,
   ``usage.md``); upstream watch stays in maintainers §8.7
+- DevTools formalization — ``open_devtools`` / ``close_devtools`` /
+  ``is_devtools_open`` + ``devtools=`` parity table (``docs/platforms.md``,
+  ``usage.md``); Windows WebView2 close/query limits documented
 
 ## [0.1.6] - 2026-08-31
 

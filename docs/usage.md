@@ -276,13 +276,25 @@ web.inject_script("window.__sticky = 3;")  # re-runs on later navigations
 web.execute_script("window.__once = 4;")  # this document only
 ```
 
-DevTools need `devtools=True` at construction, then `open_devtools()`
-(calling `open_devtools()` alone is a no-op on macOS if the flag was false).
+DevTools — unified surface (`devtools=` create flag + three methods):
 
 ```python
 web = WebView(frame, html="<h1>Hello</h1>", devtools=True)
+web.wait_until_ready()
 web.open_devtools()
+print(web.is_devtools_open())  # True on macOS/Linux when open; always False on Windows
+web.close_devtools()           # no-op on Windows (close the inspector UI yourself)
+```
 
+| | `devtools=True` | `open_devtools()` | `close_devtools()` | `is_devtools_open()` |
+|--|-----------------|-------------------|--------------------|----------------------|
+| **Windows** | enables inspector | opens | no-op (wry/WebView2) | always `False` |
+| **macOS** | required (else open is no-op); private APIs — avoid Mac App Store | opens | closes | accurate |
+| **Linux** | recommended | opens | closes | accurate |
+
+Details: [Platform notes — DevTools](platforms.md#devtools).
+
+```python
 # Web Clipboard API (Monaco / editors): opt-in on Windows / Linux.
 # macOS WebView clipboard is always available — see platforms.md.
 web = WebView(frame, html="<textarea></textarea>", clipboard=True)
@@ -331,7 +343,7 @@ Swipe history: [Platform notes — Back / forward gestures](platforms.md#back--f
 Context menus: [Platform notes — Default context menus](platforms.md#default-context-menus).
 Windows `app=` origin: [Platform notes — HTTPS scheme](platforms.md#https-scheme-windows-app).
 Proxy: [Platform notes — Proxy](platforms.md#proxy-http-connect--socksv5).
-DevTools OS caveats: [Platform notes](platforms.md).
+DevTools: [Platform notes — DevTools](platforms.md#devtools).
 
 ## Layout / resize
 

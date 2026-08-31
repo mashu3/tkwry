@@ -2210,15 +2210,29 @@ class WebView(WebViewRpcMixin):
             self._ensure_event_poll()
 
     def open_devtools(self) -> None:
-        """Open the platform DevTools / inspector (private APIs on macOS)."""
+        """Open the platform DevTools / web inspector.
+
+        Prefer ``devtools=True`` at construction. On macOS, ``open_devtools()``
+        without that flag is a no-op; on Windows / Linux the engine may still
+        open. See platform notes for ``close_devtools`` /
+        ``is_devtools_open`` quirks (Windows WebView2).
+        """
         self._require_ready("open_devtools").open_devtools()
 
     def close_devtools(self) -> None:
-        """Close DevTools if open."""
+        """Close DevTools if open.
+
+        On Windows (WebView2 via wry), this is a no-op — close the inspector
+        UI manually. macOS / Linux forward to the engine.
+        """
         self._require_ready("close_devtools").close_devtools()
 
     def is_devtools_open(self) -> bool:
-        """Return whether DevTools is currently open."""
+        """Return whether DevTools is currently open.
+
+        On Windows (WebView2 via wry), always ``False`` even after
+        :meth:`open_devtools`. Prefer macOS / Linux for open/close round-trips.
+        """
         return self._require_ready("is_devtools_open").is_devtools_open()
 
     def set_on_navigation(self, handler: NavigationHandler | None) -> None:

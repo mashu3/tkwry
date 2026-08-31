@@ -198,7 +198,7 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 - **Typed failure signals** — create: `<<WebViewCreateFailed>>` / `when_failed`; eval: `<<WebViewEvalFailed>>` / `WebViewTimeoutError`; nav hook timeout: `<<WebViewNavigationFailed>>` / `WebViewNavigationError` (native still returns the default deny); downloads: `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>` / `last_download`
 - **Deferred callbacks** — IPC, RPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
 - **URL safety** — Python `load_url` normalizes/validates schemes; in-page nav denies `javascript:`/`blob:`/… (`data:` under `app=`); `app=` stays on `tkwry://`; IPC/RPC origin/path allowlist + `bridge_allow`
-- **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()` (macOS: private APIs)
+- **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()`; Windows: open works, close/`is_devtools_open` limited (see [Platform notes — DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools)); macOS: private APIs
 - **Print** — `web.print()` opens the system print dialog (no PDF / no result)
 - **Downloads** — `on_download` / `on_download_complete` + `download_allow`; `untrusted=True` denies unless permitted; `last_download` + `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`; `unique_download_path` for same-name files (absolute dest only; no overwrite policy)
 - **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)

@@ -42,3 +42,27 @@ def test_devtools_methods_delegate_to_native(
     native.close_devtools.assert_called_once_with()
 
     frame.destroy()
+
+
+def test_devtools_public_surface() -> None:
+    """F22: unified DevTools API is exactly these three methods + create flag."""
+    for name in ("open_devtools", "close_devtools", "is_devtools_open"):
+        assert callable(getattr(WebView, name))
+    assert "devtools" in WebView.__init__.__code__.co_varnames
+
+
+def test_devtools_raises_after_destroy(tk_root) -> None:
+    import tkinter as tk
+
+    from tkwry import WebViewDestroyedError
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame)
+    web.destroy()
+    with pytest.raises(WebViewDestroyedError, match="open_devtools"):
+        web.open_devtools()
+    with pytest.raises(WebViewDestroyedError, match="close_devtools"):
+        web.close_devtools()
+    with pytest.raises(WebViewDestroyedError, match="is_devtools_open"):
+        web.is_devtools_open()
+    frame.destroy()

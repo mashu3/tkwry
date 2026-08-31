@@ -78,8 +78,8 @@ awareness (e.g. `tkface.win.enable_dpi_awareness()` before `tk.Tk()`), Tk
 would double-scale. Prefer awareness + design-pixel→physical sizing in the
 host app; do not monkeypatch tkwry bounds from app code.
 
-**DevTools:** wry/WebView2 reports `is_devtools_open()` as `False` and
-`close_devtools()` is a no-op; `open_devtools()` still opens the inspector.
+**DevTools:** see [DevTools](#devtools) (WebView2 open works;
+`is_devtools_open` / `close_devtools` do not).
 
 ## Linux
 
@@ -100,6 +100,9 @@ starting the next — when you have several views.
 **Shared `app=`:** Linux can register `tkwry://` only once per WebContext.
 WebViews that share a non-ephemeral `WebSession` must use the same `app=`
 root (`ValueError` on all platforms). See [Trust boundaries](trust.md).
+
+**DevTools:** open / close / `is_devtools_open` work under WebKitGTK when
+the runtime supports the inspector (headless / Xvfb may lack a UI).
 
 ## macOS embedding
 
@@ -131,9 +134,8 @@ create fails, tkwry logs and retries asynchronously (non-fatal).
 WKWebView has no document `NSURL`. After `load_url`, it becomes the concrete
 URI.
 
-**DevTools:** create with `devtools=True`, then `open_devtools()` (flag alone
-does not open; `open_devtools()` without the flag is a no-op on macOS). Uses
-private APIs — avoid in Mac App Store builds.
+**DevTools:** see [DevTools](#devtools) — need `devtools=True` then
+`open_devtools()` (private APIs; avoid Mac App Store builds).
 
 **Notebook / tabs:** unmapped tabs hide the native view (`set_visible(False)`)
 and show again on `<Map>` — required because frames share the toplevel
@@ -146,6 +148,25 @@ Lifecycle / IPC / page-load handlers run on the **Tk main thread**. RPC may
 use a worker (`thread=True`). `on_navigation` / `on_new_window` /
 create-time `permission_handler` still make WebKit wait for a return value —
 see [Usage — Navigation / lifecycle callbacks](usage.md#navigation--lifecycle-callbacks).
+
+## DevTools
+
+Public surface (all platforms):
+
+- create-time ``devtools=True`` (wry ``with_devtools``)
+- ``web.open_devtools()`` / ``web.close_devtools()`` / ``web.is_devtools_open()``
+
+Ready / Tk-thread only; destroy raises ``WebViewDestroyedError``.
+
+| Platform | Enable | Open | Close | ``is_devtools_open`` |
+|----------|--------|------|-------|----------------------|
+| **Windows** | ``devtools=True`` | opens inspector | **no-op** (wry/WebView2) | always ``False`` |
+| **macOS** | **required** — without it ``open_devtools`` is a no-op; uses private APIs (avoid Mac App Store) | opens | closes | accurate when supported |
+| **Linux** | recommended | opens when inspector UI exists | closes | accurate when supported |
+
+Do not invent a fourth API or poll ``is_devtools_open`` on Windows expecting
+a true positive. Integration smoke:
+``tests/integration/test_create_options.py::test_devtools_open_close_roundtrip``.
 
 ## Downloads
 
