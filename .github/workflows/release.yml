@@ -258,7 +258,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "paths<<'EOF'"
+            echo "paths<<EOF"
             ls -1 dist/*.whl dist/*.tar.gz
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
