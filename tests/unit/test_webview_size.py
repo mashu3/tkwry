@@ -1493,6 +1493,8 @@ def test_creation_failure_raises_on_handler_setters(
         web.set_ipc_handler(lambda _msg: None)
     with pytest.raises(WebViewCreationError, match="set_on_navigation"):
         web.set_on_navigation(lambda _url: True)
+    with pytest.raises(WebViewCreationError, match="set_navigation_policy"):
+        web.set_navigation_policy(lambda _event: True)
     with pytest.raises(WebViewCreationError, match="set_on_page_load"):
         web.set_on_page_load(lambda _evt, _url: None)
     with pytest.raises(WebViewCreationError, match="set_on_title_changed"):

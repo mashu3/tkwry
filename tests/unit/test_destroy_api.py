@@ -60,6 +60,7 @@ POST_DESTROY_ACTIONS: dict[str, Callable[[WebView], object]] = {
     "unexpose": lambda w: w.unexpose("ping"),
     "watch_app": lambda w: w.watch_app(),
     "set_on_navigation": lambda w: w.set_on_navigation(lambda _u: True),
+    "set_navigation_policy": lambda w: w.set_navigation_policy(lambda _e: True),
     "set_on_page_load": lambda w: w.set_on_page_load(lambda *_a: None),
     "set_on_title_changed": lambda w: w.set_on_title_changed(lambda _t: None),
     "set_on_new_window": lambda w: w.set_on_new_window(

@@ -92,6 +92,7 @@ WEBVIEW_METHODS = (
     "unexpose",
     "watch_app",
     "set_on_navigation",
+    "set_navigation_policy",
     "set_on_page_load",
     "set_on_title_changed",
     "set_on_new_window",
@@ -275,3 +276,10 @@ def test_drag_drop_event_members() -> None:
 
 def test_new_window_response_members() -> None:
     assert NewWindowResponse.Allow != NewWindowResponse.Deny
+
+
+def test_navigation_event_members() -> None:
+    from tkwry import NavigationEvent, NavigationType
+
+    assert NavigationType.Unknown != NavigationType.Link
+    assert NavigationEvent(url="https://example.com/").url == "https://example.com/"

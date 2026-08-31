@@ -27,6 +27,7 @@ def _snapshot(web: WebView) -> dict[str, Any]:
         "needs_poll": web._needs_event_poll(),
         "download_policy": web._download_policy_active(),
         "on_navigation": web._on_navigation is not None,
+        "navigation_policy": web._navigation_policy is not None,
         "on_page_load": web._on_page_load is not None,
         "on_title_changed": web._on_title_changed is not None,
         "on_new_window": web._on_new_window is not None,
@@ -48,6 +49,11 @@ def _equivalence_case(
     ("ctor_kw", "setter", "handler"),
     [
         _equivalence_case("on_navigation", "set_on_navigation", lambda _url: True),
+        _equivalence_case(
+            "navigation_policy",
+            "set_navigation_policy",
+            lambda event: event.url.startswith("https://"),
+        ),
         _equivalence_case(
             "on_page_load",
             "set_on_page_load",
@@ -96,6 +102,10 @@ def test_handler_ctor_matches_setter(
     ("setter", "register"),
     [
         ("set_on_navigation", lambda w: w.set_on_navigation(lambda _u: True)),
+        (
+            "set_navigation_policy",
+            lambda w: w.set_navigation_policy(lambda _e: True),
+        ),
         (
             "set_on_page_load",
             lambda w: w.set_on_page_load(lambda _e, _u: None),

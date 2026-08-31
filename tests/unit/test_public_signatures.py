@@ -52,6 +52,7 @@ WEBVIEW_INIT_KWONLY = (
     "initialization_script",
     "focused",
     "on_navigation",
+    "navigation_policy",
     "on_page_load",
     "on_title_changed",
     "on_new_window",

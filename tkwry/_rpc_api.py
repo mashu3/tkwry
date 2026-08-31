@@ -223,6 +223,13 @@ class WebViewRpcMixin:
         ``await window.tkwry.invoke("get_data", {id: 123})`` to pass a single
         object as Python keyword arguments.
         """
+        self._require_not_destroyed("rpc")
+        if self._untrusted:
+            raise ValueError("WebView: untrusted=True cannot expose() RPC methods")
+        if self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call rpc()"
+            ) from self._creation_error
         expose_kwargs = {
             "thread": thread,
             "run_in": run_in,

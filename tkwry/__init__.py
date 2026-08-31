@@ -54,6 +54,12 @@ try:
         PermissionKind,
         PermissionResponse,
     )
+    from tkwry.navigation import (
+        NavigationEvent,
+        NavigationHandler,
+        NavigationPolicyHandler,
+        NavigationType,
+    )
     from tkwry.session import WebSession
     from tkwry.webview import (
         BridgeAllow,
@@ -69,7 +75,6 @@ try:
         EvalErrorHandler,
         InFlightDownload,
         IpcHandler,
-        NavigationHandler,
         NewWindowHandler,
         PageLoadHandler,
         PermissionHandler,
@@ -103,7 +108,10 @@ __all__ = [
     "EvalErrorHandler",
     "InFlightDownload",
     "IpcHandler",
+    "NavigationEvent",
     "NavigationHandler",
+    "NavigationPolicyHandler",
+    "NavigationType",
     "NewWindowHandler",
     "NewWindowResponse",
     "PageLoadEvent",

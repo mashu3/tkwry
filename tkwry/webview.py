@@ -83,6 +83,12 @@ from tkwry.exceptions import (
     WebViewNotReadyError,
     WebViewTimeoutError,
 )
+from tkwry.navigation import (
+    NavigationEvent,
+    NavigationHandler,
+    NavigationPolicyHandler,
+    call_navigation_handler,
+)
 from tkwry.session import WebSession
 
 if sys.platform == "darwin":
@@ -99,7 +105,6 @@ if sys.platform == "darwin":
 IpcHandler: TypeAlias = Callable[[str], None]
 BridgeOrigins: TypeAlias = Literal["*"] | Collection[str]
 BridgeAllow: TypeAlias = Callable[[str], bool]
-NavigationHandler: TypeAlias = Callable[[str], bool]
 PageLoadHandler: TypeAlias = Callable[[PageLoadEvent, str], None]
 TitleChangedHandler: TypeAlias = Callable[[str], None]
 NewWindowHandler: TypeAlias = Callable[[str], NewWindowResponse]
@@ -557,6 +562,7 @@ class WebView(WebViewRpcMixin):
         initialization_script: str | None = None,
         focused: bool = True,
         on_navigation: NavigationHandler | None = None,
+        navigation_policy: NavigationPolicyHandler | None = None,
         on_page_load: PageLoadHandler | None = None,
         on_title_changed: TitleChangedHandler | None = None,
         on_new_window: NewWindowHandler | None = None,
@@ -692,6 +698,7 @@ class WebView(WebViewRpcMixin):
         self._spa_fallback = spa_fallback
         self._app_dev = app_dev
         self._on_navigation = on_navigation
+        self._navigation_policy = navigation_policy
         self._on_page_load = on_page_load
         self._on_title_changed = on_title_changed
         self._on_new_window = on_new_window
@@ -2098,19 +2105,43 @@ class WebView(WebViewRpcMixin):
         return self._require_ready("is_devtools_open").is_devtools_open()
 
     def set_on_navigation(self, handler: NavigationHandler | None) -> None:
-        """Register a navigation allow/deny hook (Tk main thread; WebKit waits)."""
+        """Register a navigation allow/deny hook (Tk main thread; WebKit waits).
+
+        The handler receives a :class:`~tkwry.NavigationEvent` or, for legacy
+        code, the URL ``str``. Return ``True`` to allow or ``False`` to block.
+        When set, the handler replaces built-in ``navigation_allow`` /
+        ``open_external`` policy for navigations.
+        """
         self._require_not_destroyed("set_on_navigation")
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call set_on_navigation()"
             ) from self._creation_error
         self._on_navigation = handler
+        self._sync_navigation_hook()
+
+    def set_navigation_policy(self, handler: NavigationPolicyHandler | None) -> None:
+        """Register a URL policy hook using :class:`~tkwry.NavigationEvent`.
+
+        Example: ``set_navigation_policy(lambda e: e.url.startswith("https://"))``.
+        Ignored when :meth:`set_on_navigation` is set — use one hook or combine
+        logic in ``on_navigation``.
+        """
+        self._require_not_destroyed("set_navigation_policy")
+        if handler is not None and self._creation_error is not None:
+            raise WebViewCreationError(
+                "WebView native creation failed; cannot call set_navigation_policy()"
+            ) from self._creation_error
+        self._navigation_policy = handler
+        self._sync_navigation_hook()
+
+    def _sync_navigation_hook(self) -> None:
         if self._webview is not None:
-            if handler is not None or self._navigation_policy_active():
+            if self._on_navigation is not None or self._navigation_policy_active():
                 self._webview.set_on_navigation(self._native_navigation)
             else:
                 self._webview.clear_on_navigation()
-        if handler is not None or self._navigation_policy_active():
+        if self._on_navigation is not None or self._navigation_policy_active():
             self._ensure_tk_wakeup_pipe()
             self._ensure_event_poll()
 
@@ -2629,6 +2660,7 @@ class WebView(WebViewRpcMixin):
             self._untrusted
             or self._lock_app_navigation
             or self._navigation_allow is not None
+            or self._navigation_policy is not None
         )
 
     def _new_window_policy_active(self) -> bool:
@@ -2700,24 +2732,41 @@ class WebView(WebViewRpcMixin):
     def _invoke_navigation_handler(self, url: str) -> bool:
         if self._untrusted and not untrusted_navigation_allowed(url):
             return False
+        event = NavigationEvent(url=url)
         handler = self._on_navigation
-        if handler is None:
-            allowed = self._default_navigation_allowed(url)
-            if not allowed:
-                self._maybe_open_external(url)
-            return allowed
-        try:
-            result = handler(url)
-        except Exception:
-            traceback.print_exc()
-            return False
-        if type(result) is not bool:
-            print(
-                f"tkwry: on_navigation must return bool, got {type(result).__name__}",
-                file=sys.stderr,
-            )
-            return False
-        return result
+        if handler is not None:
+            try:
+                result = call_navigation_handler(handler, event, url=url)
+            except Exception:
+                traceback.print_exc()
+                return False
+            if type(result) is not bool:
+                print(
+                    "tkwry: on_navigation must return bool, got "
+                    f"{type(result).__name__}",
+                    file=sys.stderr,
+                )
+                return False
+            return result
+        policy = self._navigation_policy
+        if policy is not None:
+            try:
+                result = policy(event)
+            except Exception:
+                traceback.print_exc()
+                return False
+            if type(result) is not bool:
+                print(
+                    "tkwry: navigation_policy must return bool, got "
+                    f"{type(result).__name__}",
+                    file=sys.stderr,
+                )
+                return False
+            return result
+        allowed = self._default_navigation_allowed(url)
+        if not allowed:
+            self._maybe_open_external(url)
+        return allowed
 
     def _native_navigation(self, url: str) -> bool:
         if self._on_navigation is None and not self._navigation_policy_active():

@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-Named browser profiles, app-facing download helpers, and RPC invoke sugar.
+Named browser profiles, app-facing download helpers, RPC invoke sugar, and navigation policy events.
 
 ### Added
 
@@ -35,6 +35,13 @@ Named browser profiles, app-facing download helpers, and RPC invoke sugar.
   ``@web.rpc("get_data")`` or ``@web.rpc`` (function name)
 - ``window.tkwry.invoke(method, data)`` — pass a single object as Python
   keyword arguments (maps to ``call`` with ``{ kwargs: data }``)
+- ``NavigationEvent`` / ``NavigationType`` — event object for navigation hooks
+  (``url`` plus reserved fields for future engine metadata)
+- ``set_navigation_policy`` / ``navigation_policy=`` — allow/deny navigations
+  with ``lambda event: event.url.startswith("https://")``; ``on_navigation``
+  takes precedence when both are set
+- ``set_on_navigation`` handlers may receive ``NavigationEvent`` or legacy
+  URL ``str``
 
 ### Docs
 
@@ -42,6 +49,7 @@ Named browser profiles, app-facing download helpers, and RPC invoke sugar.
   handler shapes; download started / failed callbacks and events; ``@web.rpc``
   / ``window.tkwry.invoke``
 - ``docs/rpc.md`` — ``invoke`` vs ``call``; ``@web.rpc`` decorator
+- ``docs/usage.md`` — ``NavigationEvent`` / ``set_navigation_policy`` recipes
 
 ## [0.1.6] - 2026-08-31
 
