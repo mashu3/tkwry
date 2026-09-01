@@ -2601,8 +2601,10 @@ class WebView(WebViewRpcMixin):
         if self._context_menu_active():
             self._require_windows_context_menu_ready("set_context_menu")
             self._enable_context_menu_bridge()
-        elif self._webview is not None:
-            self._webview.set_ipc_listening(self._ipc_listening_wanted())
+        else:
+            if self._webview is not None:
+                self._webview.set_ipc_listening(self._ipc_listening_wanted())
+            self._remove_context_menu_bridge()
         self._sync_page_load_listening()
 
     def set_context_menu_handler(self, handler: ContextMenuHandler | None) -> None:
@@ -2621,8 +2623,10 @@ class WebView(WebViewRpcMixin):
         if self._context_menu_active():
             self._require_windows_context_menu_ready("set_context_menu_handler")
             self._enable_context_menu_bridge()
-        elif self._webview is not None:
-            self._webview.set_ipc_listening(self._ipc_listening_wanted())
+        else:
+            if self._webview is not None:
+                self._webview.set_ipc_listening(self._ipc_listening_wanted())
+            self._remove_context_menu_bridge()
         self._sync_page_load_listening()
 
     def _require_windows_context_menu_ready(self, method: str) -> None:

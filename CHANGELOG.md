@@ -101,6 +101,9 @@ navigation policy events, Tk context menus, script injection tiers, and
   (no longer last-wins through ``eval_js`` coalescing)
 - Context-menu bridge re-injects on ``PageLoadEvent.Started`` after navigation
   so custom menus keep working on subsequent documents
+- Clearing ``set_context_menu(None)`` / ``set_context_menu_handler(None)``
+  removes the page ``contextmenu`` listener so the browser default menu works
+  again
 - Off-thread sync hooks (navigation, new window, download policy) reuse
   preallocated ``threading.Event`` objects instead of allocating on every
   call, avoiding rare crashes when garbage collection runs during a hook

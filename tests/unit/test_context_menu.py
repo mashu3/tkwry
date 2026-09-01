@@ -10,6 +10,7 @@ import pytest
 
 from tkwry import ContextMenuEvent, PageLoadEvent, WebView
 from tkwry.context_menu import (
+    CONTEXT_MENU_DISABLE_JS,
     CONTEXT_MENU_JS,
     merge_context_menu_script,
     normalize_context_menu_items,
@@ -170,6 +171,71 @@ def test_context_menu_bridge_reinjected_on_page_load_started(
     web._deliver_page_load_events()
 
     assert injected == [CONTEXT_MENU_JS]
+    web.destroy()
+    frame.destroy()
+
+
+def test_clearing_context_menu_removes_bridge(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>x</p>", default_context_menus=False)
+    evals: list[str] = []
+
+    class _Native:
+        def set_ipc_listening(self, enabled: bool) -> None:
+            pass
+
+        def set_page_load_listening(self, enabled: bool) -> None:
+            pass
+
+        def eval_js(self, script: str) -> None:
+            evals.append(script)
+
+        def destroy(self) -> None:
+            pass
+
+    web._webview = _Native()  # type: ignore[assignment]
+    web.set_context_menu([("Copy", lambda: None)])
+    web._context_menu_bridge_injected = True
+    evals.clear()
+
+    web.set_context_menu(None)
+
+    assert evals == [CONTEXT_MENU_DISABLE_JS]
+    assert web._context_menu_bridge_injected is False
+    assert web._page_load_listening_wanted() is False
+    web.destroy()
+    frame.destroy()
+
+
+def test_clearing_context_menu_handler_removes_bridge_when_no_items(
+    tk_root,
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>x</p>", default_context_menus=False)
+    evals: list[str] = []
+
+    class _Native:
+        def set_ipc_listening(self, enabled: bool) -> None:
+            pass
+
+        def set_page_load_listening(self, enabled: bool) -> None:
+            pass
+
+        def eval_js(self, script: str) -> None:
+            evals.append(script)
+
+        def destroy(self) -> None:
+            pass
+
+    web._webview = _Native()  # type: ignore[assignment]
+    web.set_context_menu_handler(lambda _e: None)
+    web._context_menu_bridge_injected = True
+    evals.clear()
+
+    web.set_context_menu_handler(None)
+
+    assert evals == [CONTEXT_MENU_DISABLE_JS]
+    assert web._context_menu_bridge_injected is False
     web.destroy()
     frame.destroy()
 

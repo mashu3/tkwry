@@ -16,9 +16,14 @@ CONTEXT_MENU_MARKER = "contextmenu"
 # Injected when a host context menu or handler is registered.
 CONTEXT_MENU_JS = """\
 (function () {
-  if (window.__tkwryContextMenu) return;
-  window.__tkwryContextMenu = true;
-  document.addEventListener("contextmenu", function (event) {
+  if (window.__tkwryContextMenuListener) {
+    document.removeEventListener(
+      "contextmenu",
+      window.__tkwryContextMenuListener,
+      true
+    );
+  }
+  window.__tkwryContextMenuListener = function (event) {
     event.preventDefault();
     event.stopPropagation();
     var link = null;
@@ -44,7 +49,25 @@ CONTEXT_MENU_JS = """\
       link_url: link,
       selected_text: sel || null
     }));
-  }, true);
+  };
+  window.__tkwryContextMenu = true;
+  document.addEventListener(
+    "contextmenu",
+    window.__tkwryContextMenuListener,
+    true
+  );
+})();
+"""
+
+# Injected when the host clears all context-menu hooks on a live document.
+CONTEXT_MENU_DISABLE_JS = """\
+(function () {
+  var listener = window.__tkwryContextMenuListener;
+  if (listener) {
+    document.removeEventListener("contextmenu", listener, true);
+    window.__tkwryContextMenuListener = null;
+  }
+  window.__tkwryContextMenu = false;
 })();
 """
 

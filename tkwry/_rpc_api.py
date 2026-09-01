@@ -25,6 +25,7 @@ from tkwry._app import (
     scan_app_mtime,
 )
 from tkwry.context_menu import (
+    CONTEXT_MENU_DISABLE_JS,
     CONTEXT_MENU_JS,
     parse_context_menu_event,
 )
@@ -405,6 +406,18 @@ class WebViewRpcMixin:
             self._context_menu_bridge_injected = True
         except Exception:
             traceback.print_exc()
+
+    def _remove_context_menu_bridge(self) -> None:
+        """Drop the context-menu JS hook from the current document."""
+        if not getattr(self, "_context_menu_bridge_injected", False):
+            return
+        native = self._webview
+        if native is not None:
+            try:
+                native.eval_js(CONTEXT_MENU_DISABLE_JS)
+            except Exception:
+                traceback.print_exc()
+        self._context_menu_bridge_injected = False
 
     def _enable_context_menu_bridge(self) -> None:
         """Ensure IPC listening and the context-menu JS hook are active."""
