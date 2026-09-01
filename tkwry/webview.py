@@ -2288,6 +2288,7 @@ class WebView(WebViewRpcMixin):
             or self._state_wanted
             or self._rpc_bridge_wanted
             or bool(self._rpc_methods)
+            or self._context_menu_active()
         )
 
     def _title_listening_wanted(self) -> bool:
@@ -2602,6 +2603,7 @@ class WebView(WebViewRpcMixin):
             self._enable_context_menu_bridge()
         elif self._webview is not None:
             self._webview.set_ipc_listening(self._ipc_listening_wanted())
+        self._sync_page_load_listening()
 
     def set_context_menu_handler(self, handler: ContextMenuHandler | None) -> None:
         """Register a host handler for page context-menu events.
@@ -2621,6 +2623,7 @@ class WebView(WebViewRpcMixin):
             self._enable_context_menu_bridge()
         elif self._webview is not None:
             self._webview.set_ipc_listening(self._ipc_listening_wanted())
+        self._sync_page_load_listening()
 
     def _require_windows_context_menu_ready(self, method: str) -> None:
         if sys.platform != "win32":
@@ -3683,7 +3686,12 @@ class WebView(WebViewRpcMixin):
         native = self._webview
         if native is None:
             return
-        if page_load is None and not self._inject_scripts and not self._state_wanted:
+        if (
+            page_load is None
+            and not self._inject_scripts
+            and not self._state_wanted
+            and not self._context_menu_active()
+        ):
             if not self._rpc_bridge_wanted and not self._rpc_methods:
                 return
         pending = native.drain_page_load_events()
@@ -3703,6 +3711,11 @@ class WebView(WebViewRpcMixin):
                         self._run_eval_js(script)
                     except Exception:
                         traceback.print_exc()
+            if event == PageLoadEvent.Started and self._context_menu_active():
+                try:
+                    self._inject_context_menu_bridge()
+                except Exception:
+                    traceback.print_exc()
             if page_load is not None:
                 self._invoke_callback(page_load, event, page_url, kind="on_page_load")
 

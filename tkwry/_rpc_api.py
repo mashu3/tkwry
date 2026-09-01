@@ -394,16 +394,22 @@ class WebViewRpcMixin:
         self._sync_page_load_listening()
         self._ensure_event_poll()
 
+    def _inject_context_menu_bridge(self) -> None:
+        """Inject the context-menu JS hook into the current document."""
+        native = self._webview
+        if native is None or not self._context_menu_active():
+            return
+        native.set_ipc_listening(True)
+        try:
+            native.eval_js(CONTEXT_MENU_JS)
+            self._context_menu_bridge_injected = True
+        except Exception:
+            traceback.print_exc()
+
     def _enable_context_menu_bridge(self) -> None:
         """Ensure IPC listening and the context-menu JS hook are active."""
-        if self._webview is not None:
-            self._webview.set_ipc_listening(True)
-            if not getattr(self, "_context_menu_bridge_injected", False):
-                try:
-                    self._webview.eval_js(CONTEXT_MENU_JS)
-                    self._context_menu_bridge_injected = True
-                except Exception:
-                    traceback.print_exc()
+        if not getattr(self, "_context_menu_bridge_injected", False):
+            self._inject_context_menu_bridge()
         self._ensure_event_poll()
 
     def _effective_initialization_script(self) -> str | None:
