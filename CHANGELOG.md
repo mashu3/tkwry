@@ -57,8 +57,8 @@ navigation policy events, Tk context menus, script injection tiers, and
 - ``execute_script`` — one-shot alias of ``eval_js`` (does not re-run on
   navigation)
 - ``inject_script`` — before create acts like ``add_init_script``; after
-  ready runs now and re-injects on each ``PageLoadEvent.Started``
-  (best-effort persistence; wry has no post-create init-script API)
+  ready runs now and re-injects on each page load start (best-effort
+  persistence across navigations)
 - ``WebView.get_state()`` → ``WebViewState`` snapshot for Tk toolbars
   (``url``, ``title``, ``loading``, ``can_go_back`` / ``can_go_forward``,
   ``zoom``, ``ready``, ``phase``, ``destroyed``, ``devtools_open``);
@@ -67,8 +67,13 @@ navigation policy events, Tk context menus, script injection tiers, and
 
 ### Fixed
 
-- Off-thread sync hooks reuse preallocated ``threading.Event`` objects so
-  Linux CI no longer aborts when GC runs during ``test_sync_hooks``
+- Releasing the native WebView from a background thread no longer destroys the
+  embedded browser on that thread (which could crash). Call ``destroy()`` on
+  the Tk main thread before dropping the last reference; if the native object
+  is still collected elsewhere, tkwry logs a warning instead of crashing
+- Off-thread sync hooks (navigation, new window, download policy) reuse
+  preallocated ``threading.Event`` objects instead of allocating on every
+  call, avoiding rare crashes when garbage collection runs during a hook
 
 ### Docs
 
@@ -79,20 +84,21 @@ navigation policy events, Tk context menus, script injection tiers, and
 - ``docs/usage.md`` — ``NavigationEvent`` / ``set_navigation_policy`` recipes;
   Tk context menu / ``ContextMenuEvent``; script injection tiers
   (``inject_script`` / ``execute_script`` / ``add_init_script``)
-- Print / PDF honesty — no ``print_to_pdf`` under wry 0.56.1; system dialog
-  + macOS ``print_with_options`` only (``docs/platforms.md``, README,
-  ``usage.md``); upstream watch stays in maintainers §8.7
-- DevTools formalization — ``open_devtools`` / ``close_devtools`` /
-  ``is_devtools_open`` + ``devtools=`` parity table (``docs/platforms.md``,
-  ``usage.md``); Windows WebView2 close/query limits documented
-- Find in page honesty — no ``find`` / ``find_next`` under wry 0.56.1
-  (``docs/platforms.md``, README); upstream watch stays in maintainers §8.7
+- ``docs/platforms.md``, README, ``docs/usage.md`` — document that
+  ``print_to_pdf`` is not available; system print dialog and macOS
+  ``print_with_options`` only
+- ``docs/platforms.md``, ``docs/usage.md`` — DevTools API
+  (``open_devtools`` / ``close_devtools`` / ``is_devtools_open`` /
+  ``devtools=``) with a platform parity table; Windows WebView2
+  close/query limits documented
+- ``docs/platforms.md``, README — find-in-page is not available (no
+  ``find`` / ``find_next`` API)
 - ``docs/usage.md`` — ``get_state`` / ``WebViewState`` for toolbar binding
 
 ## [0.1.6] - 2026-08-31
 
-Last Alpha slice before Beta prep: wry builder wraps, session/download/print
-deferrals, release provenance, and lifecycle leak / routing fixes.
+Additional create-time WebView options, session/download/print helpers,
+release provenance, and lifecycle leak / routing fixes.
 
 ### Added
 
@@ -102,7 +108,7 @@ deferrals, release provenance, and lifecycle leak / routing fixes.
 - ``WebSession.close()`` — tear down a shared profile when no WebViews remain
   (``closed`` flag; usage + ``browser_demo`` quit path)
 - ``InFlightDownload`` / ``in_flight_downloads`` — active download metadata
-  from policy-hook starts through complete (no progress % — §8.7)
+  from policy-hook starts through complete (download progress % not exposed)
 - ``print_with_options`` (macOS) — page margins via wry; no PDF / print result
   on any platform
 - ``WebView.bounds`` — read native ``(x, y, width, height)`` in ``set_bounds``
@@ -136,21 +142,20 @@ deferrals, release provenance, and lifecycle leak / routing fixes.
 
 ### Fixed
 
-- Idempotent per-WebView Tk wakeup pipe registration (D24); Linux no longer
+- Idempotent per-WebView Tk wakeup pipe registration; Linux no longer
   double-increments on create; setter churn does not leak FDs / handlers
 - Claim frame host before WebView ctor side effects; rollback partial binds on
-  failed create (D25)
-- Nonblocking wakeup pipe writes when saturated (D26 Unix ``O_NONBLOCK``,
-  D27 Windows ``PIPE_NOWAIT``)
+  failed create
+- Nonblocking wakeup pipe writes when saturated (Unix ``O_NONBLOCK``,
+  Windows ``PIPE_NOWAIT``)
 - Linux ``registered_app_root`` committed only after successful
   ``build_as_child``; failed create retries still attach ``app=`` protocol
-  (D28)
 - macOS multi-WebView focus coordinator refreshes wakeup fd when a sibling
-  WebView is destroyed (D29)
+  WebView is destroyed
 - RPC envelope routing parses the top-level ``__tkwry`` JSON key instead of
-  substring scan (D30)
+  substring scan
 - When ``html=`` is given at construction, ``app=`` is not resolved — no
-  ``_app_root``, nav lock, or app CSP / bridge origins (D31)
+  app root binding, navigation lock, or app CSP / bridge origins
 
 ### Docs
 
@@ -176,9 +181,9 @@ deferrals, release provenance, and lifecycle leak / routing fixes.
   other worker-stress cases (``0x80000003`` under GC after ``test_content``)
 - Windows CI: reap leftover ``msedgewebview2.exe`` between pytest suites
   (arm64 ``Tk.update()`` wedge after create/destroy); 25-minute step timeout
-- Frame host claim (T9), wakeup pipe saturation (T10), Linux app-root commit
-  (T11), macOS focus wakeup fd (T12), RPC envelope routing (T13), ``html=``
-  precedence (T14)
+- Regression coverage for frame host claim, wakeup pipe saturation under load,
+  Linux ``app=`` root commit after create, macOS multi-WebView focus wakeup
+  fd refresh, RPC envelope routing, and ``html=`` vs ``app=`` precedence
 
 ## [0.1.5] - 2026-08-30
 
@@ -218,7 +223,7 @@ download-complete / RPC fixes, docs CI, and tag gates.
   ``<<WebViewDownloadFailed>>`` without ``on_download_complete`` (wakeup path;
   no idle ``_webview is not None`` poll latch)
 - Windows (and Tk without ``createfilehandler``): after-poll the shared wakeup
-  pipe so handler-less download-complete still drains (D21 gap on Required)
+  pipe so handler-less download-complete still drains on Windows and macOS
 - Provisional ``on_callback_error=(exc, kind)`` / ``set_on_callback_error``
   for lifecycle / IPC / page-load / title / DnD / download-complete /
   ``when_ready`` / ``when_failed`` callback exceptions (default remains stderr)
@@ -234,8 +239,7 @@ download-complete / RPC fixes, docs CI, and tag gates.
 
 ### Tests
 
-- Dual ctor/setter equivalence for lifecycle handler APIs
-  (``test_dual_api_equivalence.py`` — Beta B3 partial)
+- Dual ctor/setter equivalence tests for lifecycle handler APIs
 - Browser-essentials integration (local HTTP): ``load_url`` custom headers,
   ``Set-Cookie`` / ``set_cookie`` / ``delete_cookie`` /
   ``clear_all_browsing_data``, zoom + permission + clipboard smoke, and
@@ -307,7 +311,7 @@ the 0.1.4 contract.
 
 - Split README into a landing page plus ``docs/trust.md``, ``docs/rpc.md``,
   and ``docs/platforms.md``. Trust recipes (local / untrusted / mixed
-  sessions), Origin / ``download_allow`` error table, ``print()`` honesty
+  sessions), Origin / ``download_allow`` error table, ``print()`` limitations
   (system dialog, no PDF / no result), and window chrome = host Toplevel
   (WebView follows the Frame)
 - Bump wry ``0.55.1`` → ``0.56.1`` (IPC no longer panics on invalid document

@@ -1279,12 +1279,35 @@ struct WebView {
 }
 
 impl WebView {
+    fn is_owner_thread(&self) -> bool {
+        python_thread_id()
+            .ok()
+            .is_some_and(|current| current == self.owner_thread)
+    }
+
     fn require_owner_thread(&self) -> PyResult<()> {
         let current = python_thread_id()?;
         if current != self.owner_thread {
             return Err(pyo3::exceptions::PyRuntimeError::new_err(THREAD_ERROR));
         }
         Ok(())
+    }
+
+    /// Off-thread ``Drop`` must not destroy UI objects — leak the native view.
+    fn leak_native_off_owner_thread(&self) {
+        #[cfg(target_os = "macos")]
+        self.mac.teardown();
+        self.wakeup_write_fd.store(-1, Ordering::SeqCst);
+        let Ok(mut guard) = self.inner.lock() else {
+            return;
+        };
+        if let Some(wv) = guard.take() {
+            eprintln!(
+                "tkwry: WebView dropped off owner thread; native WebView leaked — \
+call destroy() on the Tk thread before GC"
+            );
+            std::mem::forget(wv);
+        }
     }
 
     fn enter_wry_call(&self) {
@@ -2686,8 +2709,12 @@ WebViews that share a session must use the same app= root \
 impl Drop for WebView {
     fn drop(&mut self) {
         self.clear_callbacks_and_queues();
-        if let Err(err) = self.destroy_inner() {
-            eprintln!("tkwry: WebView drop teardown failed: {err}");
+        if self.is_owner_thread() {
+            if let Err(err) = self.destroy_inner() {
+                eprintln!("tkwry: WebView drop teardown failed: {err}");
+            }
+        } else {
+            self.leak_native_off_owner_thread();
         }
     }
 }

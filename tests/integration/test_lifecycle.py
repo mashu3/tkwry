@@ -446,6 +446,42 @@ def test_native_rejects_other_thread(tk_root) -> None:
     frame.destroy()
 
 
+def test_native_drop_off_owner_thread_leaks_without_crash(tk_root) -> None:
+    """Native WebView collected off the Tk thread must not crash."""
+    import gc
+
+    frame = bare_frame(tk_root)
+    web = WebView(frame, width=400, height=300, html="<p>drop</p>")
+    layout_bare_frame(frame, width=400, height=300)
+    assert web.wait_until_ready(timeout=10.0)
+
+    native = web.native
+    assert native is not None
+    assert native.is_alive()
+    native_holder = [native]
+    errors: list[str] = []
+    done = threading.Event()
+
+    def worker() -> None:
+        try:
+            web._webview = None  # type: ignore[assignment]
+            native_holder.clear()
+            gc.collect()
+        except BaseException as exc:
+            errors.append(str(exc))
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    assert done.wait(timeout=10.0)
+    assert errors == []
+    assert web._webview is None
+
+    web._destroyed = True
+    frame.destroy()
+
+
 def test_navigation_callback_can_clear_handler(tk_root) -> None:
     frame = bare_frame(tk_root)
     web = WebView(frame, width=400, height=300, html="<p>nav-reentrant</p>")
