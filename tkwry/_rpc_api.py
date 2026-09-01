@@ -48,7 +48,9 @@ from tkwry.ipc import (
     format_rpc_error,
     merge_initialization_script,
     parse_rpc_request,
+    rpc_bump_epoch_script,
     rpc_error,
+    rpc_id_epoch,
     settle_script,
     stream_chunk_script,
 )
@@ -88,6 +90,7 @@ class WebViewRpcMixin:
         self._rpc_timeout_after: dict[str, str] = {}
         self._rpc_cancel_events: dict[str, threading.Event] = {}
         self._rpc_user_cancelled: set[str] = set()
+        self._rpc_epoch = 0
         self._app_watch_after_id: str | None = None
         self._app_watch_mtime: float | None = None
         self._app_watch_suffixes: frozenset[str] | None = WATCH_DEFAULT_SUFFIXES
@@ -388,6 +391,7 @@ class WebViewRpcMixin:
                     self._rpc_bootstrap_injected = True
                 except Exception:
                     traceback.print_exc()
+        self._sync_page_load_listening()
         self._ensure_event_poll()
 
     def _enable_context_menu_bridge(self) -> None:
@@ -482,6 +486,44 @@ class WebViewRpcMixin:
         n = self._rpc_stream_dropped
         self._rpc_stream_dropped = 0
         return n
+
+    def _rpc_settle_allowed(self, req_id: str) -> bool:
+        epoch = rpc_id_epoch(req_id)
+        if epoch is None:
+            return True
+        return epoch == self._rpc_epoch
+
+    def _cancel_inflight_rpc_for_navigation(self) -> None:
+        """Drop in-flight RPC when the document navigates (no JS settle)."""
+        pending = list(self._rpc_inflight.items())
+        self._rpc_inflight.clear()
+        self._discard_rpc_done_queue()
+        for after_id in list(self._rpc_timeout_after.values()):
+            try:
+                self._frame.after_cancel(after_id)
+            except (tk.TclError, RuntimeError, ValueError):
+                pass
+        self._rpc_timeout_after.clear()
+        self._rpc_stream_open.clear()
+        for event in self._rpc_cancel_events.values():
+            event.set()
+        self._rpc_cancel_events.clear()
+        self._rpc_user_cancelled.clear()
+        for _req_id, fut in pending:
+            fut.cancel()
+
+    def _bump_rpc_epoch_for_navigation(self) -> None:
+        """Advance RPC ids so stale responses cannot settle a new document."""
+        self._rpc_epoch += 1
+        self._cancel_inflight_rpc_for_navigation()
+        if self._destroyed or self._webview is None:
+            return
+        if not (self._rpc_bridge_wanted or self._rpc_methods):
+            return
+        try:
+            self._webview.eval_js(rpc_bump_epoch_script(self._rpc_epoch))
+        except Exception:
+            traceback.print_exc()
 
     def _abort_inflight_rpc(self) -> None:
         """Drop inflight RPC on destroy without touching the dying native view."""
@@ -758,6 +800,8 @@ class WebViewRpcMixin:
             self._settle_tracked_rpc_future(req_id, done_fut)
 
     def _push_rpc_chunk(self, req_id: str, value: object) -> None:
+        if not self._rpc_settle_allowed(req_id):
+            return
         if self._destroyed or req_id not in self._rpc_stream_open:
             return
         try:
@@ -836,6 +880,11 @@ class WebViewRpcMixin:
             pass
 
     def _settle_rpc(self, req_id: str, *, ok: bool, value: object) -> None:
+        if not self._rpc_settle_allowed(req_id):
+            self._drop_rpc_cancel(req_id)
+            self._rpc_inflight.pop(req_id, None)
+            self._rpc_stream_open.discard(req_id)
+            return
         self._rpc_user_cancelled.discard(req_id)
         self._rpc_stream_open.discard(req_id)
         try:

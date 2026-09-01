@@ -26,8 +26,10 @@ from tkwry.ipc import (
     format_rpc_error,
     merge_initialization_script,
     parse_rpc_request,
+    rpc_bump_epoch_script,
     rpc_cancel_event,
     rpc_cancelled,
+    rpc_id_epoch,
     settle_script,
     stream_chunk_script,
 )
@@ -110,6 +112,19 @@ def test_parse_rpc_request_rejects_plain_ipc() -> None:
         )
         is None
     )
+
+
+def test_rpc_id_epoch_and_bump_script() -> None:
+    assert rpc_id_epoch("0:r1") == 0
+    assert rpc_id_epoch("12:r99") == 12
+    assert rpc_id_epoch("r1") is None
+    assert rpc_id_epoch("bad:r1") is None
+    assert "_bumpEpoch(2)" in rpc_bump_epoch_script(2)
+
+
+def test_rpc_bootstrap_uses_epoch_prefixed_ids() -> None:
+    assert "nextRpcId" in RPC_BOOTSTRAP_JS
+    assert "_bumpEpoch" in RPC_BOOTSTRAP_JS
 
 
 def test_dispatch_rpc_success_and_unknown() -> None:

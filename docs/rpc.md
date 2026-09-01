@@ -88,7 +88,10 @@ and `emit` payloads must be strict JSON (no `datetime`, custom objects,
 `RpcSerializationError`. Errors reject the Promise with a structured payload
 (`error.name` / `error.message`; set `rpc_traceback=True` or
 `TKWRY_RPC_TRACEBACK=1` for tracebacks). Duplicate method names raise unless
-`replace=True`. Destroy rejects in-flight RPCs. Keyword args go in
+`replace=True`. Destroy rejects in-flight RPCs. After the first page load,
+each top-level navigation advances an RPC **epoch** so ids look like
+``0:r1``, ``1:r1`` — stale responses from an earlier page cannot settle a
+new document's Promises. Keyword args go in
 `{ kwargs: { … } }` (a trailing `{ timeout: ms }` is still call options, not
 a positional dict).
 

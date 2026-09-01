@@ -74,6 +74,9 @@ navigation policy events, Tk context menus, script injection tiers, and
 - ``@expose(thread=True)`` handlers that return a ``concurrent.futures.Future``
   now await that future on the worker thread before settling the RPC (main-thread
   handlers still pass the future through for async settle)
+- RPC ids include a navigation epoch (``0:r1``, ``1:r1``, …) so responses from a
+  previous page cannot settle Promises after reload or in-page navigation;
+  in-flight calls are cancelled on the Python side when the epoch advances
 - Off-thread sync hooks (navigation, new window, download policy) reuse
   preallocated ``threading.Event`` objects instead of allocating on every
   call, avoiding rare crashes when garbage collection runs during a hook

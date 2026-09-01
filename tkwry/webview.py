@@ -776,6 +776,7 @@ class WebView(WebViewRpcMixin):
         self._inject_scripts: list[str] = []
         self._document_title: str | None = None
         self._loading = False
+        self._document_loaded_once = False
         self._zoom = 1.0
         self._state_wanted = False
         self._focus_when_ready = False
@@ -2285,6 +2286,8 @@ class WebView(WebViewRpcMixin):
             self._on_page_load is not None
             or bool(self._inject_scripts)
             or self._state_wanted
+            or self._rpc_bridge_wanted
+            or bool(self._rpc_methods)
         )
 
     def _title_listening_wanted(self) -> bool:
@@ -3661,13 +3664,19 @@ class WebView(WebViewRpcMixin):
         if native is None:
             return
         if page_load is None and not self._inject_scripts and not self._state_wanted:
-            return
+            if not self._rpc_bridge_wanted and not self._rpc_methods:
+                return
         pending = native.drain_page_load_events()
         for event, page_url in pending:
             if event == PageLoadEvent.Started:
                 self._loading = True
+                if (self._rpc_bridge_wanted or self._rpc_methods) and (
+                    self._document_loaded_once
+                ):
+                    self._bump_rpc_epoch_for_navigation()
             elif event == PageLoadEvent.Finished:
                 self._loading = False
+                self._document_loaded_once = True
             if event == PageLoadEvent.Started and self._inject_scripts:
                 for script in list(self._inject_scripts):
                     try:

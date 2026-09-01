@@ -59,9 +59,27 @@ RPC_BOOTSTRAP_JS = """\
 (function () {
   if (window.tkwry && window.tkwry.call && window.tkwry.invoke
       && window.tkwry.stream && window.tkwry.on) return;
+  var epoch = 0;
   var seq = 0;
   var pending = Object.create(null);
   var listeners = Object.create(null);
+  function nextRpcId() {
+    return String(epoch) + ":r" + String(++seq);
+  }
+  function rpcEpochOf(id) {
+    id = String(id || "");
+    var colon = id.indexOf(":");
+    if (colon < 0) return null;
+    return id.slice(0, colon);
+  }
+  function rejectAllPending(reason) {
+    for (var key in pending) {
+      if (!Object.prototype.hasOwnProperty.call(pending, key)) continue;
+      var slot = pending[key];
+      if (slot && slot.finish) slot.finish(false, reason);
+    }
+    pending = Object.create(null);
+  }
   function isCallOptions(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
     var keys = Object.keys(value);
@@ -104,7 +122,7 @@ RPC_BOOTSTRAP_JS = """\
       if (params.length && isCallOptions(params[params.length - 1])) {
         options = params.pop();
       }
-      var id = "r" + String(++seq);
+      var id = nextRpcId();
       var promise = new Promise(function (resolve, reject) {
         var settled = false;
         var timer = null;
@@ -184,7 +202,7 @@ RPC_BOOTSTRAP_JS = """\
       if (params.length && isCallOptions(params[params.length - 1])) {
         options = params.pop();
       }
-      var id = "r" + String(++seq);
+      var id = nextRpcId();
       var queue = [];
       var waiting = null;
       var finished = false;
@@ -288,6 +306,8 @@ RPC_BOOTSTRAP_JS = """\
     cancel: function (id) {
       id = String(id || "");
       if (!id) return;
+      var idEpoch = rpcEpochOf(id);
+      if (idEpoch !== null && String(epoch) !== idEpoch) return;
       var slot = pending[id];
       if (slot) {
         slot.finish(false, {
@@ -336,14 +356,29 @@ RPC_BOOTSTRAP_JS = """\
       }
     },
     _chunk: function (id, value) {
+      id = String(id || "");
+      var idEpoch = rpcEpochOf(id);
+      if (idEpoch !== null && String(epoch) !== idEpoch) return;
       var slot = pending[id];
       if (!slot || !slot.chunk) return;
       slot.chunk(value);
     },
     _settle: function (id, ok, value) {
+      id = String(id || "");
+      if (!id) return;
+      var idEpoch = rpcEpochOf(id);
+      if (idEpoch !== null && String(epoch) !== idEpoch) return;
       var slot = pending[id];
       if (!slot) return;
       slot.finish(!!ok, value);
+    },
+    _bumpEpoch: function (nextEpoch) {
+      epoch = Number(nextEpoch) || 0;
+      seq = 0;
+      rejectAllPending({
+        type: "RpcCancelledError",
+        message: "rpc cancelled by navigation"
+      });
     }
   };
 })();
@@ -580,6 +615,27 @@ def format_rpc_error(
 def rpc_error(type_name: str, message: str) -> dict[str, str]:
     """Build a structured error without a live exception."""
     return {"type": type_name, "message": message}
+
+
+def rpc_id_epoch(req_id: str) -> int | None:
+    """Return the navigation epoch prefix of an RPC id, or ``None`` if absent."""
+    if ":" not in req_id:
+        return None
+    prefix, _, rest = req_id.partition(":")
+    if not rest:
+        return None
+    try:
+        return int(prefix)
+    except ValueError:
+        return None
+
+
+def rpc_bump_epoch_script(epoch: int) -> str:
+    """Build ``eval_js`` source that advances the in-page RPC epoch."""
+    return (
+        "window.tkwry && window.tkwry._bumpEpoch && "
+        f"window.tkwry._bumpEpoch({int(epoch)});"
+    )
 
 
 def settle_script(req_id: str, *, ok: bool, value: Any) -> str:
