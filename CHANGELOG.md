@@ -80,6 +80,8 @@ navigation policy events, Tk context menus, script injection tiers, and
 - ``html=`` bridge defaults now allow only ``about:blank`` (not ``null``), and
   ``data:``, ``blob:``, and ``about:srcdoc`` documents cannot reach IPC/RPC even
   after navigation
+- ``app=`` custom-protocol requests reject ``Referer`` URLs whose host only
+  prefix-matched ``tkwry.localhost`` (for example ``https://tkwry.localhost.evil/``)
 - Off-thread sync hooks (navigation, new window, download policy) reuse
   preallocated ``threading.Event`` objects instead of allocating on every
   call, avoiding rare crashes when garbage collection runs during a hook

@@ -564,14 +564,35 @@ fn is_tkwry_origin(value: &str) -> bool {
     )
 }
 
+/// Parse ``scheme`` and ``host`` from a Referer URL (authority only).
+fn parse_referer_host(value: &str) -> Option<(String, String)> {
+    let trimmed = value.trim();
+    let scheme_sep = trimmed.find("://")?;
+    let scheme = trimmed[..scheme_sep].to_ascii_lowercase();
+    let rest = &trimmed[scheme_sep + 3..];
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    let host_port = authority.rsplit('@').next()?;
+    let host = if host_port.starts_with('[') {
+        let end = host_port.find(']')?;
+        host_port[1..end].to_ascii_lowercase()
+    } else if let Some(colon) = host_port.rfind(':') {
+        host_port[..colon].to_ascii_lowercase()
+    } else {
+        host_port.to_ascii_lowercase()
+    };
+    Some((scheme, host))
+}
+
 fn is_tkwry_referer(value: &str) -> bool {
-    let lower = value.trim().to_ascii_lowercase();
-    lower.starts_with("tkwry://localhost")
-        || lower == "tkwry://app"
-        || lower.starts_with("tkwry://app/")
-        || lower.starts_with("tkwry://app?")
-        || lower.starts_with("https://tkwry.localhost")
-        || lower.starts_with("http://tkwry.localhost")
+    let Some((scheme, host)) = parse_referer_host(value) else {
+        return false;
+    };
+    match scheme.as_str() {
+        "tkwry" => matches!(host.as_str(), "localhost" | "app"),
+        "https" | "http" => host == "tkwry.localhost",
+        _ => false,
+    }
 }
 
 /// True when a custom-protocol request clearly comes from another origin.
@@ -974,6 +995,39 @@ mod tests {
             &options,
         );
         assert_eq!(referer.status(), StatusCode::FORBIDDEN);
+
+        let lookalike_referer = serve_app_request(
+            &root,
+            request_with(
+                Method::GET,
+                "/index.html",
+                &[("referer", "https://tkwry.localhost.evil/page")],
+            ),
+            &options,
+        );
+        assert_eq!(lookalike_referer.status(), StatusCode::FORBIDDEN);
+
+        let lookalike_tkwry_referer = serve_app_request(
+            &root,
+            request_with(
+                Method::GET,
+                "/index.html",
+                &[("referer", "tkwry://localhost.evil/page")],
+            ),
+            &options,
+        );
+        assert_eq!(lookalike_tkwry_referer.status(), StatusCode::FORBIDDEN);
+
+        let valid_referer = serve_app_request(
+            &root,
+            request_with(
+                Method::GET,
+                "/index.html",
+                &[("referer", "https://tkwry.localhost/index.html")],
+            ),
+            &options,
+        );
+        assert_eq!(valid_referer.status(), StatusCode::OK);
 
         let same = serve_app_request(
             &root,
