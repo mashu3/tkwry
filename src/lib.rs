@@ -1275,7 +1275,7 @@ struct WebView {
     https_scheme: bool,
     /// Keeps the shared ``WebContext`` alive (custom protocol / profile).
     #[allow(dead_code)]
-    session: Option<Arc<Mutex<session::WebSessionState>>>,
+    session: Option<session::SessionRefs>,
 }
 
 impl WebView {
@@ -1749,13 +1749,7 @@ impl WebView {
                 );
             };
 
-        let session_state = session.as_ref().map(|s| s.borrow().state_arc());
-        let mut session_guard = match session_state.as_ref() {
-            Some(arc) => Some(arc.lock().map_err(|_| {
-                pyo3::exceptions::PyRuntimeError::new_err("WebSession lock poisoned")
-            })?),
-            None => None,
-        };
+        let session_refs = session.as_ref().map(|s| s.borrow().session_refs());
 
         let app_root_path = match app_root {
             Some(root) => {
@@ -1771,31 +1765,48 @@ impl WebView {
             None => None,
         };
 
-        let register_app = match (&app_root_path, session_guard.as_ref()) {
-            (Some(root), Some(guard)) if !guard.ephemeral => {
-                if let Some(existing) = &guard.registered_app_root {
-                    if existing != root {
-                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                            "WebSession already has app root {}; cannot use {}. \
+        let (register_app, ephemeral, data_store_id) = match (&app_root_path, session_refs.as_ref())
+        {
+            (Some(root), Some(refs)) => {
+                let guard = refs.lock_meta()?;
+                let register = if guard.ephemeral {
+                    true
+                } else {
+                    if let Some(existing) = &guard.registered_app_root {
+                        if existing != root {
+                            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                                "WebSession already has app root {}; cannot use {}. \
 WebViews that share a session must use the same app= root \
 (Linux registers tkwry:// once per WebContext)",
-                            existing.display(),
-                            root.display()
-                        )));
+                                existing.display(),
+                                root.display()
+                            )));
+                        }
                     }
-                }
-                session::should_attach_app_protocol(guard.registered_app_root.as_ref(), root)
+                    session::should_attach_app_protocol(guard.registered_app_root.as_ref(), root)
+                };
+                #[cfg(target_os = "macos")]
+                let store_id = guard.data_store_id;
+                #[cfg(not(target_os = "macos"))]
+                let store_id = None;
+                (register, guard.ephemeral, store_id)
             }
-            (Some(_), _) => true,
-            (None, _) => false,
+            (Some(_), None) => (true, false, None),
+            (None, Some(refs)) => {
+                let guard = refs.lock_meta()?;
+                #[cfg(target_os = "macos")]
+                let store_id = guard.data_store_id;
+                #[cfg(not(target_os = "macos"))]
+                let store_id = None;
+                (false, guard.ephemeral, store_id)
+            }
+            (None, None) => (false, false, None),
         };
 
-        let ephemeral = session_guard.as_ref().map(|g| g.ephemeral).unwrap_or(false);
-        #[cfg(target_os = "macos")]
-        let data_store_id = session_guard.as_ref().and_then(|g| g.data_store_id);
+        let mut session_context = session_refs.as_ref().map(|refs| refs.context.borrow_mut());
 
-        let mut builder = match session_guard.as_mut() {
-            Some(guard) => wry::WebViewBuilder::new_with_web_context(&mut guard.context),
+        let mut builder = match session_context.as_mut() {
+            Some(ctx) => wry::WebViewBuilder::new_with_web_context(&mut *ctx),
             None => wry::WebViewBuilder::new(),
         };
 
@@ -1969,14 +1980,15 @@ WebViews that share a session must use the same app= root \
             .build_as_child(&window_handle)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
+        // Release context borrow before re-locking session meta or storing refs on Self.
+        drop(session_context);
+
         if register_app {
-            if let (Some(root), Some(guard)) = (app_root_path.as_ref(), session_guard.as_mut()) {
-                session::commit_registered_app_root(guard, root);
+            if let (Some(root), Some(refs)) = (app_root_path.as_ref(), session_refs.as_ref()) {
+                let mut guard = refs.lock_meta()?;
+                session::commit_registered_app_root(&mut guard, root);
             }
         }
-
-        // Drop the session lock before storing Arc on Self.
-        drop(session_guard);
         #[cfg(all(unix, not(target_os = "macos")))]
         {
             for _ in 0..64 {
@@ -2035,7 +2047,7 @@ WebViews that share a session must use the same app= root \
             wry_call_depth: Cell::new(0),
             destroy_pending: Cell::new(false),
             https_scheme,
-            session: session_state,
+            session: session_refs,
         })
     }
 

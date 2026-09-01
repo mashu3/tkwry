@@ -243,6 +243,23 @@ def test_dispatch_sync_hook_schedules_tk_drain(tk_root, monkeypatch) -> None:
     web.destroy()
 
 
+def test_try_create_defers_during_sync_hook(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _frame, web = _make_web(tk_root)
+    scheduled: list[dict] = []
+
+    def capture_schedule(**kwargs: object) -> None:
+        scheduled.append(kwargs)
+
+    monkeypatch.setattr(web, "_schedule_try_create", capture_schedule, raising=False)
+    web._sync_hook_depth = 1
+    web._try_create()
+    assert web._webview is None
+    assert len(scheduled) == 1
+    web.destroy()
+
+
 def test_navigation_deferred_load_avoids_sync_hook_deadlock(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:

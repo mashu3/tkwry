@@ -3957,6 +3957,9 @@ class WebView(WebViewRpcMixin):
             or self._creation_error is not None
         ):
             return
+        if self._sync_hook_depth > 0:
+            self._schedule_try_create()
+            return
 
         size = self._creation_size()
         # ``update_idletasks`` inside ``_creation_size`` can re-enter create.

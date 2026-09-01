@@ -1,5 +1,6 @@
 //! Shared wry [`WebContext`] exposed as ``WebSession``.
 
+use std::cell::RefCell;
 #[cfg(any(target_os = "macos", test))]
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -25,8 +26,7 @@ pub(crate) fn data_store_id_for_path(path: &Path) -> [u8; 16] {
     out
 }
 
-pub(crate) struct WebSessionState {
-    pub(crate) context: wry::WebContext,
+pub(crate) struct WebSessionMeta {
     pub(crate) ephemeral: bool,
     pub(crate) data_directory: Option<PathBuf>,
     /// Linux registers ``tkwry`` once per context; remember the app root.
@@ -35,7 +35,7 @@ pub(crate) struct WebSessionState {
     pub(crate) data_store_id: Option<[u8; 16]>,
 }
 
-impl WebSessionState {
+impl WebSessionMeta {
     fn new(data_directory: Option<PathBuf>, ephemeral: bool) -> PyResult<Self> {
         if ephemeral && data_directory.is_some() {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -51,10 +51,6 @@ impl WebSessionState {
             })?;
         }
 
-        // wry's ephemeral constructor is crate-private; use a normal context and
-        // ``with_incognito(true)`` on each WebView (see WebView::new).
-        let context = wry::WebContext::new(data_directory.clone());
-
         #[cfg(target_os = "macos")]
         let data_store_id = data_directory
             .as_ref()
@@ -62,13 +58,26 @@ impl WebSessionState {
             .map(|p| data_store_id_for_path(p));
 
         Ok(Self {
-            context,
             ephemeral,
             data_directory,
             registered_app_root: None,
             #[cfg(target_os = "macos")]
             data_store_id,
         })
+    }
+}
+
+/// Keeps shared ``WebContext`` alive for attached WebViews.
+pub(crate) struct SessionRefs {
+    pub(crate) meta: Arc<Mutex<WebSessionMeta>>,
+    pub(crate) context: Arc<RefCell<wry::WebContext>>,
+}
+
+impl SessionRefs {
+    pub(crate) fn lock_meta(&self) -> PyResult<std::sync::MutexGuard<'_, WebSessionMeta>> {
+        self.meta
+            .lock()
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("WebSession lock poisoned"))
     }
 }
 
@@ -90,7 +99,7 @@ pub(crate) fn should_attach_app_protocol(
     }
 }
 
-pub(crate) fn commit_registered_app_root(state: &mut WebSessionState, app_root: &Path) {
+pub(crate) fn commit_registered_app_root(state: &mut WebSessionMeta, app_root: &Path) {
     if state.ephemeral || state.registered_app_root.is_some() {
         return;
     }
@@ -103,9 +112,11 @@ pub(crate) fn commit_registered_app_root(state: &mut WebSessionState, app_root: 
 /// platform supports it). Keep the session alive while any WebView uses it.
 #[pyclass(name = "WebSession", unsendable)]
 pub struct WebSession {
-    /// Shared across WebViews on the Tk thread; wry ``WebContext`` is not Sync.
+    /// Session metadata (app root registration, ephemeral flag, …).
+    pub(crate) meta: Arc<Mutex<WebSessionMeta>>,
+    /// Shared wry context; borrowed mutably during ``build_as_child`` on the Tk thread.
     #[allow(clippy::arc_with_non_send_sync)]
-    pub(crate) state: Arc<Mutex<WebSessionState>>,
+    pub(crate) context: Arc<RefCell<wry::WebContext>>,
 }
 
 #[pymethods]
@@ -125,10 +136,14 @@ impl WebSession {
             }
         }
         let data_directory = data_directory.map(PathBuf::from);
-        let state = WebSessionState::new(data_directory, ephemeral)?;
+        let meta = WebSessionMeta::new(data_directory.clone(), ephemeral)?;
+        // wry's ephemeral constructor is crate-private; use a normal context and
+        // ``with_incognito(true)`` on each WebView (see WebView::new).
+        let context = wry::WebContext::new(data_directory);
         Ok(Self {
+            meta: Arc::new(Mutex::new(meta)),
             #[allow(clippy::arc_with_non_send_sync)]
-            state: Arc::new(Mutex::new(state)),
+            context: Arc::new(RefCell::new(context)),
         })
     }
 
@@ -136,7 +151,7 @@ impl WebSession {
     #[getter]
     fn data_directory(&self) -> PyResult<Option<String>> {
         let guard = self
-            .state
+            .meta
             .lock()
             .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("WebSession lock poisoned"))?;
         Ok(guard
@@ -149,7 +164,7 @@ impl WebSession {
     #[getter]
     fn ephemeral(&self) -> PyResult<bool> {
         let guard = self
-            .state
+            .meta
             .lock()
             .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("WebSession lock poisoned"))?;
         Ok(guard.ephemeral)
@@ -157,8 +172,11 @@ impl WebSession {
 }
 
 impl WebSession {
-    pub(crate) fn state_arc(&self) -> Arc<Mutex<WebSessionState>> {
-        self.state.clone()
+    pub(crate) fn session_refs(&self) -> SessionRefs {
+        SessionRefs {
+            meta: self.meta.clone(),
+            context: self.context.clone(),
+        }
     }
 }
 
@@ -180,8 +198,7 @@ mod tests {
         let root = PathBuf::from("/tmp/tkwry-app");
         assert!(should_attach_app_protocol(None, &root));
         assert!(should_attach_app_protocol(None, &root));
-        let mut state = WebSessionState {
-            context: wry::WebContext::new(None),
+        let mut state = WebSessionMeta {
             ephemeral: false,
             data_directory: None,
             registered_app_root: None,
