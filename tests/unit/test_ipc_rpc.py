@@ -465,6 +465,7 @@ def test_bootstrap_includes_on_and_timeout() -> None:
     assert "window.tkwry.on" in RPC_BOOTSTRAP_JS
     assert "window.tkwry.invoke" in RPC_BOOTSTRAP_JS
     assert "timeout" in RPC_BOOTSTRAP_JS
+    assert "Number.isFinite(value.timeout)" in RPC_BOOTSTRAP_JS
     assert "kwargs" in RPC_BOOTSTRAP_JS
     assert "_emit" in RPC_BOOTSTRAP_JS
     assert "console.error" in RPC_BOOTSTRAP_JS

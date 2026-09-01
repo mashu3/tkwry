@@ -52,6 +52,24 @@ def test_expose_thread_conflicts_with_main(tk_root) -> None:
     frame.destroy()
 
 
+@pytest.mark.parametrize(
+    "bad_timeout",
+    [0, -1, float("nan"), float("inf"), float("-inf"), True],
+)
+def test_expose_rejects_non_finite_timeout(tk_root, bad_timeout: float | bool) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>rpc</p>")
+
+    with pytest.raises(ValueError, match="timeout must be a finite positive"):
+
+        @web.expose(thread=True, timeout=bad_timeout)  # type: ignore[arg-type]
+        def slow() -> None:
+            return None
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_rpc_delivered_from_dedicated_queue(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>rpc</p>")

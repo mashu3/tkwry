@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import math
 import re
 import threading
 import traceback
@@ -90,6 +91,7 @@ RPC_BOOTSTRAP_JS = """\
       var key = keys[i];
       if (key === "timeout") {
         if (typeof value.timeout !== "number") return false;
+        if (!Number.isFinite(value.timeout) || value.timeout <= 0) return false;
         hasTimeout = true;
         continue;
       }
@@ -477,6 +479,16 @@ class RpcRegistration:
     run_in: RpcRunIn = "main"
     timeout: float | None = None
     allow_any_origin: bool = False
+
+
+def validate_rpc_timeout(timeout: float | None) -> None:
+    """Raise :class:`ValueError` if *timeout* is set but not finite and positive."""
+    if timeout is None:
+        return
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        raise ValueError("expose: timeout must be a finite positive number when set")
+    if timeout <= 0 or not math.isfinite(timeout):
+        raise ValueError("expose: timeout must be a finite positive number when set")
 
 
 def is_rpc_envelope(data: object) -> bool:

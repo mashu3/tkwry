@@ -54,6 +54,7 @@ from tkwry.ipc import (
     rpc_id_epoch,
     settle_script,
     stream_chunk_script,
+    validate_rpc_timeout,
 )
 from tkwry.ipc import (
     RPC_BOOTSTRAP_JS as _RPC_BOOTSTRAP_JS,
@@ -182,8 +183,7 @@ class WebViewRpcMixin:
             run_in = "worker" if thread else "main"
         elif thread and run_in == "main":
             raise ValueError("expose: thread=True conflicts with run_in='main'")
-        if timeout is not None and timeout <= 0:
-            raise ValueError("expose: timeout must be positive when set")
+        validate_rpc_timeout(timeout)
         if self._bridge_origins == "*" and not allow_any_origin:
             raise ValueError(
                 "expose: bridge_origins='*' requires allow_any_origin=True "
