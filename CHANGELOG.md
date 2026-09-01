@@ -108,6 +108,8 @@ navigation policy events, Tk context menus, script injection tiers, and
   on-disk directory (``os.path.normcase``)
 - ``expose(timeout=…)`` rejects non-finite values (``NaN`` / ``inf``); JS
   ``call`` / ``stream`` options ignore invalid ``timeout`` values
+- RPC stream ``next()`` rejects on cancel/error before draining buffered
+  chunks queued before the terminal failure
 - Off-thread sync hooks (navigation, new window, download policy) reuse
   preallocated ``threading.Event`` objects instead of allocating on every
   call, avoiding rare crashes when garbage collection runs during a hook

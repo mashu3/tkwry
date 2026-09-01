@@ -480,6 +480,16 @@ def test_bootstrap_includes_on_and_timeout() -> None:
     assert '"return": function' in RPC_BOOTSTRAP_JS
 
 
+def test_stream_next_rejects_before_buffered_chunks_on_error() -> None:
+    stream = RPC_BOOTSTRAP_JS.split("stream: function", 1)[1]
+    next_fn = stream.split("next: function", 1)[1].split('"return": function', 1)[0]
+    assert next_fn.index("if (finished)") < next_fn.index("if (queue.length)")
+    finish_block = stream.split("function finish(ok, value)", 1)[1].split(
+        "pending[id] = {", 1
+    )[0]
+    assert "queue.length = 0" in finish_block
+
+
 def test_merge_initialization_script() -> None:
     assert merge_initialization_script(None, rpc_enabled=False) is None
     assert merge_initialization_script("void 0", rpc_enabled=False) == "void 0"

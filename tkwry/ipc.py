@@ -215,7 +215,10 @@ RPC_BOOTSTRAP_JS = """\
         finished = true;
         if (timer !== null) clearTimeout(timer);
         delete pending[id];
-        if (!ok) error = makeError(value);
+        if (!ok) {
+          error = makeError(value);
+          queue.length = 0;
+        }
         if (waiting) {
           var w = waiting;
           waiting = null;
@@ -267,12 +270,15 @@ RPC_BOOTSTRAP_JS = """\
         id: id,
         cancel: function () { window.tkwry.cancel(id); },
         next: function () {
-          if (queue.length) {
-            return Promise.resolve({ done: false, value: queue.shift() });
-          }
           if (finished) {
             if (error) return Promise.reject(error);
+            if (queue.length) {
+              return Promise.resolve({ done: false, value: queue.shift() });
+            }
             return Promise.resolve({ done: true, value: undefined });
+          }
+          if (queue.length) {
+            return Promise.resolve({ done: false, value: queue.shift() });
           }
           return new Promise(function (resolve, reject) {
             waiting = { resolve: resolve, reject: reject };
