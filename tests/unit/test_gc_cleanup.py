@@ -343,6 +343,52 @@ def test_teardown_native_if_alive_drops_native_without_destroy(
 
 
 @pytest.mark.skipif(sys.platform == "darwin", reason="macOS uses a separate pipe")
+def test_teardown_native_if_alive_releases_wakeup_pipe_when_last_user(
+    tk_root,
+) -> None:
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    web._ensure_tk_wakeup_pipe()
+
+    read_fd = tk_root._tkwry_wake_read_fd
+    write_fd = tk_root._tkwry_wake_write_fd
+    assert read_fd is not None
+    assert write_fd is not None
+
+    web._teardown_native_if_alive()
+
+    assert not hasattr(tk_root, "_tkwry_wake_read_fd")
+    assert not hasattr(tk_root, "_tkwry_wake_write_fd")
+    with pytest.raises(OSError):
+        os.fstat(read_fd)
+    with pytest.raises(OSError):
+        os.fstat(write_fd)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux-only")
+def test_teardown_native_if_alive_detaches_gtk_pump(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tkwry._linux import GtkPump
+
+    detach_calls: list[object] = []
+    monkeypatch.setattr(
+        "tkwry.webview.GtkPump.detach",
+        lambda widget: detach_calls.append(widget),
+    )
+
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    GtkPump.attach(frame)
+
+    web._teardown_native_if_alive()
+
+    assert detach_calls == [frame]
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="macOS uses a separate pipe")
 def test_destroy_closes_wakeup_pipe_when_last_user(tk_root) -> None:
     frame = tk.Frame(tk_root)
     frame.pack()

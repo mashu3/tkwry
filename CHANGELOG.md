@@ -91,6 +91,8 @@ navigation policy events, Tk context menus, script injection tiers, and
   deferred until the hook returns
 - ``force_destroy`` no longer zeroes nested ``wry_call_depth`` mid-flight, so
   in-progress native callbacks unwind safely after an emergency teardown
+- Emergency ``_teardown_native_if_alive`` now releases the shared wakeup pipe
+  and detaches the Linux GtkPump, matching normal ``destroy()``
 - Off-thread sync hooks (navigation, new window, download policy) reuse
   preallocated ``threading.Event`` objects instead of allocating on every
   call, avoiding rare crashes when garbage collection runs during a hook

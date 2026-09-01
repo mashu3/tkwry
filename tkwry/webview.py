@@ -1538,6 +1538,7 @@ class WebView(WebViewRpcMixin):
         self._shutdown_rpc_executor()
         self._detach_from_host(unbind_events=False)
         self._release_native_view(hide=False)
+        self._release_wakeup_pipe_and_linux_pump()
         self._unregister_platform_webview()
         # Deferred native teardown still needs the poll (arm via release path).
         self._stop_event_poll_if_idle()
@@ -1578,10 +1579,9 @@ class WebView(WebViewRpcMixin):
         self._detach_from_host(unbind_events=True)
         had_native = self._webview is not None
         self._release_native_view(hide=True)
-        self._release_tk_wakeup_pipe_registration()
+        self._release_wakeup_pipe_and_linux_pump()
         self._unregister_platform_webview()
         if sys.platform == "linux":
-            GtkPump.detach(self._frame)
             if had_native or self._native_teardown_pending is not None:
                 from tkwry._linux import pump_gtk_unless_active
 
@@ -3426,6 +3426,12 @@ class WebView(WebViewRpcMixin):
             _release_tk_wakeup_pipe(self._frame.winfo_toplevel())
         except tk.TclError:
             pass
+
+    def _release_wakeup_pipe_and_linux_pump(self) -> None:
+        """Shared Win/Linux wakeup pipe + GtkPump cleanup for any teardown path."""
+        self._release_tk_wakeup_pipe_registration()
+        if sys.platform == "linux":
+            GtkPump.detach(self._frame)
 
     def _wake_tk_for_sync_hook(self) -> None:
         write_fd = self._tk_wakeup_write_fd
