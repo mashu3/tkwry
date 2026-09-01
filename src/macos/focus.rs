@@ -53,7 +53,8 @@ struct FocusEntry {
     inner: Arc<Mutex<Option<wry::WebView>>>,
     web_wants_keyboard: Arc<AtomicBool>,
     mac_tk_unfocus: Arc<AtomicBool>,
-    parent_ns_view: NonNull<NSView>,
+    /// Retained embed host — must outlive hit-test callbacks if Tk destroys the frame early.
+    parent_ns_view: Retained<NSView>,
     wakeup_write_fd: Arc<AtomicI32>,
 }
 
@@ -88,14 +89,25 @@ fn event_belongs_to_window(event: &NSEvent, window: &NSWindow) -> bool {
     let Some(mtm) = MainThreadMarker::new() else {
         return false;
     };
-    event.window(mtm)
+    event
+        .window(mtm)
         .is_some_and(|event_window| window_key(&event_window) == window_key(window))
 }
 
 fn select_wakeup_write_fd(entries: &[FocusEntry], fallback: &Arc<AtomicI32>) -> Arc<AtomicI32> {
-    for entry in entries {
-        if entry.wakeup_write_fd.load(Ordering::SeqCst) >= 0 {
-            return entry.wakeup_write_fd.clone();
+    first_live_wakeup_fd(
+        entries.iter().map(|entry| entry.wakeup_write_fd.clone()),
+        fallback,
+    )
+}
+
+fn first_live_wakeup_fd(
+    candidates: impl IntoIterator<Item = Arc<AtomicI32>>,
+    fallback: &Arc<AtomicI32>,
+) -> Arc<AtomicI32> {
+    for fd in candidates {
+        if fd.load(Ordering::SeqCst) >= 0 {
+            return fd;
         }
     }
     fallback.clone()
@@ -124,6 +136,15 @@ impl Drop for FocusSyncGuard {
     }
 }
 
+fn retain_parent_view(parent_ns_view: NonNull<NSView>) -> Result<Retained<NSView>, String> {
+    // SAFETY: Tk passes a live NSView at create; retain so focus monitors cannot
+    // dereference a dangling embed host if the frame is destroyed before teardown.
+    unsafe {
+        Retained::retain(parent_ns_view.as_ptr())
+            .ok_or_else(|| "failed to retain parent NSView".into())
+    }
+}
+
 pub fn install_focus_sync(
     inner: Arc<Mutex<Option<wry::WebView>>>,
     parent_ns_view: NonNull<NSView>,
@@ -133,7 +154,8 @@ pub fn install_focus_sync(
 ) -> Result<FocusSyncGuard, String> {
     let _mtm = MainThreadMarker::new().ok_or("macOS focus sync requires the main thread")?;
 
-    let ns_window = unsafe { parent_ns_view.as_ref() }
+    let parent_view = retain_parent_view(parent_ns_view)?;
+    let ns_window = parent_view
         .window()
         .ok_or("macOS focus sync requires an NSWindow")?;
 
@@ -143,7 +165,7 @@ pub fn install_focus_sync(
         inner,
         web_wants_keyboard,
         mac_tk_unfocus,
-        parent_ns_view,
+        parent_ns_view: parent_view,
         wakeup_write_fd: wakeup_write_fd.clone(),
     };
 
@@ -528,17 +550,15 @@ fn entry_index_matching_view(entries: &[FocusEntry], view: &NSView) -> Option<us
 }
 
 fn view_belongs_to_entry(view: &NSView, entry: &FocusEntry) -> bool {
-    unsafe {
-        if std::ptr::eq(view, entry.parent_ns_view.as_ref()) {
-            return true;
-        }
-    }
     let Ok(guard) = entry.inner.lock() else {
         return false;
     };
     let Some(ref wv) = *guard else {
         return false;
     };
+    if std::ptr::eq(view, Retained::as_ptr(&entry.parent_ns_view)) {
+        return true;
+    }
     let wk = wv.webview();
     std::ptr::eq(view, Retained::as_ptr(&wk).cast::<NSView>())
 }
@@ -617,25 +637,7 @@ mod tests {
     fn select_wakeup_write_fd_prefers_live_sibling() {
         let dead = Arc::new(AtomicI32::new(-1));
         let alive = Arc::new(AtomicI32::new(7));
-        let entries = [
-            FocusEntry {
-                id: 1,
-                inner: Arc::new(Mutex::new(None)),
-                web_wants_keyboard: Arc::new(AtomicBool::new(false)),
-                mac_tk_unfocus: Arc::new(AtomicBool::new(false)),
-                parent_ns_view: NonNull::dangling(),
-                wakeup_write_fd: dead.clone(),
-            },
-            FocusEntry {
-                id: 2,
-                inner: Arc::new(Mutex::new(None)),
-                web_wants_keyboard: Arc::new(AtomicBool::new(false)),
-                mac_tk_unfocus: Arc::new(AtomicBool::new(false)),
-                parent_ns_view: NonNull::dangling(),
-                wakeup_write_fd: alive.clone(),
-            },
-        ];
-        let picked = select_wakeup_write_fd(&entries, &dead);
+        let picked = first_live_wakeup_fd([dead.clone(), alive.clone()], &dead);
         assert!(Arc::ptr_eq(&picked, &alive));
     }
 
