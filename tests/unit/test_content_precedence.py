@@ -7,7 +7,7 @@ from pathlib import Path
 
 from tkwry import WebView
 from tkwry._app import DEFAULT_CSP
-from tkwry._origin import INLINE_ORIGINS
+from tkwry._origin import HTML_BRIDGE_ORIGINS
 
 
 def test_html_wins_over_app_clears_app_side_effects(
@@ -24,7 +24,7 @@ def test_html_wins_over_app_clears_app_side_effects(
         assert web._pending_html == "<p>inline</p>"
         assert web._pending_url is None
         assert not web._lock_app_navigation
-        assert web._bridge_origins == INLINE_ORIGINS
+        assert web._bridge_origins == HTML_BRIDGE_ORIGINS
         assert web.csp is None
         assert web._invoke_navigation_handler("https://example.com/") is True
     finally:

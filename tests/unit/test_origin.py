@@ -6,9 +6,11 @@ import pytest
 
 from tkwry._origin import (
     APP_ORIGINS,
+    HTML_BRIDGE_ORIGINS,
     INLINE_ORIGINS,
     app_navigation_allowed,
     is_external_http_url,
+    is_opaque_bridge_url,
     normalize_navigation_allow,
     open_in_browser,
     origin_allowed,
@@ -30,11 +32,12 @@ def test_origin_of_common_forms() -> None:
     assert origin_of("http://tkwry.localhost/app.js") == "http://tkwry.localhost"
     assert origin_of("file:///tmp/index.html") == "file://"
     assert origin_of("data:text/html,hi") == "null"
+    assert origin_of("about:srcdoc") == "about:srcdoc"
 
 
 def test_resolve_bridge_origins_infers_from_content() -> None:
     assert resolve_bridge_origins(None, url=None, html="<p>x</p>", app=False) == (
-        INLINE_ORIGINS
+        HTML_BRIDGE_ORIGINS
     )
     assert resolve_bridge_origins(None, url=None, html=None, app=True) == APP_ORIGINS
     assert resolve_bridge_origins(
@@ -59,10 +62,23 @@ def test_resolve_bridge_origins_rejects_bare_string() -> None:
 
 def test_origin_allowed_star_and_blank() -> None:
     assert origin_allowed("https://evil.example/", "*")
+    assert origin_allowed("about:blank", HTML_BRIDGE_ORIGINS)
     assert origin_allowed("about:blank", INLINE_ORIGINS)
-    assert origin_allowed("", INLINE_ORIGINS)
+    assert origin_allowed("null", INLINE_ORIGINS)
+    assert not origin_allowed("", HTML_BRIDGE_ORIGINS)
+    assert not origin_allowed("data:text/html,<p>x</p>", HTML_BRIDGE_ORIGINS)
+    assert not origin_allowed("about:srcdoc", HTML_BRIDGE_ORIGINS)
     assert not origin_allowed("https://evil.example/", INLINE_ORIGINS)
     assert not origin_allowed("https://evil.example/", APP_ORIGINS)
+
+
+def test_is_opaque_bridge_url() -> None:
+    assert is_opaque_bridge_url("data:text/html,<p>x</p>")
+    assert is_opaque_bridge_url("blob:https://example.com/uuid")
+    assert is_opaque_bridge_url("about:srcdoc")
+    assert is_opaque_bridge_url("")
+    assert not is_opaque_bridge_url("about:blank")
+    assert not is_opaque_bridge_url("https://example.com/")
 
 
 def test_origin_allowed_path_prefix() -> None:

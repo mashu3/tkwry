@@ -77,6 +77,9 @@ navigation policy events, Tk context menus, script injection tiers, and
 - RPC ids include a navigation epoch (``0:r1``, ``1:r1``, …) so responses from a
   previous page cannot settle Promises after reload or in-page navigation;
   in-flight calls are cancelled on the Python side when the epoch advances
+- ``html=`` bridge defaults now allow only ``about:blank`` (not ``null``), and
+  ``data:``, ``blob:``, and ``about:srcdoc`` documents cannot reach IPC/RPC even
+  after navigation
 - Off-thread sync hooks (navigation, new window, download policy) reuse
   preallocated ``threading.Event`` objects instead of allocating on every
   call, avoiding rare crashes when garbage collection runs during a hook

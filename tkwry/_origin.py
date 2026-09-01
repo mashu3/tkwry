@@ -22,6 +22,9 @@ APP_ORIGINS = frozenset(
     }
 )
 INLINE_ORIGINS = frozenset({"about:blank", "null"})
+# ``html=`` bridge default: inline document only (not ``data:`` / ``blob:`` / srcdoc).
+HTML_BRIDGE_ORIGINS = frozenset({"about:blank"})
+_OPAQUE_BRIDGE_SCHEMES = frozenset({"data", "blob"})
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 # app= must not escape via opaque documents. Not applied globally in Rust:
 # WebView2 ``html=`` uses NavigateToString (``data:``). untrusted+html= still
@@ -45,7 +48,9 @@ def origin_of(url: str | None) -> str:
     if not raw:
         return "null"
     lower = raw.lower()
-    if lower in {"about:blank", "about:srcdoc", "about:"}:
+    if lower == "about:srcdoc":
+        return "about:srcdoc"
+    if lower in {"about:blank", "about:"}:
         return "about:blank"
     parsed = urlparse(raw)
     scheme = (parsed.scheme or "").lower()
@@ -158,7 +163,7 @@ def resolve_bridge_origins(
             raise ValueError("bridge_origins must not be empty")
         return origins
     if html is not None:
-        return INLINE_ORIGINS
+        return HTML_BRIDGE_ORIGINS
     if app:
         return APP_ORIGINS
     if url:
@@ -166,26 +171,30 @@ def resolve_bridge_origins(
     return INLINE_ORIGINS
 
 
+def is_opaque_bridge_url(url: str | None) -> bool:
+    """True for document URLs that must not use the bridge by default."""
+    if url is None:
+        return False
+    raw = url.strip()
+    if not raw:
+        return True
+    lower = raw.lower()
+    if lower == "about:srcdoc":
+        return True
+    scheme = (urlparse(raw).scheme or "").lower()
+    return scheme in _OPAQUE_BRIDGE_SCHEMES
+
+
 def origin_allowed(url: str | None, allowlist: BridgeAllowlist) -> bool:
     """True when *url* matches ``"*"``, an origin, or an origin+path prefix."""
     if allowlist == "*":
         return True
+    if is_opaque_bridge_url(url):
+        return False
     origin = origin_of(url)
     path = url_path_of(url)
     for entry in allowlist:
         entry_origin, prefix = _split_bridge_entry(entry)
-        if (
-            origin == "null"
-            and entry_origin in {"null", "about:blank"}
-            and prefix is None
-        ):
-            return True
-        if (
-            origin == "about:blank"
-            and entry_origin in {"null", "about:blank"}
-            and prefix is None
-        ):
-            return True
         if origin != entry_origin:
             continue
         if prefix is None or path_prefix_matches(path, prefix):

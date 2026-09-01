@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from tkwry import NewWindowResponse, TkwrySecurityWarning, WebSession, WebView
-from tkwry._origin import APP_ORIGINS, INLINE_ORIGINS
+from tkwry._origin import APP_ORIGINS, HTML_BRIDGE_ORIGINS
 
 
 def _app_dir(tmp_path: Path) -> Path:
@@ -22,7 +22,7 @@ def test_html_infers_inline_bridge_origins(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>x</p>")
     assert web.untrusted is False
-    assert web.bridge_origins == INLINE_ORIGINS
+    assert web.bridge_origins == HTML_BRIDGE_ORIGINS
     web.destroy()
     frame.destroy()
 
@@ -264,6 +264,42 @@ def test_inline_origin_rpc_is_allowed(tk_root) -> None:
     web._webview = native
     web._deliver_ipc_messages()
     assert called == ["ping"]
+    web.destroy()
+    frame.destroy()
+
+
+@pytest.mark.parametrize(
+    "source_url",
+    [
+        "data:text/html,<script>window.tkwry.call('ping')</script>",
+        "blob:https://example.com/uuid",
+        "about:srcdoc",
+    ],
+)
+def test_opaque_document_rpc_is_rejected(tk_root, source_url: str) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>rpc</p>")
+    called: list[str] = []
+
+    @web.expose
+    def ping() -> str:
+        called.append("ping")
+        return "ok"
+
+    native = MagicMock()
+    native.drain_rpc_messages.return_value = [
+        (
+            source_url,
+            json.dumps({"__tkwry": "rpc", "id": "r1", "method": "ping", "params": []}),
+        )
+    ]
+    native.drain_ipc_messages.return_value = []
+    web._webview = native
+    web._deliver_ipc_messages()
+    assert called == []
+    native.eval_js.assert_called()
+    script = native.eval_js.call_args[0][0]
+    assert "RpcOriginError" in script
     web.destroy()
     frame.destroy()
 
