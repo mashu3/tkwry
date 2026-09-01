@@ -153,6 +153,64 @@ def test_sync_hook_timeout_skips_late_handler(tk_root, monkeypatch) -> None:
     web.destroy()
 
 
+def test_sync_hook_timeout_recycles_event_only_after_drain(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pooled Event must not return before the cancelled queue item is drained."""
+    import time
+
+    _frame, web = _make_web(tk_root)
+    borrowed: list[threading.Event] = []
+    returned: list[threading.Event] = []
+    orig_borrow = web._borrow_sync_hook_event
+    orig_return = web._return_sync_hook_event
+
+    def track_borrow() -> threading.Event:
+        event = orig_borrow()
+        borrowed.append(event)
+        return event
+
+    def track_return(event: threading.Event) -> None:
+        returned.append(event)
+        orig_return(event)
+
+    monkeypatch.setattr(web, "_borrow_sync_hook_event", track_borrow)
+    monkeypatch.setattr(web, "_return_sync_hook_event", track_return)
+
+    def slow_handler(url: str) -> bool:
+        time.sleep(0.2)
+        return True
+
+    web.set_on_navigation(slow_handler)
+    monkeypatch.setattr("tkwry.webview._SYNC_HOOK_TIMEOUT_S", 0.05)
+    monkeypatch.setattr("tkwry.webview._SYNC_HOOK_MAX_WAIT_S", 0.1)
+    monkeypatch.setattr(web, "_ensure_event_poll", lambda: None, raising=False)
+    monkeypatch.setattr(web, "_wake_tk_for_sync_hook", lambda: None, raising=False)
+    monkeypatch.setattr(
+        web._frame,
+        "after",
+        lambda _delay, callback: callback(),
+    )
+
+    result_holder: list[bool] = []
+
+    def worker() -> None:
+        result_holder.append(web._native_navigation("https://example.com/late"))
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=0.5)
+    assert not thread.is_alive()
+    assert result_holder == [False]
+    assert len(borrowed) == 1
+    assert returned == []
+
+    web._drain_sync_hooks()
+
+    assert returned == [borrowed[0]]
+    web.destroy()
+
+
 def test_sync_hook_timeout_signals_navigation_error(tk_root, monkeypatch) -> None:
     import time
 

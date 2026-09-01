@@ -93,6 +93,8 @@ navigation policy events, Tk context menus, script injection tiers, and
   in-progress native callbacks unwind safely after an emergency teardown
 - Emergency ``_teardown_native_if_alive`` now releases the shared wakeup pipe
   and detaches the Linux GtkPump, matching normal ``destroy()``
+- Sync-hook timeout no longer returns a pooled ``threading.Event`` before the
+  cancelled queue item is drained, avoiding spurious wakes on reuse
 - Off-thread sync hooks (navigation, new window, download policy) reuse
   preallocated ``threading.Event`` objects instead of allocating on every
   call, avoiding rare crashes when garbage collection runs during a hook

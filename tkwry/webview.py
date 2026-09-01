@@ -3547,7 +3547,8 @@ class WebView(WebViewRpcMixin):
                 self._schedule_sync_hook_drain()
             return cast(_T, result[0])
         finally:
-            self._return_sync_hook_event(done)
+            if done.is_set() and not cancelled[0]:
+                self._return_sync_hook_event(done)
 
     def _discard_navigation_error_queue(self) -> None:
         q = self._navigation_error_queue
@@ -3631,6 +3632,8 @@ class WebView(WebViewRpcMixin):
                 handler_started_at[0] = time.monotonic()
                 result[0] = self._run_sync_hook_invoke(invoke, default)
             done.set()
+            if cancelled[0] or self._destroyed:
+                self._return_sync_hook_event(done)
 
     def _abort_sync_hooks(self) -> None:
         while True:
@@ -3649,6 +3652,7 @@ class WebView(WebViewRpcMixin):
             cancelled[0] = True
             result[0] = default
             done.set()
+            self._return_sync_hook_event(done)
 
     def _deliver_title_events(self) -> None:
         handler = self._on_title_changed
