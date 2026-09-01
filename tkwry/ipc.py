@@ -754,6 +754,13 @@ def bind_rpc_arguments(
     return bound.args, dict(bound.kwargs)
 
 
+def _resolve_handler_future(result: Any) -> Any:
+    """Block on a handler-returned ``Future`` (worker-thread path only)."""
+    if isinstance(result, Future):
+        return result.result()
+    return result
+
+
 def dispatch_rpc(
     methods: Mapping[str, RpcRegistration | RpcHandler],
     request: RpcRequest,
@@ -770,9 +777,10 @@ def dispatch_rpc(
     - a :class:`~concurrent.futures.Future` that the caller must settle later
 
     Handlers registered with ``run_in="worker"`` are submitted via
-    *submit_worker* (required). Handlers that return a ``Future`` themselves
-    are passed through. Default ``run_in="main"`` runs on the caller thread
-    (Tk main thread in the WebView).
+    *submit_worker* (required). If such a handler returns a ``Future``, it is
+    awaited on the worker thread before the RPC is settled. On the main thread,
+    a handler ``Future`` is passed through for the caller to track. Default
+    ``run_in="main"`` runs on the caller thread (Tk main thread in the WebView).
     """
     if request.reject is not None:
         return False, request.reject
@@ -793,6 +801,13 @@ def dispatch_rpc(
         except TypeError as exc:
             raise TypeError(str(exc) or "invalid RPC arguments") from exc
         result = reg.handler(*args, **kwargs)
+        if reg.run_in == "worker":
+            result = _resolve_handler_future(result)
+            return finalize_rpc_result(
+                result,
+                stream=request.stream,
+                on_stream_chunk=on_stream_chunk,
+            )
         if isinstance(result, Future):
             return result
         return finalize_rpc_result(

@@ -71,6 +71,9 @@ navigation policy events, Tk context menus, script injection tiers, and
   embedded browser on that thread (which could crash). Call ``destroy()`` on
   the Tk main thread before dropping the last reference; if the native object
   is still collected elsewhere, tkwry logs a warning instead of crashing
+- ``@expose(thread=True)`` handlers that return a ``concurrent.futures.Future``
+  now await that future on the worker thread before settling the RPC (main-thread
+  handlers still pass the future through for async settle)
 - Off-thread sync hooks (navigation, new window, download policy) reuse
   preallocated ``threading.Event`` objects instead of allocating on every
   call, avoiding rare crashes when garbage collection runs during a hook

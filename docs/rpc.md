@@ -80,7 +80,9 @@ object. ``call`` remains the full positional / kwargs / timeout surface.
 
 Default handlers run on the **Tk main thread** (safe for Tk APIs; long work
 blocks the UI). Pass `thread=True` / `run_in="worker"` to use a background
-pool. Handlers may also return a `concurrent.futures.Future`. Return values
+pool. Handlers may also return a `concurrent.futures.Future` (on the main
+thread the RPC settles when that future completes; on a worker thread the
+future is awaited before settle). Return values
 and `emit` payloads must be strict JSON (no `datetime`, custom objects,
 `NaN` / `Infinity`) — otherwise the Promise rejects / `emit` raises
 `RpcSerializationError`. Errors reject the Promise with a structured payload

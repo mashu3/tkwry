@@ -334,6 +334,31 @@ def test_dispatch_rpc_worker_submit() -> None:
     assert submitted
 
 
+def test_dispatch_rpc_worker_awaits_handler_future() -> None:
+    inner: Future[int] = Future()
+
+    def submit(fn):  # noqa: ANN001
+        fut: Future[object] = Future()
+        fut.set_result(fn())
+        return fut
+
+    def returns_future() -> Future[int]:
+        inner.set_result(99)
+        return inner
+
+    req = parse_rpc_request(
+        json.dumps({"__tkwry": "rpc", "id": "1", "method": "f", "params": []})
+    )
+    assert req is not None
+    outcome = dispatch_rpc(
+        {"f": RpcRegistration(handler=returns_future, run_in="worker")},
+        req,
+        submit_worker=submit,
+    )
+    assert isinstance(outcome, Future)
+    assert outcome.result() == 99
+
+
 def test_dispatch_rpc_typeerror_on_arity_and_types() -> None:
     def add(a: int, b: int) -> int:
         return a + b
