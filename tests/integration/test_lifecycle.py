@@ -448,7 +448,10 @@ def test_native_rejects_other_thread(tk_root) -> None:
 
 @pytest.mark.skipif(
     sys.platform == "linux",
-    reason="WebKitGTK aborts when the embed host is destroyed after off-thread native leak",
+    reason=(
+        "WebKitGTK aborts when the embed host is destroyed "
+        "after off-thread native leak"
+    ),
 )
 def test_native_drop_off_owner_thread_leaks_without_crash(tk_root) -> None:
     """Native WebView collected off the Tk thread must not crash."""
