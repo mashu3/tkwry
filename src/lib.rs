@@ -1788,19 +1788,19 @@ WebViews that share a session must use the same app= root \
                 #[cfg(target_os = "macos")]
                 let store_id = guard.data_store_id;
                 #[cfg(not(target_os = "macos"))]
-                let store_id = None;
+                let store_id: Option<[u8; 16]> = None;
                 (register, guard.ephemeral, store_id)
             }
-            (Some(_), None) => (true, false, None),
+            (Some(_), None) => (true, false, None::<[u8; 16]>),
             (None, Some(refs)) => {
                 let guard = refs.lock_meta()?;
                 #[cfg(target_os = "macos")]
                 let store_id = guard.data_store_id;
                 #[cfg(not(target_os = "macos"))]
-                let store_id = None;
+                let store_id: Option<[u8; 16]> = None;
                 (false, guard.ephemeral, store_id)
             }
-            (None, None) => (false, false, None),
+            (None, None) => (false, false, None::<[u8; 16]>),
         };
 
         let mut session_context = session_refs.as_ref().map(|refs| refs.context.borrow_mut());
