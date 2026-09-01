@@ -6,9 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-09-02
+
 Named browser profiles, app-facing download helpers, RPC invoke sugar,
 navigation policy events, Tk context menus, script injection tiers, and
-``WebView.get_state`` snapshots.
+``WebView.get_state`` snapshots. Lifecycle, bridge security, Linux GtkPump,
+RPC stream, and download-notification fixes.
 
 ### Added
 
@@ -810,6 +813,7 @@ eval, macOS IME / import-order / DevTools private APIs, Notebook `ready`≠map.
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.1.7]: https://github.com/mashu3/tkwry/releases/tag/v0.1.7
 [0.1.6]: https://github.com/mashu3/tkwry/releases/tag/v0.1.6
 [0.1.5]: https://github.com/mashu3/tkwry/releases/tag/v0.1.5
 [0.1.4]: https://github.com/mashu3/tkwry/releases/tag/v0.1.4
