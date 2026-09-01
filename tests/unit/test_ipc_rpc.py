@@ -490,6 +490,15 @@ def test_stream_next_rejects_before_buffered_chunks_on_error() -> None:
     assert "queue.length = 0" in finish_block
 
 
+def test_stream_queues_concurrent_next_waiters() -> None:
+    stream = RPC_BOOTSTRAP_JS.split("stream: function", 1)[1]
+    assert "var waiters = []" in stream
+    assert "waiters.push" in stream
+    assert "waiters.shift" in stream
+    assert "rejectAllWaiters" in stream
+    assert "var waiting = null" not in stream.split("cancel: function", 1)[0]
+
+
 def test_merge_initialization_script() -> None:
     assert merge_initialization_script(None, rpc_enabled=False) is None
     assert merge_initialization_script("void 0", rpc_enabled=False) == "void 0"

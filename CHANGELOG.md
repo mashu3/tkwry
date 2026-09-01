@@ -110,6 +110,8 @@ navigation policy events, Tk context menus, script injection tiers, and
   ``call`` / ``stream`` options ignore invalid ``timeout`` values
 - RPC stream ``next()`` rejects on cancel/error before draining buffered
   chunks queued before the terminal failure
+- RPC stream ``next()`` waiters are queued so concurrent calls do not
+  overwrite a single pending Promise
 - Off-thread sync hooks (navigation, new window, download policy) reuse
   preallocated ``threading.Event`` objects instead of allocating on every
   call, avoiding rare crashes when garbage collection runs during a hook

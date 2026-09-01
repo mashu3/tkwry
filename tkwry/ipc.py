@@ -206,10 +206,22 @@ RPC_BOOTSTRAP_JS = """\
       }
       var id = nextRpcId();
       var queue = [];
-      var waiting = null;
+      var waiters = [];
       var finished = false;
       var error = null;
       var timer = null;
+      function rejectAllWaiters(err) {
+        while (waiters.length) {
+          var w = waiters.shift();
+          w.reject(err);
+        }
+      }
+      function resolveAllWaitersDone(value) {
+        while (waiters.length) {
+          var w = waiters.shift();
+          w.resolve({ done: true, value: value });
+        }
+      }
       function finish(ok, value) {
         if (finished) return;
         finished = true;
@@ -218,21 +230,17 @@ RPC_BOOTSTRAP_JS = """\
         if (!ok) {
           error = makeError(value);
           queue.length = 0;
+          rejectAllWaiters(error);
+          return;
         }
-        if (waiting) {
-          var w = waiting;
-          waiting = null;
-          if (!ok) w.reject(error);
-          else w.resolve({ done: true, value: undefined });
-        }
+        resolveAllWaitersDone(undefined);
       }
       pending[id] = {
         finish: finish,
         chunk: function (value) {
           if (finished) return;
-          if (waiting) {
-            var w = waiting;
-            waiting = null;
+          if (waiters.length) {
+            var w = waiters.shift();
             w.resolve({ done: false, value: value });
           } else {
             queue.push(value);
@@ -281,7 +289,7 @@ RPC_BOOTSTRAP_JS = """\
             return Promise.resolve({ done: false, value: queue.shift() });
           }
           return new Promise(function (resolve, reject) {
-            waiting = { resolve: resolve, reject: reject };
+            waiters.push({ resolve: resolve, reject: reject });
           });
         },
         "return": function (value) {
@@ -289,11 +297,7 @@ RPC_BOOTSTRAP_JS = """\
             finished = true;
             if (timer !== null) clearTimeout(timer);
             delete pending[id];
-            if (waiting) {
-              var w = waiting;
-              waiting = null;
-              w.resolve({ done: true, value: value });
-            }
+            resolveAllWaitersDone(value);
             if (window.ipc && window.ipc.postMessage) {
               window.ipc.postMessage(JSON.stringify({
                 __tkwry: "rpc",
