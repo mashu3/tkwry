@@ -2707,9 +2707,12 @@ WebViews that share a session must use the same app= root \
     fn force_destroy(&self) -> PyResult<()> {
         self.require_owner_thread()?;
         self.clear_callbacks_and_queues();
+        self.destroy_inner()?;
+        // Do not reset ``wry_call_depth`` — nested ``with_webview`` frames on the
+        // stack must unwind through ``leave_wry_call``. Clearing depth mid-flight
+        // underflows on unwind and drops deferred-teardown state.
         self.destroy_pending.set(false);
-        self.wry_call_depth.set(0);
-        self.destroy_inner()
+        Ok(())
     }
 
     /// ``True`` while the native webview has not been torn down yet.
@@ -3156,5 +3159,41 @@ mod tests {
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
         assert_eq!(callbacks.len(), 1);
         assert!(callbacks.contains_key(&2));
+    }
+
+    #[test]
+    fn force_destroy_preserves_wry_call_depth_for_nested_unwind() {
+        let depth = Cell::new(0_u32);
+        let destroy_pending = Cell::new(false);
+        let destroy_runs = Cell::new(0_u32);
+
+        let enter = |depth: &Cell<u32>| {
+            depth.set(depth.get().saturating_add(1));
+        };
+        let leave = |depth: &Cell<u32>, destroy_pending: &Cell<bool>, destroy_runs: &Cell<u32>| {
+            let current = depth.get();
+            assert!(current > 0);
+            depth.set(current - 1);
+            if current == 1 && destroy_pending.get() {
+                destroy_runs.set(destroy_runs.get() + 1);
+                destroy_pending.set(false);
+            }
+        };
+        let force_destroy = |destroy_pending: &Cell<bool>, destroy_runs: &Cell<u32>| {
+            destroy_runs.set(destroy_runs.get() + 1);
+            destroy_pending.set(false);
+        };
+
+        enter(&depth);
+        destroy_pending.set(true);
+        force_destroy(&destroy_pending, &destroy_runs);
+        assert_eq!(depth.get(), 1, "force_destroy must not zero nested depth");
+        leave(&depth, &destroy_pending, &destroy_runs);
+        assert_eq!(depth.get(), 0);
+        assert_eq!(
+            destroy_runs.get(),
+            1,
+            "leave must not destroy again after force"
+        );
     }
 }

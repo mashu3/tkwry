@@ -89,6 +89,8 @@ navigation policy events, Tk context menus, script injection tiers, and
 - Shared ``WebSession`` create no longer holds session metadata locked across
   ``build_as_child``; nested WebView create from a sync hook during create is
   deferred until the hook returns
+- ``force_destroy`` no longer zeroes nested ``wry_call_depth`` mid-flight, so
+  in-progress native callbacks unwind safely after an emergency teardown
 - Off-thread sync hooks (navigation, new window, download policy) reuse
   preallocated ``threading.Event`` objects instead of allocating on every
   call, avoiding rare crashes when garbage collection runs during a hook
