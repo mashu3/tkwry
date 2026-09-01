@@ -97,6 +97,8 @@ navigation policy events, Tk context menus, script injection tiers, and
   cancelled queue item is drained, avoiding spurious wakes on reuse
 - Linux: final native create failure (max attempts) detaches the pre-create
   ``GtkPump`` so the 10ms tick does not run forever without a WebView
+- Multiple ``inject_script()`` entries all re-run on ``PageLoadEvent.Started``
+  (no longer last-wins through ``eval_js`` coalescing)
 - Off-thread sync hooks (navigation, new window, download policy) reuse
   preallocated ``threading.Event`` objects instead of allocating on every
   call, avoiding rare crashes when garbage collection runs during a hook

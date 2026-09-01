@@ -102,11 +102,31 @@ def test_inject_scripts_rerun_on_page_load_started(
         def drain_page_load_events(self):
             return [(PageLoadEvent.Started, "https://example.com/")]
 
-    monkeypatch.setattr(web, "eval_js", lambda s, *, on_error=None: evals.append(s))
+    monkeypatch.setattr(web, "_run_eval_js", lambda s, on_error=None: evals.append(s))
     web._webview = _Native()  # type: ignore[assignment]
     web._inject_scripts = ["window.__p = 1;"]
     web._deliver_page_load_events()
     assert evals == ["window.__p = 1;"]
+    web.destroy()
+    frame.destroy()
+
+
+def test_inject_scripts_rerun_all_on_page_load_started(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>x</p>")
+    evals: list[str] = []
+
+    class _Native:
+        def drain_page_load_events(self):
+            return [(PageLoadEvent.Started, "https://example.com/")]
+
+    monkeypatch.setattr(web, "_run_eval_js", lambda s, on_error=None: evals.append(s))
+    web._webview = _Native()  # type: ignore[assignment]
+    web._inject_scripts = ["window.__a = 1;", "window.__b = 2;"]
+    web._deliver_page_load_events()
+    assert evals == ["window.__a = 1;", "window.__b = 2;"]
     web.destroy()
     frame.destroy()
 

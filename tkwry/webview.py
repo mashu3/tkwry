@@ -3700,7 +3700,7 @@ class WebView(WebViewRpcMixin):
             if event == PageLoadEvent.Started and self._inject_scripts:
                 for script in list(self._inject_scripts):
                     try:
-                        self.eval_js(script)
+                        self._run_eval_js(script)
                     except Exception:
                         traceback.print_exc()
             if page_load is not None:
