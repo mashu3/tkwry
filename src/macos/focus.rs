@@ -83,6 +83,15 @@ fn window_key(window: &NSWindow) -> isize {
     window as *const NSWindow as isize
 }
 
+/// Local NSEvent monitors are process-wide; ignore events for other windows.
+fn event_belongs_to_window(event: &NSEvent, window: &NSWindow) -> bool {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return false;
+    };
+    event.window(mtm)
+        .is_some_and(|event_window| window_key(&event_window) == window_key(window))
+}
+
 fn select_wakeup_write_fd(entries: &[FocusEntry], fallback: &Arc<AtomicI32>) -> Arc<AtomicI32> {
     for entry in entries {
         if entry.wakeup_write_fd.load(Ordering::SeqCst) >= 0 {
@@ -171,6 +180,9 @@ impl WindowFocusCoordinator {
             let window = window.clone();
             RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
                 let event_ref = unsafe { event.as_ref() };
+                if !event_belongs_to_window(event_ref, &window) {
+                    return event.as_ptr();
+                }
                 let window_point = event_ref.locationInWindow();
                 with_coordinator(&window, |coord| {
                     handle_click(
@@ -195,6 +207,9 @@ impl WindowFocusCoordinator {
             let window = window.clone();
             RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
                 let event_ref = unsafe { event.as_ref() };
+                if !event_belongs_to_window(event_ref, &window) {
+                    return event.as_ptr();
+                }
                 with_coordinator(&window, |coord| {
                     handle_keydown(&window, &coord.entries, event_ref, &coord.wakeup_write_fd);
                 });
@@ -211,6 +226,10 @@ impl WindowFocusCoordinator {
         let keyup_block = {
             let window = window.clone();
             RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+                let event_ref = unsafe { event.as_ref() };
+                if !event_belongs_to_window(event_ref, &window) {
+                    return event.as_ptr();
+                }
                 with_coordinator(&window, |coord| {
                     handle_keyup_or_flags(
                         &window,
@@ -233,6 +252,9 @@ impl WindowFocusCoordinator {
             let window = window.clone();
             RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
                 let event_ref = unsafe { event.as_ref() };
+                if !event_belongs_to_window(event_ref, &window) {
+                    return event.as_ptr();
+                }
                 if event_ref.keyCode() == TAB_KEY_CODE {
                     return event.as_ptr();
                 }
