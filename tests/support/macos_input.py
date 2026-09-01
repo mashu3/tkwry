@@ -8,12 +8,22 @@ import os
 import sys
 import time
 import tkinter as tk
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
 if sys.platform != "darwin":
     raise ImportError("macos_input_helpers is macOS-only")
 
 _cg = ctypes.CDLL(ctypes.util.find_library("CoreGraphics"))
+_cf = ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
+_carbon = ctypes.CDLL(ctypes.util.find_library("Carbon"))
+
+kCFStringEncodingUTF8 = 0x08000100
+_US_KEYBOARD_SOURCE_IDS = (
+    "com.apple.keylayout.ABC",
+    "com.apple.keylayout.US",
+    "com.apple.keylayout.USExtended",
+)
 
 kCGHIDEventTap = 0
 kCGEventLeftMouseDown = 1
@@ -44,7 +54,106 @@ _cg.CGEventCreateKeyboardEvent.restype = ctypes.c_void_p
 _cg.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
 _cg.CGEventPost.restype = None
 
+_cf.CFRelease.argtypes = [ctypes.c_void_p]
+_cf.CFRelease.restype = None
+_cf.CFArrayGetCount.argtypes = [ctypes.c_void_p]
+_cf.CFArrayGetCount.restype = ctypes.c_long
+_cf.CFArrayGetValueAtIndex.argtypes = [ctypes.c_void_p, ctypes.c_long]
+_cf.CFArrayGetValueAtIndex.restype = ctypes.c_void_p
+_cf.CFStringCreateWithCString.argtypes = [
+    ctypes.c_void_p,
+    ctypes.c_char_p,
+    ctypes.c_uint32,
+]
+_cf.CFStringCreateWithCString.restype = ctypes.c_void_p
+_cf.CFStringGetCString.argtypes = [
+    ctypes.c_void_p,
+    ctypes.c_char_p,
+    ctypes.c_long,
+    ctypes.c_uint32,
+]
+_cf.CFStringGetCString.restype = ctypes.c_bool
+
+_carbon.TISCopyCurrentKeyboardInputSource.restype = ctypes.c_void_p
+_carbon.TISCopyCurrentKeyboardInputSource.argtypes = []
+_carbon.TISSelectInputSource.restype = ctypes.c_int32
+_carbon.TISSelectInputSource.argtypes = [ctypes.c_void_p]
+_carbon.TISCreateInputSourceList.restype = ctypes.c_void_p
+_carbon.TISCreateInputSourceList.argtypes = [ctypes.c_void_p, ctypes.c_bool]
+_carbon.TISGetInputSourceProperty.restype = ctypes.c_void_p
+_carbon.TISGetInputSourceProperty.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_carbon.TISCopyInputSourceForLanguage.restype = ctypes.c_void_p
+_carbon.TISCopyInputSourceForLanguage.argtypes = [ctypes.c_void_p]
+
+_kTISPropertyInputSourceID = ctypes.c_void_p.in_dll(
+    _carbon, "kTISPropertyInputSourceID"
+)
+
 _cgevent_probe: bool | None = None
+
+
+def _cfstring_to_str(value: int | None) -> str | None:
+    if not value:
+        return None
+    buf = ctypes.create_string_buffer(512)
+    if _cf.CFStringGetCString(value, buf, 512, kCFStringEncodingUTF8):
+        return buf.value.decode("utf-8")
+    return None
+
+
+def _select_input_source_by_id(source_id: str) -> bool:
+    source_list = _carbon.TISCreateInputSourceList(None, True)
+    if not source_list:
+        return False
+    try:
+        for index in range(_cf.CFArrayGetCount(source_list)):
+            source = _cf.CFArrayGetValueAtIndex(source_list, index)
+            prop = _carbon.TISGetInputSourceProperty(source, _kTISPropertyInputSourceID)
+            if _cfstring_to_str(prop) == source_id:
+                return _carbon.TISSelectInputSource(source) == 0
+        return False
+    finally:
+        _cf.CFRelease(source_list)
+
+
+def _select_us_keyboard_layout() -> bool:
+    for source_id in _US_KEYBOARD_SOURCE_IDS:
+        if _select_input_source_by_id(source_id):
+            return True
+    lang = _cf.CFStringCreateWithCString(None, b"en", kCFStringEncodingUTF8)
+    if not lang:
+        return False
+    try:
+        source = _carbon.TISCopyInputSourceForLanguage(lang)
+        if not source:
+            return False
+        try:
+            return _carbon.TISSelectInputSource(source) == 0
+        finally:
+            _cf.CFRelease(source)
+    finally:
+        _cf.CFRelease(lang)
+
+
+@contextmanager
+def us_keyboard_layout() -> Iterator[None]:
+    """Use a non-IME US keyboard for CGEvent typing tests; restore afterward."""
+    previous = _carbon.TISCopyCurrentKeyboardInputSource()
+    if not _select_us_keyboard_layout():
+        if previous:
+            _cf.CFRelease(previous)
+        raise RuntimeError(
+            "could not select a US keyboard layout for CGEvent tests "
+            "(add ABC / U.S. in System Settings → Keyboard → Input Sources)"
+        )
+    time.sleep(0.05)
+    try:
+        yield
+    finally:
+        if previous:
+            _carbon.TISSelectInputSource(previous)
+            _cf.CFRelease(previous)
+        time.sleep(0.05)
 
 
 def wry_point(root: tk.Misc, widget: tk.Misc) -> tuple[float, float]:

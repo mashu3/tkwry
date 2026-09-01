@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import tkinter as tk
+from collections.abc import Iterator
 from tkinter import ttk
 from types import SimpleNamespace
 
@@ -26,6 +27,15 @@ if sys.platform == "darwin":
         wait_until,
         wry_point,
     )
+
+
+@pytest.fixture(autouse=True)
+def _us_keyboard_for_cgevent_tests() -> Iterator[None]:
+    """CGEvent key 'a' must not pass through an IME (e.g. あ on Japanese macOS)."""
+    from support.macos_input import us_keyboard_layout
+
+    with us_keyboard_layout():
+        yield
 
 
 @pytest.fixture
