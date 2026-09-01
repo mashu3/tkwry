@@ -104,6 +104,8 @@ navigation policy events, Tk context menus, script injection tiers, and
 - Clearing ``set_context_menu(None)`` / ``set_context_menu_handler(None)``
   removes the page ``contextmenu`` listener so the browser default menu works
   again
+- Windows: ``profile=`` names that differ only by case share one session and
+  on-disk directory (``os.path.normcase``)
 - Off-thread sync hooks (navigation, new window, download policy) reuse
   preallocated ``threading.Event`` objects instead of allocating on every
   call, avoiding rare crashes when garbage collection runs during a hook

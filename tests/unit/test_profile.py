@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import tkinter as tk
 from pathlib import Path
 
@@ -55,6 +56,34 @@ def test_close_profile_drops_registry_entry() -> None:
     assert session.closed
     again = get_profile_session("work")
     assert again is not session
+    assert not again.closed
+
+
+def test_profile_names_stay_distinct_on_unix() -> None:
+    if sys.platform == "win32":
+        pytest.skip("Unix-only distinction")
+    first = get_profile_session("Foo")
+    second = get_profile_session("foo")
+    assert first is not second
+    assert profile_directory("Foo") != profile_directory("foo")
+
+
+def test_profile_names_case_insensitive_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("tkwry.profile.sys.platform", "win32")
+    monkeypatch.setattr(
+        "tkwry.profile.os.path.normcase",
+        lambda name: name.casefold(),
+    )
+    first = get_profile_session("Foo")
+    second = get_profile_session("foo")
+    assert first is second
+    assert profile_directory("Foo") == profile_directory("foo")
+    close_profile("Foo")
+    assert first.closed
+    again = get_profile_session("foo")
+    assert again is not first
     assert not again.closed
 
 

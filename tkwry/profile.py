@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 
 from tkwry.session import WebSession
@@ -44,10 +45,17 @@ def validate_profile_name(name: str) -> None:
         )
 
 
+def _profile_registry_key(name: str) -> str:
+    """Registry / on-disk key for *name* (case-folded on Windows)."""
+    validate_profile_name(name)
+    if sys.platform == "win32":
+        return os.path.normcase(name)
+    return name
+
+
 def profile_directory(name: str) -> Path:
     """Persistent data directory for a named profile."""
-    validate_profile_name(name)
-    return profiles_base() / name
+    return profiles_base() / _profile_registry_key(name)
 
 
 def get_profile_session(name: str) -> WebSession:
@@ -56,22 +64,22 @@ def get_profile_session(name: str) -> WebSession:
     Creates the on-disk directory and session on first use. The session stays
     open for the process lifetime unless :func:`close_profile` is called.
     """
-    validate_profile_name(name)
-    existing = _profile_sessions.get(name)
+    key = _profile_registry_key(name)
+    existing = _profile_sessions.get(key)
     if existing is not None:
         if existing.closed:
-            del _profile_sessions[name]
+            del _profile_sessions[key]
         else:
             return existing
     session = WebSession(data_directory=profile_directory(name))
-    _profile_sessions[name] = session
+    _profile_sessions[key] = session
     return session
 
 
 def close_profile(name: str) -> None:
     """Close a named profile session and drop it from the in-process registry."""
-    validate_profile_name(name)
-    session = _profile_sessions.pop(name, None)
+    key = _profile_registry_key(name)
+    session = _profile_sessions.pop(key, None)
     if session is not None and not session.closed:
         session.close()
 
