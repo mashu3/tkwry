@@ -3316,7 +3316,7 @@ class WebView(WebViewRpcMixin):
             )
         return True, None
 
-    def _notify_download_started(self, url: str, dest: str) -> tuple[bool, str | None]:
+    def _notify_download_started(self, url: str, dest: str) -> tuple[bool, None]:
         self._add_in_flight_download(url, dest, None)
         return True, None
 
