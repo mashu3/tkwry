@@ -1297,6 +1297,11 @@ def test_try_create_stops_after_max_attempts(
     monkeypatch.setattr(frame, "after_idle", lambda _fn: None)
     web = WebView(frame, width=400, height=300)
     scheduled: list[int] = []
+    detach_calls: list[object] = []
+    monkeypatch.setattr(
+        "tkwry.webview.GtkPump.detach",
+        lambda widget: detach_calls.append(widget),
+    )
 
     def boom(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("native create failed")
@@ -1314,6 +1319,10 @@ def test_try_create_stops_after_max_attempts(
     assert scheduled == []
     assert web._create_attempt == _CREATE_MAX_ATTEMPTS
     assert web._creation_error is not None
+    if sys.platform == "linux":
+        assert detach_calls == [frame]
+    else:
+        assert detach_calls == []
     with pytest.raises(WebViewCreationError, match="native creation failed"):
         web._require_ready("eval_js")
 
@@ -1328,6 +1337,11 @@ def test_try_create_retries_after_native_failure(
     monkeypatch.setattr(frame, "after_idle", lambda _fn: None)
     web = WebView(frame, width=400, height=300)
     scheduled: list[int] = []
+    detach_calls: list[object] = []
+    monkeypatch.setattr(
+        "tkwry.webview.GtkPump.detach",
+        lambda widget: detach_calls.append(widget),
+    )
 
     def boom(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("native create failed")
@@ -1341,6 +1355,7 @@ def test_try_create_retries_after_native_failure(
 
     assert web._webview is None
     assert scheduled == [1]
+    assert detach_calls == []
 
 
 @pytest.mark.parametrize("should_show", [True, False])

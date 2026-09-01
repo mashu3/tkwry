@@ -2945,6 +2945,8 @@ class WebView(WebViewRpcMixin):
     def _mark_creation_failed(self, exc: BaseException) -> None:
         if self._creation_error is None:
             self._creation_error = exc
+        if sys.platform == "linux" and self._webview is None:
+            GtkPump.detach(self._frame)
         self._fire_create_failed()
 
     def _fire_create_failed(self) -> None:

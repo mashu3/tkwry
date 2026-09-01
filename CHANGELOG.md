@@ -95,6 +95,8 @@ navigation policy events, Tk context menus, script injection tiers, and
   and detaches the Linux GtkPump, matching normal ``destroy()``
 - Sync-hook timeout no longer returns a pooled ``threading.Event`` before the
   cancelled queue item is drained, avoiding spurious wakes on reuse
+- Linux: final native create failure (max attempts) detaches the pre-create
+  ``GtkPump`` so the 10ms tick does not run forever without a WebView
 - Off-thread sync hooks (navigation, new window, download policy) reuse
   preallocated ``threading.Event`` objects instead of allocating on every
   call, avoiding rare crashes when garbage collection runs during a hook
