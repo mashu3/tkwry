@@ -1765,8 +1765,7 @@ impl WebView {
             None => None,
         };
 
-        let (register_app, ephemeral, data_store_id) = match (&app_root_path, session_refs.as_ref())
-        {
+        let (register_app, ephemeral) = match (&app_root_path, session_refs.as_ref()) {
             (Some(root), Some(refs)) => {
                 let guard = refs.lock_meta()?;
                 let register = if guard.ephemeral {
@@ -1785,23 +1784,21 @@ WebViews that share a session must use the same app= root \
                     }
                     session::should_attach_app_protocol(guard.registered_app_root.as_ref(), root)
                 };
-                #[cfg(target_os = "macos")]
-                let store_id = guard.data_store_id;
-                #[cfg(not(target_os = "macos"))]
-                let store_id: Option<[u8; 16]> = None;
-                (register, guard.ephemeral, store_id)
+                (register, guard.ephemeral)
             }
-            (Some(_), None) => (true, false, None::<[u8; 16]>),
+            (Some(_), None) => (true, false),
             (None, Some(refs)) => {
                 let guard = refs.lock_meta()?;
-                #[cfg(target_os = "macos")]
-                let store_id = guard.data_store_id;
-                #[cfg(not(target_os = "macos"))]
-                let store_id: Option<[u8; 16]> = None;
-                (false, guard.ephemeral, store_id)
+                (false, guard.ephemeral)
             }
-            (None, None) => (false, false, None::<[u8; 16]>),
+            (None, None) => (false, false),
         };
+
+        #[cfg(target_os = "macos")]
+        let data_store_id = session_refs
+            .as_ref()
+            .and_then(|refs| refs.lock_meta().ok())
+            .and_then(|guard| guard.data_store_id);
 
         let mut session_context = session_refs.as_ref().map(|refs| refs.context.borrow_mut());
 
