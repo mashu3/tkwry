@@ -609,9 +609,10 @@ class WebViewRpcMixin:
         rpc_messages = native.drain_rpc_messages()
         ipc_messages = native.drain_ipc_messages()
         for source_url, message in (*rpc_messages, *ipc_messages):
+            bridge_url = self._ipc_source_url_for_bridge(source_url)
             request = parse_rpc_request(message)
             if request is not None:
-                if not self._bridge_origin_allowed(source_url):
+                if not self._bridge_origin_allowed(bridge_url):
                     if request.id and not request.cancel:
                         self._settle_rpc(
                             request.id,
@@ -627,11 +628,11 @@ class WebViewRpcMixin:
                 continue
             context_event = parse_context_menu_event(message)
             if context_event is not None:
-                if not self._bridge_origin_allowed(source_url):
+                if not self._bridge_origin_allowed(bridge_url):
                     continue
                 self._deliver_context_menu_event(context_event)
                 continue
-            if not self._bridge_origin_allowed(source_url):
+            if not self._bridge_origin_allowed(bridge_url):
                 continue
             try:
                 oversized = len(message.encode("utf-8")) > MAX_IPC_MESSAGE_BYTES

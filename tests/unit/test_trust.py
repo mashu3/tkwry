@@ -351,6 +351,36 @@ def test_bridge_path_prefix_and_allow_callback(tk_root) -> None:
     frame.destroy()
 
 
+def test_ipc_empty_source_normalizes_for_html_bridge(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>x</p>")
+    called: list[str] = []
+    web.set_ipc_handler(called.append)
+    native = MagicMock()
+    native.drain_rpc_messages.return_value = []
+    native.drain_ipc_messages.return_value = [("", "hello")]
+    web._webview = native
+    web._deliver_ipc_messages()
+    assert called == ["hello"]
+    web.destroy()
+    frame.destroy()
+
+
+def test_ipc_empty_source_stays_denied_for_url_bridge(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, url="https://example.com/")
+    called: list[str] = []
+    web.set_ipc_handler(called.append)
+    native = MagicMock()
+    native.drain_rpc_messages.return_value = []
+    native.drain_ipc_messages.return_value = [("", "hello")]
+    web._webview = native
+    web._deliver_ipc_messages()
+    assert called == []
+    web.destroy()
+    frame.destroy()
+
+
 def test_expose_star_requires_allow_any_origin(tk_root) -> None:
     frame = tk.Frame(tk_root)
     with pytest.warns(TkwrySecurityWarning, match="bridge_origins"):

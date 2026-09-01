@@ -177,7 +177,7 @@ def is_opaque_bridge_url(url: str | None) -> bool:
         return False
     raw = url.strip()
     if not raw:
-        return True
+        return False
     lower = raw.lower()
     if lower == "about:srcdoc":
         return True

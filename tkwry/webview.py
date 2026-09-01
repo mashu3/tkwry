@@ -3034,6 +3034,14 @@ class WebView(WebViewRpcMixin):
         except tk.TclError:
             open_in_browser(target)
 
+    def _ipc_source_url_for_bridge(self, source_url: str) -> str:
+        """Map missing document URLs to inline ``about:blank`` when allowed."""
+        if source_url.strip():
+            return source_url
+        if origin_allowed("about:blank", self._bridge_origins):
+            return "about:blank"
+        return source_url
+
     def _bridge_origin_allowed(self, source_url: str | None) -> bool:
         if not origin_allowed(source_url, self._bridge_origins):
             return False

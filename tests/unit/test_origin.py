@@ -76,7 +76,7 @@ def test_is_opaque_bridge_url() -> None:
     assert is_opaque_bridge_url("data:text/html,<p>x</p>")
     assert is_opaque_bridge_url("blob:https://example.com/uuid")
     assert is_opaque_bridge_url("about:srcdoc")
-    assert is_opaque_bridge_url("")
+    assert not is_opaque_bridge_url("")
     assert not is_opaque_bridge_url("about:blank")
     assert not is_opaque_bridge_url("https://example.com/")
 
