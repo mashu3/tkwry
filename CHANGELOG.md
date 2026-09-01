@@ -112,6 +112,8 @@ navigation policy events, Tk context menus, script injection tiers, and
   chunks queued before the terminal failure
 - RPC stream ``next()`` waiters are queued so concurrent calls do not
   overwrite a single pending Promise
+- ``on_download_started`` alone now registers the native download-started
+  handler and fires notify-only started events without ``on_download``
 - Off-thread sync hooks (navigation, new window, download policy) reuse
   preallocated ``threading.Event`` objects instead of allocating on every
   call, avoiding rare crashes when garbage collection runs during a hook

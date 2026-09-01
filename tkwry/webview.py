@@ -2528,12 +2528,8 @@ class WebView(WebViewRpcMixin):
                 "WebView native creation failed; cannot call set_on_download()"
             ) from self._creation_error
         self._on_download = handler
-        if self._webview is not None:
-            if self._download_policy_active():
-                self._webview.set_on_download_started(self._native_download_started)
-            else:
-                self._webview.clear_on_download_started()
-        if self._download_policy_active():
+        self._sync_download_started_native()
+        if self._download_started_native_wanted():
             self._ensure_tk_wakeup_pipe()
             self._ensure_event_poll()
 
@@ -2549,6 +2545,10 @@ class WebView(WebViewRpcMixin):
                 "WebView native creation failed; cannot call set_on_download_started()"
             ) from self._creation_error
         self._on_download_started = handler
+        self._sync_download_started_native()
+        if self._download_started_native_wanted():
+            self._ensure_tk_wakeup_pipe()
+            self._ensure_event_poll()
 
     def set_on_download_complete(self, handler: DownloadCompleteHandler | None) -> None:
         """Register a download-finished handler (Tk main thread; notify-only).
@@ -2996,6 +2996,7 @@ class WebView(WebViewRpcMixin):
                 self._on_title_changed is not None,
                 self._drag_drop_handler is not None,
                 self._download_policy_active(),
+                self._on_download_started is not None,
                 self._on_download_complete is not None,
             )
         )
@@ -3022,6 +3023,18 @@ class WebView(WebViewRpcMixin):
             or self._download_allow is not None
             or self._on_download is not None
         )
+
+    def _download_started_native_wanted(self) -> bool:
+        return self._download_policy_active() or self._on_download_started is not None
+
+    def _sync_download_started_native(self) -> None:
+        native = self._webview
+        if native is None:
+            return
+        if self._download_started_native_wanted():
+            native.set_on_download_started(self._native_download_started)
+        else:
+            native.clear_on_download_started()
 
     def _default_navigation_allowed(self, url: str) -> bool:
         if self._lock_app_navigation and app_navigation_allowed(url):
@@ -3283,18 +3296,29 @@ class WebView(WebViewRpcMixin):
                 return
 
     def _native_download_started(self, url: str, dest: str) -> tuple[bool, str | None]:
-        if not self._download_policy_active():
-            return True, None
-        deny: tuple[bool, str | None] = (False, None)
-        allowed, path = self._dispatch_sync_hook(
-            lambda: self._invoke_download_handler(url, dest),
-            default=deny,
-            kind="on_download",
-            detail=url,
-        )
-        if allowed:
-            self._add_in_flight_download(url, dest, path)
-        return allowed, path
+        if self._download_policy_active():
+            deny: tuple[bool, str | None] = (False, None)
+            allowed, path = self._dispatch_sync_hook(
+                lambda: self._invoke_download_handler(url, dest),
+                default=deny,
+                kind="on_download",
+                detail=url,
+            )
+            if allowed:
+                self._add_in_flight_download(url, dest, path)
+            return allowed, path
+        if self._on_download_started is not None:
+            return self._dispatch_sync_hook(
+                lambda: self._notify_download_started(url, dest),
+                default=(True, None),
+                kind="on_download_started",
+                detail=url,
+            )
+        return True, None
+
+    def _notify_download_started(self, url: str, dest: str) -> tuple[bool, str | None]:
+        self._add_in_flight_download(url, dest, None)
+        return True, None
 
     def _deliver_download_complete_events(self) -> None:
         native = self._webview
@@ -4058,7 +4082,7 @@ class WebView(WebViewRpcMixin):
         kwargs["ipc_listening"] = self._ipc_listening_wanted()
         kwargs["title_listening"] = self._title_listening_wanted()
         kwargs["drag_drop_listening"] = self._drag_drop_handler is not None
-        if self._download_policy_active():
+        if self._download_started_native_wanted():
             kwargs["on_download_started"] = self._native_download_started
         kwargs["download_complete_listening"] = True
         if self._untrusted:

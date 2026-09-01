@@ -496,6 +496,30 @@ def test_download_started_event_and_handler(tk_root, tmp_path: Path) -> None:
         web.destroy()
 
 
+def test_download_started_notify_only_wires_native_and_fires(tk_root) -> None:
+    started: list[Download] = []
+    web = _make_web(tk_root)
+    native = MagicMock()
+    web._webview = native
+    fired: list[str] = []
+    web.bind("<<WebViewDownloadStarted>>", lambda _evt: fired.append("started"))
+    try:
+        web.set_on_download_started(lambda item: started.append(item))
+        native.set_on_download_started.assert_called_once()
+        allowed, path = web._native_download_started(
+            "https://example.com/a.zip", "/tmp/a.zip"
+        )
+        assert allowed is True
+        assert path is None
+        assert fired == ["started"]
+        assert started[0].url == "https://example.com/a.zip"
+        web.set_on_download_started(None)
+        native.clear_on_download_started.assert_called_once()
+    finally:
+        web._webview = None
+        web.destroy()
+
+
 def test_download_failed_handler(tk_root) -> None:
     web = _make_web(tk_root)
     native = MagicMock()
