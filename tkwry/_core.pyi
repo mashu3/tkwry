@@ -4,6 +4,7 @@ from typing import Any, Final, final
 __all__: Final = [
     "WebView",
     "WebSession",
+    "NativeGcCompanion",
     "Cookie",
     "PageLoadEvent",
     "NewWindowResponse",

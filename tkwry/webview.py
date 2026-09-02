@@ -23,13 +23,13 @@ from tkwry._app import resolve_app, resolve_app_csp, validate_app_isolation
 from tkwry._core import (
     Cookie,
     DragDropEvent,
+    NativeGcCompanion,
     NewWindowResponse,
     PageLoadEvent,
     PermissionKind,
     PermissionResponse,
 )
 from tkwry._core import (
-    NativeGcCompanion,
     WebView as NativeWebView,
 )
 from tkwry._host import (
