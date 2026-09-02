@@ -87,7 +87,10 @@ def _navigation_handler_uses_url(handler: NavigationHandler) -> bool:
     ]
     if len(params) != 1:
         return True
-    annotation = params[0].annotation
+    param = params[0]
+    if param.name == "event":
+        return False
+    annotation = param.annotation
     if annotation is inspect.Parameter.empty:
         return True
     if annotation is str:

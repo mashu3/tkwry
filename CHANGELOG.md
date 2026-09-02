@@ -68,6 +68,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is used for the domain only)
 - macOS embed bounds probe catches destroyed-widget ``TclError`` instead of
   raising ``NameError`` when ``tkinter`` was import-time only
+- Linux missing ``_core`` on ``import tkwry`` now surfaces the build hint even
+  when the failure is reached via ``profile`` / ``session``
+- Unannotated ``on_navigation`` handlers whose sole parameter is named
+  ``event`` receive :class:`~tkwry.NavigationEvent` (legacy ``url: str`` form
+  unchanged)
 
 ## [0.1.7] - 2026-09-02
 

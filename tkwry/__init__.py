@@ -17,7 +17,6 @@ from tkwry.exceptions import (
     WebViewTimeoutError,
 )
 from tkwry.ipc import rpc_cancel_event, rpc_cancelled
-from tkwry.profile import close_profile, set_profiles_base
 from tkwry.window import configure_window
 
 _LINUX_CORE_BUILD_HINT = (
@@ -64,6 +63,7 @@ try:
         NavigationPolicyHandler,
         NavigationType,
     )
+    from tkwry.profile import close_profile, set_profiles_base
     from tkwry.session import WebSession
     from tkwry.webview import (
         BridgeAllow,

@@ -46,6 +46,16 @@ def test_linux_core_build_hint_reraise(monkeypatch: pytest.MonkeyPatch) -> None:
     assert raised.value.__cause__ is exc
 
 
+def test_init_imports_profile_inside_core_guard() -> None:
+    from pathlib import Path
+
+    text = Path(tkwry_init.__file__).read_text(encoding="utf-8")
+    try_pos = text.find("try:")
+    profile_pos = text.find("from tkwry.profile import")
+    assert try_pos != -1
+    assert profile_pos > try_pos
+
+
 def test_non_linux_core_error_is_not_rewritten(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tkwry_init.sys, "platform", "darwin")
     exc = ModuleNotFoundError("No module named 'tkwry._core'", name="tkwry._core")

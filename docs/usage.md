@@ -468,6 +468,9 @@ web = WebView(
     url="https://example.com",
     on_page_load=lambda evt, url: print(evt, url),
     on_title_changed=lambda title: root.title(title),
+    # ``on_navigation`` / ``set_navigation_policy``: one-arg handlers named
+    # ``event`` (or annotated ``NavigationEvent``) receive the event object;
+    # legacy ``url: str`` handlers still get the URL string only.
     on_navigation=lambda event: event.url.startswith("https://"),
     permission_handler=lambda kind: (
         PermissionResponse.Allow

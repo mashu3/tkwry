@@ -52,6 +52,18 @@ def test_call_navigation_handler_legacy_url_form() -> None:
     assert seen == ["https://example.com/x"]
 
 
+def test_call_navigation_handler_event_name_without_annotation() -> None:
+    seen: list[NavigationEvent] = []
+
+    def handler(event) -> bool:  # noqa: ANN001
+        seen.append(event)
+        return event.url.startswith("https://")
+
+    event = NavigationEvent(url="https://example.com/x")
+    assert call_navigation_handler(handler, event, url=event.url) is True
+    assert seen == [event]
+
+
 def test_set_navigation_policy_blocks_urls(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>x</p>")
@@ -120,6 +132,22 @@ def test_navigation_policy_ctor_matches_setter(tk_root) -> None:
     web_setter.destroy()
     frame_ctor.destroy()
     frame_setter.destroy()
+
+
+def test_on_navigation_unannotated_event_param(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>x</p>")
+
+    def allow(event) -> bool:  # noqa: ANN001
+        return event.url.startswith("https://")
+
+    web.set_on_navigation(allow)
+
+    assert web._invoke_navigation_handler("https://example.com/") is True
+    assert web._invoke_navigation_handler("http://example.com/") is False
+
+    web.destroy()
+    frame.destroy()
 
 
 def test_legacy_on_navigation_url_handler(tk_root) -> None:
