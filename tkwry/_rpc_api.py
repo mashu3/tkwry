@@ -380,6 +380,18 @@ class WebViewRpcMixin:
             or getattr(self, "_context_menu_items", None) is not None
         )
 
+    def _inject_rpc_bootstrap(self) -> None:
+        """Inject the RPC JS bridge into the current document."""
+        native = self._webview
+        if native is None or not (self._rpc_bridge_wanted or self._rpc_methods):
+            return
+        native.set_ipc_listening(True)
+        try:
+            native.eval_js(_RPC_BOOTSTRAP_JS)
+            self._rpc_bootstrap_injected = True
+        except Exception:
+            traceback.print_exc()
+
     def _enable_rpc(self) -> None:
         """Turn on IPC listening and ensure the JS bridge bootstrap is present."""
         self._rpc_bridge_wanted = True
@@ -387,11 +399,7 @@ class WebViewRpcMixin:
             if self._ipc_listening_wanted():
                 self._webview.set_ipc_listening(True)
             if not self._rpc_bootstrap_injected:
-                try:
-                    self._webview.eval_js(_RPC_BOOTSTRAP_JS)
-                    self._rpc_bootstrap_injected = True
-                except Exception:
-                    traceback.print_exc()
+                self._inject_rpc_bootstrap()
         self._sync_page_load_listening()
         self._ensure_event_poll()
 
@@ -531,10 +539,14 @@ class WebViewRpcMixin:
         for _req_id, fut in pending:
             fut.cancel()
 
-    def _bump_rpc_epoch_for_navigation(self) -> None:
+    def _bump_rpc_epoch_for_navigation(self, *, sync_js: bool = True) -> None:
         """Advance RPC ids so stale responses cannot settle a new document."""
         self._rpc_epoch += 1
         self._cancel_inflight_rpc_for_navigation()
+        if sync_js:
+            self._sync_rpc_epoch_to_js()
+
+    def _sync_rpc_epoch_to_js(self) -> None:
         if self._destroyed or self._webview is None:
             return
         if not (self._rpc_bridge_wanted or self._rpc_methods):

@@ -5,8 +5,11 @@ from __future__ import annotations
 import tkinter as tk
 from unittest.mock import MagicMock
 
+import pytest
+
 from tkwry import WebView
 from tkwry._core import PageLoadEvent
+from tkwry.ipc import RPC_BOOTSTRAP_JS
 
 
 def test_page_load_started_bumps_rpc_epoch(tk_root) -> None:
@@ -30,6 +33,75 @@ def test_page_load_started_bumps_rpc_epoch(tk_root) -> None:
 
     assert web._rpc_epoch == 1
     assert any("_bumpEpoch(1)" in script for script in eval_scripts)
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_page_load_started_bumps_rpc_epoch_before_first_finished(tk_root) -> None:
+    """Early re-navigation must bump epoch even when Finished never ran."""
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>rpc</p>")
+
+    @web.expose
+    def ping() -> str:
+        return "pong"
+
+    native = MagicMock()
+    native.drain_page_load_events.return_value = [
+        (PageLoadEvent.Started, "https://example.com/next")
+    ]
+    eval_scripts: list[str] = []
+    native.eval_js = lambda script: eval_scripts.append(script)
+    web._webview = native  # type: ignore[assignment]
+    assert web._document_loaded_once is False
+
+    web._deliver_page_load_events()
+
+    assert web._rpc_epoch == 1
+    assert any("_bumpEpoch(1)" in script for script in eval_scripts)
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_rpc_bootstrap_reinjected_on_page_load_started(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>rpc</p>")
+
+    @web.expose
+    def ping() -> str:
+        return "pong"
+
+    injected: list[str] = []
+
+    class _Native:
+        def drain_page_load_events(self):
+            return [(PageLoadEvent.Started, "https://example.com/next")]
+
+        def set_ipc_listening(self, enabled: bool) -> None:
+            pass
+
+        def set_page_load_listening(self, enabled: bool) -> None:
+            pass
+
+        def eval_js(self, script: str) -> None:
+            injected.append(script)
+
+        def destroy(self) -> None:
+            pass
+
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+    web._webview = _Native()  # type: ignore[assignment]
+    web._rpc_bootstrap_injected = True
+    injected.clear()
+
+    web._deliver_page_load_events()
+
+    assert injected[0] == RPC_BOOTSTRAP_JS
+    assert any("_bumpEpoch(1)" in script for script in injected)
 
     web.destroy()
     frame.destroy()

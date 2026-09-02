@@ -3774,10 +3774,8 @@ class WebView(WebViewRpcMixin):
         for event, page_url in pending:
             if event == PageLoadEvent.Started:
                 self._loading = True
-                if (self._rpc_bridge_wanted or self._rpc_methods) and (
-                    self._document_loaded_once
-                ):
-                    self._bump_rpc_epoch_for_navigation()
+                if self._rpc_bridge_wanted or self._rpc_methods:
+                    self._bump_rpc_epoch_for_navigation(sync_js=False)
             elif event == PageLoadEvent.Finished:
                 self._loading = False
                 self._document_loaded_once = True
@@ -3787,6 +3785,14 @@ class WebView(WebViewRpcMixin):
                         self._run_eval_js(script)
                     except Exception:
                         traceback.print_exc()
+            if event == PageLoadEvent.Started and (
+                self._rpc_bridge_wanted or self._rpc_methods
+            ):
+                try:
+                    self._inject_rpc_bootstrap()
+                    self._sync_rpc_epoch_to_js()
+                except Exception:
+                    traceback.print_exc()
             if event == PageLoadEvent.Started and self._context_menu_active():
                 try:
                     self._inject_context_menu_bridge()

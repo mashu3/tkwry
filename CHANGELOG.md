@@ -25,6 +25,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   they no longer call ``winfo_exists`` / ``after`` from native callback threads
 - Event poll rescheduling tracks one live ``after`` id instead of appending every
   tick to ``_deferred_after_ids``, so destroy does not cancel stale Tcl timers
+- ``PageLoadEvent.Started`` re-injects the RPC JS bootstrap on each navigation so
+  ``window.tkwry`` survives after the create-time init script document is gone
+- RPC epoch now bumps on every ``Started`` (including before the first
+  ``Finished``), then syncs to JS after bootstrap reinjection
 
 ## [0.1.7] - 2026-09-02
 
