@@ -1271,6 +1271,10 @@ struct WebView {
     wry_call_depth: Cell<u32>,
     /// ``destroy()`` requested while a nested wry call is active.
     destroy_pending: Cell<bool>,
+    /// Native view is out of ``inner`` for a reentrant wry call (e.g. DevTools).
+    reentrant_active: Cell<bool>,
+    /// ``force_destroy`` ran while ``reentrant_active``; drop the stack-held view.
+    destroyed_during_reentrant: Cell<bool>,
     /// Windows ``app=``: rewrite ``tkwry://`` → ``http(s)://tkwry.localhost``.
     https_scheme: bool,
     /// Keeps the shared ``WebContext`` alive (custom protocol / profile).
@@ -1378,6 +1382,13 @@ call destroy() on the Tk thread before GC"
     }
 
     fn destroy_inner(&self) -> PyResult<()> {
+        if self.reentrant_active.get() {
+            self.destroyed_during_reentrant.set(true);
+            #[cfg(target_os = "macos")]
+            self.mac.teardown();
+            self.wakeup_write_fd.store(-1, Ordering::SeqCst);
+            return Ok(());
+        }
         #[cfg(target_os = "macos")]
         self.mac.teardown();
         self.wakeup_write_fd.store(-1, Ordering::SeqCst);
@@ -1396,6 +1407,9 @@ call destroy() on the Tk thread before GC"
     }
 
     fn native_is_alive(&self) -> bool {
+        if self.reentrant_active.get() {
+            return !self.destroyed_during_reentrant.get();
+        }
         self.inner.lock().ok().is_some_and(|guard| guard.is_some())
     }
 }
@@ -2043,6 +2057,8 @@ WebViews that share a session must use the same app= root \
             download_cb,
             wry_call_depth: Cell::new(0),
             destroy_pending: Cell::new(false),
+            reentrant_active: Cell::new(false),
+            destroyed_during_reentrant: Cell::new(false),
             https_scheme,
             session: session_refs,
         })
@@ -2784,20 +2800,29 @@ where
         guard.take()
     };
 
+    this.reentrant_active.set(true);
     let result = match taken.as_ref() {
         Some(wv) => f(wv),
         None => Err(pyo3::exceptions::PyRuntimeError::new_err(
             "webview already destroyed",
         )),
     };
+    this.reentrant_active.set(false);
 
     {
         let mut guard = this
             .inner
             .lock()
             .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("webview lock poisoned"))?;
-        // Put the view back unless destroy already cleared/replaced it.
-        if guard.is_none() {
+        if this.destroyed_during_reentrant.get() {
+            this.destroyed_during_reentrant.set(false);
+            if let Some(wv) = taken {
+                if let Err(err) = wv.set_visible(false) {
+                    eprintln!("tkwry: set_visible(false) failed during reentrant destroy: {err}");
+                }
+                drop(wv);
+            }
+        } else if guard.is_none() {
             *guard = taken;
         }
     }
@@ -3194,6 +3219,32 @@ mod tests {
             destroy_runs.get(),
             1,
             "leave must not destroy again after force"
+        );
+    }
+
+    #[test]
+    fn force_destroy_during_reentrant_does_not_revive_native_view() {
+        let reentrant_active = Cell::new(false);
+        let destroyed_during_reentrant = Cell::new(false);
+        let mut inner: Option<u32> = Some(1);
+
+        reentrant_active.set(true);
+        let taken = inner.take();
+        assert_eq!(taken, Some(1));
+
+        destroyed_during_reentrant.set(true);
+
+        reentrant_active.set(false);
+        if destroyed_during_reentrant.get() {
+            destroyed_during_reentrant.set(false);
+            let _ = taken;
+        } else if inner.is_none() {
+            inner = taken;
+        }
+
+        assert!(
+            inner.is_none(),
+            "force_destroy during reentrant must not put the native view back"
         );
     }
 

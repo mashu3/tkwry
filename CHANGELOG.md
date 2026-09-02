@@ -16,6 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   fd before Python closes the pipe, so late callbacks cannot write a reused fd
 - ``force_destroy()`` clears ``destroy_pending`` even when native teardown fails,
   so nested unwind does not wedge later destroy attempts
+- ``force_destroy()`` during a reentrant native call (e.g. DevTools) no longer
+  reports success while leaving the WebView alive in the reentrant frame
 
 ## [0.1.7] - 2026-09-02
 
