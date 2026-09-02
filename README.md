@@ -41,6 +41,7 @@ Pre-built **abi3** wheels ship for **Windows** and **macOS**. **Linux** is sourc
 | Trust boundaries (`untrusted`, `bridge_origins`, recipes) | [docs/trust.md](https://github.com/mashu3/tkwry/blob/main/docs/trust.md) |
 | IPC / RPC / emit (`expose`, `call` / `stream`, cancel, limits) | [docs/rpc.md](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md) |
 | Platform notes (Windows / macOS / Linux, print, window chrome) | [docs/platforms.md](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md) |
+| wry embedding / API ownership map | [docs/wry-embedding.md](https://github.com/mashu3/tkwry/blob/main/docs/wry-embedding.md) |
 | Packaging (PyInstaller / Nuitka notes — not CI-verified in 0.1.x) | [docs/packaging.md](https://github.com/mashu3/tkwry/blob/main/docs/packaging.md) |
 
 ---
@@ -142,26 +143,33 @@ Trust (`untrusted`, `bridge_origins`): [docs/trust.md](https://github.com/mashu3
 
 Short checklist — **details live in [Platform notes](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md)** (especially [macOS embedding](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#macos-embedding)).
 
-- **Alpha** — APIs may change; not for production yet (see banner above)
-- **Windows** — WebView2 Runtime required; missing runtime → `creation_failed` / `<<WebViewCreateFailed>>` (gated APIs raise `WebViewCreationError` with [install text](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#windows))
-- **Print** — `web.print()` opens the system dialog; no `print_to_pdf`, no return value, no success/fail/cancel (wry has none). macOS: `print_with_options(…margins…)` (still no result); Win/Linux → `OSError`. See [Platform notes — Print](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#print)
-- **Downloads** — cancel is **start-deny only** (`on_download` → `False` / allowlist); no mid-flight abort, pause/resume, or progress % until wry exposes them. `in_flight_downloads` is observational. See [Platform notes — Downloads](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#downloads)
-- **Window chrome** — title / icon / geometry / fullscreen / min/max / `-topmost` are the host **Toplevel** (`configure_window`); WebView size follows the Frame (`sync_bounds`). See [Usage — Layout / resize](https://github.com/mashu3/tkwry/blob/main/docs/usage.md#layout--resize)
-- **Windows DevTools** — wry/WebView2 reports `is_devtools_open()` as `False` and `close_devtools()` is a no-op; `open_devtools()` still opens the inspector
-- **Linux** — no PyPI wheel (by design); best-effort source install
-- **Linux concurrent `eval_js_with_callback`** — evaluating on multiple WebViews at once can stall WebKitGTK; prefer sequential evals (see [Linux](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#linux))
-- **Shared `WebSession` + `app=`** — WebViews that share a non-ephemeral session must use the same `app=` root (`ValueError` otherwise; Linux can register `tkwry://` only once per context); do not share a persistent profile with untrusted sites
-- **Trust / external content** — RPC/IPC default to the initial origin (optional path prefix / `bridge_allow`); `bridge_origins="*"` warns and needs `expose(..., allow_any_origin=True)`; `app=` locks navigation to `tkwry://` (`navigation_allow` / `open_external=True` for extra origins + system browser); `untrusted=True` also **denies downloads** unless `download_allow` / `on_download` permits (see [Trust boundaries](https://github.com/mashu3/tkwry/blob/main/docs/trust.md))
-- **macOS DevTools** — create with `devtools=True`, then `open_devtools()` (flag alone does not open; `open_devtools()` without the flag is a no-op on macOS); uses private APIs — avoid in Mac App Store builds
-- **macOS IME / focus** — not Safari-parity; mid-composition focus flips can mis-route input
-- **macOS import order** — import `tkwry` before AppKit/`NSApplication`, or you may see a double titlebar
-- **`url()` on macOS** — may be `None` for inline HTML until a concrete `load_url` (WKWebView has no document `NSURL`)
-- **Sync hooks / queues** — `on_navigation` / `on_new_window` / create-time `permission_handler` may block WebKit up to ~60s; do not create a WebView from `on_new_window` (use `open_external=True` / `open_in_browser`); async event queues cap at 2048; IPC/RPC messages cap at 10 MiB (see [Usage — Navigation / lifecycle callbacks](https://github.com/mashu3/tkwry/blob/main/docs/usage.md#navigation--lifecycle-callbacks))
-- **RPC cancel / destroy** — timeout, JS `cancel`, and `destroy()` are **cooperative only** (`rpc_cancelled()`), including open streams; Python cannot preempt a running worker. `destroy()` joins the pool for ~2 seconds; leftover threads are logged to stderr (see [IPC / RPC / emit](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md#timeout-and-cancel))
-- **Eval / navigation timeout** — `eval_js_with_callback` timeout (30s) is `WebViewTimeoutError` (`on_error`, `<<WebViewEvalFailed>>`, `last_eval_error`); `on_navigation` / `on_new_window` timeout still returns the default deny and signals `WebViewNavigationError` (`<<WebViewNavigationFailed>>`, `last_navigation_error`) — not raised on the WebKit thread
-- **Drag & drop** — WebView area only (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
-- **Screenshot** — no `WebView` capture API; wry 0.56.1 does not expose one yet ([wry#1674](https://github.com/tauri-apps/wry/pull/1674)). tkwry will wrap it when upstream ships; no JS fallback (see [Platform notes](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#screenshot))
-- **Find in page** — no `find` / `find_next` / `find_previous` / `clear_find`; wry has none ([wry#585](https://github.com/tauri-apps/wry/issues/585)). Do not treat `window.find` as a Capability. See [Platform notes — Find in page](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#find-in-page)
+**Platforms**
+
+- **Windows** — [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) required; missing → create-failed signals ([install notes](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#windows))
+- **Linux** — no PyPI wheel (by design); best-effort source install; prefer sequential `eval_js_with_callback` across multiple views ([Linux](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#linux))
+
+**Engine gaps** (wrap when wry ships them)
+
+- **Print** — system dialog only; no PDF / no result ([Print](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#print))
+- **Downloads** — start-deny only; no mid-flight abort, pause/resume, or progress % ([Downloads](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#downloads))
+- **Screenshot / find in page** — not exposed ([Screenshot](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#screenshot), [Find](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#find-in-page))
+
+**macOS / Windows quirks**
+
+- **macOS** — import `tkwry` before AppKit; IME/focus not Safari-parity; inline `url()` may be `None`; DevTools needs `devtools=True` then `open_devtools()` (private APIs — avoid Mac App Store) ([macOS embedding](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#macos-embedding), [DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools))
+- **Windows DevTools** — `open_devtools()` works; `close_devtools` / `is_devtools_open` are limited ([DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools))
+
+**Trust & session**
+
+- Shared non-ephemeral `WebSession` + `app=` must use the same root; do not share a persistent profile with untrusted sites
+- External content / IPC defaults and `untrusted=` — [Trust boundaries](https://github.com/mashu3/tkwry/blob/main/docs/trust.md)
+
+**Lifecycle & IPC**
+
+- Sync `on_navigation` / `on_new_window` / create-time `permission_handler` may block WebKit ~60s; do not create a WebView from `on_new_window` ([lifecycle callbacks](https://github.com/mashu3/tkwry/blob/main/docs/usage.md#navigation--lifecycle-callbacks))
+- RPC cancel / `destroy()` are cooperative only; async queues cap at 2048; IPC/RPC messages at 10 MiB ([RPC timeout/cancel](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md#timeout-and-cancel))
+- Eval / navigation timeouts surface typed events/errors on the Tk thread (not raised on the WebKit thread)
+- Native drag & drop is **WebView area only** (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
 
 See [CHANGELOG.md](https://github.com/mashu3/tkwry/blob/main/CHANGELOG.md) for release history.
 
@@ -190,25 +198,30 @@ Tkinter apps already have a window and a layout. The web belongs **inside** a `F
 
 ## 🧩 Features
 
-- **Local app assets** — `app=` + `tkwry://` (SPA fallback, `app_dev` no-store, ETag/HEAD/Range, default CSP, optional COOP/CORP, bounded `watch_app()`; open-then-verify symlink/junction confinement)
-- **IPC / RPC / emit** — events vs request/response; sync-generator `stream`; worker RPC; typed TypeError; protocol `version`; JS `cancel`; Python→JS `emit`; origin/path allowlist (`bridge_origins`) + `bridge_allow` + `untrusted=` viewer mode
-- **WebSession** — shared wry `WebContext`; Cookie CRUD on `WebView` (`cookies` / `set_cookie` / …); shared `app=` roots must match; `emit_all` broadcast
-- **Testing helpers** — `tkwry.testing.wait_until` / `wait_ready` / `wait_eval` / `wait_title`
-- **Child-window embedding** — WebView is a native child of your Tk window surface, not a floating overlay
-- **Bounds & visibility sync** — follows `<Configure>`, `<Map>`, and `<Unmap>` (tabs / `Notebook` hide unmapped views)
-- **Typed failure signals** — create: `<<WebViewCreateFailed>>` / `when_failed`; eval: `<<WebViewEvalFailed>>` / `WebViewTimeoutError`; nav hook timeout: `<<WebViewNavigationFailed>>` / `WebViewNavigationError` (native still returns the default deny); downloads: `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>` / `last_download`
-- **Deferred callbacks** — IPC, RPC, page load, title, eval results, and DnD queue to Tk (avoids macOS deadlocks)
-- **URL safety** — Python `load_url` normalizes/validates schemes; in-page nav denies `javascript:`/`blob:`/… (`data:` under `app=`); `app=` stays on `tkwry://`; IPC/RPC origin/path allowlist + `bridge_allow`
-- **DevTools** — `devtools=True` at create, then `open_devtools()` / `close_devtools()` / `is_devtools_open()`; Windows: open works, close/`is_devtools_open` limited (see [Platform notes — DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools)); macOS: private APIs
-- **Print** — `web.print()` opens the system print dialog (no PDF / no result)
-- **Downloads** — `on_download` / `on_download_complete` + `download_allow`; `untrusted=True` denies unless permitted; `last_download` + `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`; `unique_download_path` for same-name files (absolute dest only; no overwrite policy)
-- **Native drag & drop** — OS-level file drops into the WebView (no tkinterdnd2)
-- **Navigation hooks** — all handlers on the Tk thread; `on_navigation` / `on_new_window` block WebKit until they return
-- **Multiple layouts** — works with `pack`, `grid`, `place`, `Notebook`, and `PanedWindow` (see examples)
-- **Plotly-ready** — load HTML + `eval_js`; demo toggles CDN vs local `app=`
-- **Folium-ready** — embed Leaflet maps from Folium HTML (right-click to pin)
-- **Markdown-ready** — Monaco editor + live preview in a `PanedWindow` (see [`examples/markdown_demo.py`](https://github.com/mashu3/tkwry/blob/main/examples/markdown_demo.py); CDN required — or vendor under `app=`)
-- **CI-tested** — `pytest` on Windows (x86_64 + arm64), macOS, and Linux (Xvfb + WebKitGTK)
+**Embedding & layout**
+
+- Native child of your Tk surface (`build_as_child`) — not a floating overlay
+- Bounds / visibility follow `<Configure>`, `<Map>`, `<Unmap>` (Notebook tabs hide unmapped views)
+- Works with `pack` / `grid` / `place`, `Notebook`, and `PanedWindow`; window chrome is the host Toplevel ([Layout / resize](https://github.com/mashu3/tkwry/blob/main/docs/usage.md#layout--resize))
+
+**Local apps & bridge**
+
+- `app=` serves assets over `tkwry://` (no localhost HTTP server)
+- IPC / RPC / emit between JS and Python ([docs/rpc.md](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md))
+- Origin-scoped bridge by default; `untrusted=` for arbitrary sites ([docs/trust.md](https://github.com/mashu3/tkwry/blob/main/docs/trust.md))
+
+**Browser-ish APIs**
+
+- `WebSession` / profiles, cookies, navigation hooks, downloads, print, DevTools ([platforms](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md))
+- Native file drag & drop into the WebView area
+
+**Host integration**
+
+- Typed create / eval / navigation / download failure signals on the Tk thread
+- Lifecycle callbacks deferred onto Tk (avoids native-thread deadlocks)
+- `tkwry.testing` wait helpers for integration tests
+
+Plotly / Folium / Markdown demos live under [Examples](#-examples).
 
 ---
 
