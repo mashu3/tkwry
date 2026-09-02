@@ -164,7 +164,7 @@ def test_download_complete_handler_keeps_poll(tk_root) -> None:
 
 
 def test_download_complete_wakeup_without_handler(tk_root) -> None:
-    """T7 / D21: complete arrives via wakeup; no idle ``_webview`` poll latch."""
+    """Complete arrives via wakeup; no idle ``_webview`` poll latch."""
     web = _make_web(tk_root)
     native = MagicMock()
     native.drain_download_complete_events.return_value = [
@@ -190,7 +190,7 @@ def test_download_complete_wakeup_without_handler(tk_root) -> None:
 
 
 def test_download_complete_after_poll_without_createfilehandler(tk_root) -> None:
-    """T7 / D23: no createfilehandler — after-poll + pipe wake still delivers."""
+    """No createfilehandler — after-poll + pipe wake still delivers."""
     import os
     import time
 
@@ -238,7 +238,7 @@ def test_download_complete_after_poll_without_createfilehandler(tk_root) -> None
 def test_ensure_tk_wakeup_fileevent_falls_back_without_createfilehandler(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """D23: missing createfilehandler arms after-poll instead of no-op."""
+    """Missing createfilehandler arms after-poll instead of no-op."""
     import os
 
     import tkwry._host as host

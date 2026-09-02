@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Docs ↔ public API checks (D15).
+"""Docs ↔ public API checks.
 
 Fails when:
 
@@ -65,8 +65,8 @@ def api_summary_section(usage_text: str) -> str:
 def public_all_names() -> list[str]:
     """Parse ``tkwry/__init__.py`` ``__all__`` without importing the native ext.
 
-    The lint job does not build wheels; reading the list from source keeps D15
-    runnable alongside ruff / README link checks.
+    The lint job does not build wheels; reading the list from source keeps this
+    check runnable alongside ruff / README link checks.
     """
     init_path = ROOT / "tkwry" / "__init__.py"
     tree = ast.parse(init_path.read_text(encoding="utf-8"), filename=str(init_path))

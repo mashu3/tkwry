@@ -434,7 +434,7 @@ def test_destroy_keeps_wakeup_pipe_while_other_users_remain(tk_root) -> None:
 
 @pytest.mark.skipif(sys.platform == "darwin", reason="macOS uses a separate pipe")
 def test_wakeup_pipe_ensure_is_idempotent_per_webview(tk_root) -> None:
-    """D24 / T8: repeated _ensure_tk_wakeup_pipe must not inflate users."""
+    """Repeated _ensure_tk_wakeup_pipe must not inflate users."""
     frame = tk.Frame(tk_root)
     frame.pack()
     web = WebView(frame, width=400, height=300)
@@ -452,7 +452,7 @@ def test_wakeup_pipe_ensure_is_idempotent_per_webview(tk_root) -> None:
 
 @pytest.mark.skipif(sys.platform == "darwin", reason="macOS uses a separate pipe")
 def test_wakeup_pipe_setter_churn_does_not_inflate_users(tk_root) -> None:
-    """D24 / T8: set_on_navigation churn must not leak pipe users."""
+    """set_on_navigation churn must not leak pipe users."""
     frame = tk.Frame(tk_root)
     frame.pack()
     web = WebView(frame, width=400, height=300)
@@ -471,7 +471,7 @@ def test_wakeup_pipe_setter_churn_does_not_inflate_users(tk_root) -> None:
 
 @pytest.mark.skipif(sys.platform == "darwin", reason="macOS uses a separate pipe")
 def test_wakeup_pipe_simulated_linux_double_create_path(tk_root) -> None:
-    """D24 / T8: old Linux _try_create double-ensure left users at 1 after destroy."""
+    """Old Linux _try_create double-ensure left users at 1 after destroy."""
     frame = tk.Frame(tk_root)
     frame.pack()
     web = WebView(frame, width=400, height=300)

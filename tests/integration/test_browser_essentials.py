@@ -1,6 +1,6 @@
 """Browser-essentials integration: headers, cookies, zoom, permission, clipboard.
 
-Uses a local HTTP server (D20). Keep this module in its own CI pytest process
+Uses a local HTTP server. Keep this module in its own CI pytest process
 on Linux/Windows so WebView create/destroy fatigue does not cascade.
 """
 

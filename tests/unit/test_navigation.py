@@ -1,4 +1,4 @@
-"""Navigation policy and NavigationEvent (F18)."""
+"""Navigation policy and NavigationEvent."""
 
 from __future__ import annotations
 

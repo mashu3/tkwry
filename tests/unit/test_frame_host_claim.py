@@ -1,4 +1,4 @@
-"""Regression tests for frame-host claim ordering (D25 / T9)."""
+"""Regression tests for frame-host claim ordering."""
 
 from __future__ import annotations
 

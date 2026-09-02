@@ -1,4 +1,4 @@
-"""F24: WebView.get_state / WebViewState."""
+"""WebView.get_state / WebViewState."""
 
 from __future__ import annotations
 

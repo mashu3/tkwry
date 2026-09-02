@@ -1,4 +1,4 @@
-"""Provisional on_callback_error / set_on_callback_error (§5.5)."""
+"""Provisional on_callback_error / set_on_callback_error."""
 
 from __future__ import annotations
 

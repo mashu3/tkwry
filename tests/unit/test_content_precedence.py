@@ -1,4 +1,4 @@
-"""Regression tests for html=/app=/url= constructor precedence (D31 / T14)."""
+"""Regression tests for html=/app=/url= constructor precedence."""
 
 from __future__ import annotations
 

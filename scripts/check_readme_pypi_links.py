@@ -2,7 +2,7 @@
 """Fail if README.md is not PyPI-safe (absolute GitHub links + renderable).
 
 PyPI long-description has no repo tree, so relative ``docs/`` / ``examples/``
-links break. D11: keep README links as ``https://github.com/mashu3/tkwry/blob/main/...``.
+links break. Keep README links as ``https://github.com/mashu3/tkwry/blob/main/...``.
 """
 
 from __future__ import annotations

@@ -80,7 +80,8 @@ def _toplevel_wakeup_write_fd(toplevel: tk.Misc) -> int | None:
 
 
 # When Tk has no createfilehandler (typical Windows), poll the shared wakeup
-# pipe on an after timer — same role as macOS idle pump for D21 delivery.
+# pipe on an after timer — same role as the macOS idle pump for download /
+# sync-hook delivery without an idle ``_webview is not None`` latch.
 _WAKE_AFTER_POLL_MS = 16
 
 
@@ -301,7 +302,7 @@ def _wakeup_after_poll_tick(toplevel: tk.Misc) -> None:
 
 
 def _ensure_wakeup_after_poll(toplevel: tk.Misc) -> None:
-    """Arm a light ``after`` poll for the shared wakeup pipe (D23)."""
+    """Arm a light ``after`` poll for the shared wakeup pipe."""
     if getattr(toplevel, "_tkwry_wake_after_poll", False):
         return
     setattr(toplevel, "_tkwry_wake_after_poll", True)
@@ -316,7 +317,7 @@ def _ensure_tk_wakeup_fileevent(toplevel: tk.Misc) -> None:
     """Register a Tcl readable handler so sync hooks drain without polling delay.
 
     Windows (and any Tk without ``createfilehandler``) uses
-    :func:`_ensure_wakeup_after_poll` instead — required for D21 handler-less
+    :func:`_ensure_wakeup_after_poll` instead — required for handler-less
     download-complete delivery without an idle ``_webview is not None`` latch.
     """
     if sys.platform == "darwin" or getattr(toplevel, "_tkwry_wake_fileevent", False):

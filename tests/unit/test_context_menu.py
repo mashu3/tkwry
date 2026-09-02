@@ -1,4 +1,4 @@
-"""Context menu API (F19) — JS bridge + Tk Menu."""
+"""Context menu API — JS bridge + Tk Menu."""
 
 from __future__ import annotations
 

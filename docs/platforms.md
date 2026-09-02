@@ -191,7 +191,7 @@ Upstream: wry still has no cross-platform PDF API (open ask
 [wry#707](https://github.com/tauri-apps/wry/issues/707); Windows-only
 `print_to` was declined in
 [wry#1167](https://github.com/tauri-apps/wry/pull/1167)). When wry ships
-one, tkwry will wrap it in the next open cut — see maintainers §8.7.
+one, tkwry will wrap it in the next open cut.
 
 **macOS only:** `web.print_with_options(top=…, right=…, bottom=…, left=…)`
 wraps wry `WebViewExtMacOS::print_with_options` (margin points). Still
@@ -355,8 +355,7 @@ tkwry does **not** add `find` / `find_next` / `find_previous` /
 accelerator keys are enabled (engine chrome — not a tkwry API).
 **macOS / Linux:** no portable wry surface yet.
 
-When wry ships a cross-platform find API, wrap it in the next open cut
-(maintainers §8.7).
+When wry ships a cross-platform find API, wrap it in the next open cut.
 
 ## Related
 

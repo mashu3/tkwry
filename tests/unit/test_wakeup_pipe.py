@@ -1,4 +1,4 @@
-"""Regression tests for non-blocking wakeup pipe writes (D26/D27 / T10)."""
+"""Regression tests for non-blocking wakeup pipe writes."""
 
 from __future__ import annotations
 

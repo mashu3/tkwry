@@ -1,4 +1,4 @@
-"""Ctor vs setter equivalence for dual handler APIs (Beta B3 partial)."""
+"""Ctor vs setter equivalence for dual handler APIs."""
 
 from __future__ import annotations
 

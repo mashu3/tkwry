@@ -1,4 +1,4 @@
-"""F20: inject_script / execute_script / add_init_script tiers."""
+"""inject_script / execute_script / add_init_script tiers."""
 
 from __future__ import annotations
 

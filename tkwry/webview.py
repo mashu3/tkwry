@@ -1070,7 +1070,7 @@ class WebView(WebViewRpcMixin):
         Populated only when :meth:`set_on_download` / ``download_allow`` /
         ``on_download=`` is active — trusted default downloads without a start
         hook do not appear here (see :attr:`last_download` on complete).
-        No progress percentage (wry does not expose it — §8.7).
+        No progress percentage (wry does not expose it yet).
         """
         self._require_tk_thread()
         return tuple(self._in_flight_downloads)
@@ -1658,7 +1658,7 @@ class WebView(WebViewRpcMixin):
             return False
 
     def _bind_native_gc(self, native: NativeWebView) -> None:
-        """Hook off-thread native GC so Rust cleanup still runs (D57)."""
+        """Hook off-thread native GC so Rust cleanup still runs."""
         companion = native.gc_companion()
         self._native_gc_companion = companion
         weakref.finalize(native, companion.on_native_deallocated)
@@ -3514,7 +3514,7 @@ class WebView(WebViewRpcMixin):
             traceback.print_exc()
 
     def _release_tk_wakeup_pipe_registration(self) -> None:
-        """Drop this WebView's share of the Win/Linux shared wakeup pipe (D24)."""
+        """Drop this WebView's share of the Win/Linux shared wakeup pipe."""
         if sys.platform == "darwin" or not self._tk_wakeup_pipe_attached:
             return
         self._tk_wakeup_pipe_attached = False

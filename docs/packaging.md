@@ -91,7 +91,7 @@ For `app=mydir/` layouts, include the entire `web/` directory in `datas`.
 
 ## What 0.2.0 will add
 
-Beta gate **B9** targets automated PyInstaller / Nuitka smoke on Windows and
+Beta 0.2.0 targets automated PyInstaller / Nuitka smoke on Windows and
 macOS CI (minimal create/load/destroy). Until then, report packaging gaps as
 GitHub issues with OS, freezer version, and traceback.
 

@@ -5,7 +5,7 @@ use std::borrow::Cow;
 /// Maximum nesting depth when skipping JSON values for envelope detection.
 ///
 /// Deeper payloads are treated as non-RPC so a hostile IPC message cannot blow
-/// the Rust stack (see MAINTAINERS §3.2 **D52**).
+/// the Rust stack.
 const MAX_JSON_SKIP_DEPTH: usize = 128;
 
 /// True when *body* is a JSON object whose ``__tkwry`` field is the string ``rpc``.

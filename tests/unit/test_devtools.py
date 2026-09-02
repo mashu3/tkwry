@@ -45,7 +45,7 @@ def test_devtools_methods_delegate_to_native(
 
 
 def test_devtools_public_surface() -> None:
-    """F22: unified DevTools API is exactly these three methods + create flag."""
+    """Unified DevTools API is exactly these three methods + create flag."""
     for name in ("open_devtools", "close_devtools", "is_devtools_open"):
         assert callable(getattr(WebView, name))
     assert "devtools" in WebView.__init__.__code__.co_varnames
