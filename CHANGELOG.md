@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Deep JSON on the IPC path no longer overflows the Rust stack when classifying
+  RPC envelopes; nesting beyond 128 levels is treated as non-RPC
+- ``parse_rpc_request`` treats ``json.loads`` ``RecursionError`` as a non-RPC
+  message so the Tk event poll keeps running after hostile deep JSON
+
 ## [0.1.7] - 2026-09-02
 
 Named browser profiles, app-facing download helpers, RPC invoke sugar,

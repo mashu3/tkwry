@@ -526,7 +526,7 @@ def parse_rpc_request(message: str) -> RpcRequest | None:
         )
     try:
         data = json.loads(message)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError):
         return None
     if not is_rpc_envelope(data):
         return None

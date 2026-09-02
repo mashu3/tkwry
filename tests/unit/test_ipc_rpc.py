@@ -114,6 +114,23 @@ def test_parse_rpc_request_rejects_plain_ipc() -> None:
     )
 
 
+def test_parse_rpc_request_deep_json_returns_none() -> None:
+    depth = 5000
+    nested = "[" * depth + "]" * depth
+    assert parse_rpc_request(nested) is None
+
+
+def test_parse_rpc_request_recursion_error_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(_message: str) -> object:
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(json, "loads", boom)
+    raw = json.dumps({"__tkwry": "rpc", "id": "r1", "method": "ping"})
+    assert parse_rpc_request(raw) is None
+
+
 def test_rpc_id_epoch_and_bump_script() -> None:
     assert rpc_id_epoch("0:r1") == 0
     assert rpc_id_epoch("12:r99") == 12
