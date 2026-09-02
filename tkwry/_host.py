@@ -3,6 +3,11 @@
 Kept separate from :mod:`tkwry.webview` so the widget class file stays focused
 on the WebView lifecycle. Symbols are re-exported from ``webview`` for
 existing internal imports / tests.
+
+**Wakeup pipe ownership:** Rust (``configure_wakeup_write_fd`` /
+``notify_wakeup``) owns write-end non-blocking flags. This module opens the
+pipe, registers Tk ``createfilehandler`` / ``after`` poll, drains the read
+end, and closes FDs — it does **not** set ``O_NONBLOCK`` / ``PIPE_NOWAIT``.
 """
 
 from __future__ import annotations
@@ -53,34 +58,12 @@ def _release_frame_host(frame: tk.Misc, web: WebView) -> None:
         del _frame_webview_refs[key]
 
 
-def _configure_wakeup_write_fd(write_fd: int) -> None:
-    """Mark the wakeup pipe write end non-blocking (D26/D27)."""
-    if sys.platform == "win32":
-        import ctypes
-        import msvcrt
-        from ctypes import wintypes
-
-        handle = msvcrt.get_osfhandle(write_fd)
-        if handle == -1:
-            return
-        pipe_nowait = wintypes.DWORD(0x00000001)
-        ctypes.windll.kernel32.SetNamedPipeHandleState(
-            wintypes.HANDLE(handle),
-            ctypes.byref(pipe_nowait),
-            None,
-            None,
-        )
-        return
-    import fcntl
-
-    flags = fcntl.fcntl(write_fd, fcntl.F_GETFL)
-    fcntl.fcntl(write_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-
-
 def _open_wakeup_pipe() -> tuple[int, int]:
-    """Create a wakeup pipe with a non-blocking write end."""
+    """Create a wakeup pipe; Rust marks the write end non-blocking."""
+    from tkwry._core import configure_wakeup_write_fd
+
     read_fd, write_fd = os.pipe()
-    _configure_wakeup_write_fd(write_fd)
+    configure_wakeup_write_fd(write_fd)
     return read_fd, write_fd
 
 

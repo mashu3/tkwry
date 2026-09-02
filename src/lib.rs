@@ -3020,6 +3020,16 @@ fn ensure_gtk_init() {
     }
 }
 
+/// Mark a wakeup-pipe write FD non-blocking (``O_NONBLOCK`` / ``PIPE_NOWAIT``).
+///
+/// Call from Python right after ``os.pipe()`` so the write end is safe before
+/// any native ``notify_wakeup``. ``WebView.set_mac_wakeup_write_fd`` applies
+/// the same configuration when assigning the FD to a live view.
+#[pyfunction]
+fn configure_wakeup_write_fd(fd: i32) {
+    wakeup::configure_wakeup_write_fd(fd);
+}
+
 #[pyfunction]
 fn disable_macos_automatic_window_tabbing() -> PyResult<()> {
     #[cfg(target_os = "macos")]
@@ -3061,6 +3071,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<DragDropEvent>()?;
     m.add_function(wrap_pyfunction!(pump_events, m)?)?;
     m.add_function(wrap_pyfunction!(ensure_gtk_init, m)?)?;
+    m.add_function(wrap_pyfunction!(configure_wakeup_write_fd, m)?)?;
     m.add_function(wrap_pyfunction!(disable_macos_automatic_window_tabbing, m)?)?;
     m.add_function(wrap_pyfunction!(disable_macos_window_tabbing, m)?)?;
     Ok(())

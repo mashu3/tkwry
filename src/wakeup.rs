@@ -1,4 +1,9 @@
 //! Tk main-loop wakeup pipe (one byte per drain; coalesce when full).
+//!
+//! **Ownership:** Rust owns write-end FD flags (`O_NONBLOCK` / Windows
+//! `PIPE_NOWAIT`) via [`configure_wakeup_write_fd`]. Python opens the pipe,
+//! registers Tk `createfilehandler` / `after` poll, drains the read end, and
+//! closes FDs — it must not reimplement non-blocking setup.
 
 use std::sync::atomic::{AtomicI32, Ordering};
 
