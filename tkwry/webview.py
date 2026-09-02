@@ -831,8 +831,6 @@ class WebView(WebViewRpcMixin):
             app_root, app_entry_url = resolve_app(app)
             self._app_root = app_root
             url = app_entry_url
-        if self._session is not None:
-            self._session._bind_app_root(self._app_root)
         if url is not None:
             url = _normalize_url(url)
             _validate_url(url)
@@ -4219,6 +4217,8 @@ class WebView(WebViewRpcMixin):
             self._schedule_try_create(delay_ms=delay)
             return
         self._create_attempt = 0
+        if self._session is not None:
+            self._session._bind_app_root(self._app_root)
         if sys.platform != "darwin":
             self._ensure_tk_wakeup_pipe()
         self._bind_native_gc(self._webview)

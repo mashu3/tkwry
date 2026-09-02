@@ -31,6 +31,8 @@ pub(crate) struct WebSessionMeta {
     pub(crate) data_directory: Option<PathBuf>,
     /// Linux registers ``tkwry`` once per context; remember the app root.
     pub(crate) registered_app_root: Option<PathBuf>,
+    /// Serve options committed with the first successful ``app=`` create.
+    pub(crate) registered_app_serve_options: Option<crate::app_protocol::AppServeOptions>,
     #[cfg(target_os = "macos")]
     pub(crate) data_store_id: Option<[u8; 16]>,
 }
@@ -61,6 +63,7 @@ impl WebSessionMeta {
             ephemeral,
             data_directory,
             registered_app_root: None,
+            registered_app_serve_options: None,
             #[cfg(target_os = "macos")]
             data_store_id,
         })
@@ -68,9 +71,11 @@ impl WebSessionMeta {
 }
 
 /// Keeps shared ``WebContext`` alive for attached WebViews.
+#[derive(Clone)]
 pub(crate) struct SessionRefs {
     pub(crate) meta: Arc<Mutex<WebSessionMeta>>,
     pub(crate) context: Arc<RefCell<wry::WebContext>>,
+    pub(crate) create_lock: Arc<Mutex<()>>,
 }
 
 impl SessionRefs {
@@ -106,6 +111,16 @@ pub(crate) fn commit_registered_app_root(state: &mut WebSessionMeta, app_root: &
     state.registered_app_root = Some(app_root.to_path_buf());
 }
 
+pub(crate) fn commit_registered_app_serve_options(
+    state: &mut WebSessionMeta,
+    options: crate::app_protocol::AppServeOptions,
+) {
+    if state.ephemeral || state.registered_app_serve_options.is_some() {
+        return;
+    }
+    state.registered_app_serve_options = Some(options);
+}
+
 /// Shared browser profile for one or more :class:`~tkwry.WebView` instances.
 ///
 /// Maps to wry's ``WebContext`` (cookies / cache / localStorage where the
@@ -117,6 +132,8 @@ pub struct WebSession {
     /// Shared wry context; borrowed mutably during ``build_as_child`` on the Tk thread.
     #[allow(clippy::arc_with_non_send_sync)]
     pub(crate) context: Arc<RefCell<wry::WebContext>>,
+    /// Serializes native create on this session so ``WebContext`` is not double-borrowed.
+    pub(crate) create_lock: Arc<Mutex<()>>,
 }
 
 #[pymethods]
@@ -144,6 +161,7 @@ impl WebSession {
             meta: Arc::new(Mutex::new(meta)),
             #[allow(clippy::arc_with_non_send_sync)]
             context: Arc::new(RefCell::new(context)),
+            create_lock: Arc::new(Mutex::new(())),
         })
     }
 
@@ -176,6 +194,7 @@ impl WebSession {
         SessionRefs {
             meta: self.meta.clone(),
             context: self.context.clone(),
+            create_lock: self.create_lock.clone(),
         }
     }
 }
@@ -202,6 +221,7 @@ mod tests {
             ephemeral: false,
             data_directory: None,
             registered_app_root: None,
+            registered_app_serve_options: None,
             #[cfg(target_os = "macos")]
             data_store_id: None,
         };
@@ -217,5 +237,24 @@ mod tests {
             state.registered_app_root.as_ref(),
             &root
         ));
+    }
+
+    #[test]
+    fn app_serve_options_must_match_on_shared_session() {
+        use crate::app_protocol::{validate_app_serve_options, AppServeOptions};
+
+        let first = AppServeOptions {
+            spa_fallback: true,
+            csp: Some("default-src 'self'".into()),
+            ..AppServeOptions::default()
+        };
+        let same = first.clone();
+        let different = AppServeOptions {
+            coop: true,
+            ..first.clone()
+        };
+        assert!(validate_app_serve_options(None, &first).is_ok());
+        assert!(validate_app_serve_options(Some(&first), &same).is_ok());
+        assert!(validate_app_serve_options(Some(&first), &different).is_err());
     }
 }

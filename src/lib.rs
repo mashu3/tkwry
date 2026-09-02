@@ -1869,6 +1869,15 @@ impl WebView {
             };
 
         let session_refs = session.as_ref().map(|s| s.borrow().session_refs());
+        let session_for_webview = session_refs.clone();
+
+        let _session_create_guard = if let Some(refs) = session_refs.as_ref() {
+            Some(refs.create_lock.lock().map_err(|_| {
+                pyo3::exceptions::PyRuntimeError::new_err("WebSession create lock poisoned")
+            })?)
+        } else {
+            None
+        };
 
         let app_root_path = match app_root {
             Some(root) => {
@@ -1884,12 +1893,18 @@ impl WebView {
             None => None,
         };
 
+        let serve_options = app_protocol::AppServeOptions {
+            spa_fallback,
+            cache_control: app_cache_control.clone(),
+            csp: app_csp.clone(),
+            coop: app_coop,
+            corp: app_corp,
+        };
+
         let (register_app, ephemeral) = match (&app_root_path, session_refs.as_ref()) {
             (Some(root), Some(refs)) => {
                 let guard = refs.lock_meta()?;
-                let register = if guard.ephemeral {
-                    true
-                } else {
+                if !guard.ephemeral {
                     if let Some(existing) = &guard.registered_app_root {
                         if existing != root {
                             return Err(pyo3::exceptions::PyValueError::new_err(format!(
@@ -1900,7 +1915,16 @@ WebViews that share a session must use the same app= root \
                                 root.display()
                             )));
                         }
+                        app_protocol::validate_app_serve_options(
+                            guard.registered_app_serve_options.as_ref(),
+                            &serve_options,
+                        )
+                        .map_err(pyo3::exceptions::PyValueError::new_err)?;
                     }
+                }
+                let register = if guard.ephemeral {
+                    true
+                } else {
                     session::should_attach_app_protocol(guard.registered_app_root.as_ref(), root)
                 };
                 (register, guard.ephemeral)
@@ -2043,15 +2067,13 @@ WebViews that share a session must use the same app= root \
                     .expect("register_app implies app_root");
                 root.canonicalize().unwrap_or_else(|_| root.clone())
             };
-            let serve_options = app_protocol::AppServeOptions {
-                spa_fallback,
-                cache_control: app_cache_control,
-                csp: app_csp,
-                coop: app_coop,
-                corp: app_corp,
-            };
+            let serve_options_for_protocol = serve_options.clone();
             builder = builder.with_custom_protocol("tkwry".into(), move |_id, request| {
-                app_protocol::serve_app_request(&root_for_protocol, request, &serve_options)
+                app_protocol::serve_app_request(
+                    &root_for_protocol,
+                    request,
+                    &serve_options_for_protocol,
+                )
             });
             #[cfg(target_os = "windows")]
             {
@@ -2105,6 +2127,7 @@ WebViews that share a session must use the same app= root \
             if let (Some(root), Some(refs)) = (app_root_path.as_ref(), session_refs.as_ref()) {
                 let mut guard = refs.lock_meta()?;
                 session::commit_registered_app_root(&mut guard, root);
+                session::commit_registered_app_serve_options(&mut guard, serve_options);
             }
         }
         #[cfg(all(unix, not(target_os = "macos")))]
@@ -2170,7 +2193,7 @@ WebViews that share a session must use the same app= root \
                 reentrant_active: Cell::new(false),
                 destroyed_during_reentrant: Cell::new(false),
                 https_scheme,
-                session: session_refs,
+                session: session_for_webview,
             }),
         })
     }

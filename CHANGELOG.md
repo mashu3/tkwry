@@ -48,6 +48,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   menu does not leave ``preventDefault`` on later navigations
 - ``untrusted=True`` rejects ``context_menu`` / ``on_context_menu`` at
   construction and via the setters (IPC is off, so the bridge cannot deliver)
+- Shared ``WebSession`` native create is serialized so ``WebContext`` is not
+  double-borrowed when sibling WebViews create during layout / idle re-entry
+- Shared-session ``app=`` views must use matching serve options (csp / coop /
+  corp / spa / cache); Linux registers ``tkwry://`` once per context
+- ``WebSession._bind_app_root`` runs only after a successful native create, not
+  in the constructor
+- ``app=`` custom-protocol Referer checks reject non-default HTTP(S) ports on
+  ``tkwry.localhost`` (for example ``:8443``)
 
 ## [0.1.7] - 2026-09-02
 

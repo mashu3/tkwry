@@ -231,7 +231,9 @@ def test_emit_eligible_respects_untrusted_and_origin(
     frame.destroy()
 
 
-def test_webview_shared_session_rejects_mismatched_app(tk_root, tmp_path: Path) -> None:
+def test_webview_shared_session_rejects_mismatched_app(
+    tk_root, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import tkinter as tk
 
     app_a = tmp_path / "a"
@@ -241,14 +243,86 @@ def test_webview_shared_session_rejects_mismatched_app(tk_root, tmp_path: Path) 
     (app_a / "index.html").write_text("<p>a</p>", encoding="utf-8")
     (app_b / "index.html").write_text("<p>b</p>", encoding="utf-8")
     session = WebSession(data_directory=tmp_path / "profile")
-    frame_a = tk.Frame(tk_root)
-    frame_b = tk.Frame(tk_root)
-    web_a = WebView(frame_a, app=app_a, session=session)
-    with pytest.raises(ValueError, match="same app="):
-        WebView(frame_b, app=app_b, session=session)
+    frame_a = tk.Frame(tk_root, width=400, height=300)
+    frame_b = tk.Frame(tk_root, width=400, height=300)
+    frame_a.pack_propagate(False)
+    frame_b.pack_propagate(False)
+    frame_a.pack()
+    frame_b.pack()
+    web_a = WebView(frame_a, width=400, height=300, app=app_a, session=session)
+
+    class _Native:
+        def destroy(self) -> None:
+            pass
+
+        def gc_companion(self) -> object:
+            return object()
+
+    def _fake_native(*args: object, **kwargs: object) -> _Native:
+        return _Native()
+
+    monkeypatch.setattr(web_a, "_layout_ready", lambda: True, raising=False)
+    monkeypatch.setattr("tkwry.webview.NativeWebView", _fake_native)
+    monkeypatch.setattr(web_a, "_bind_native_gc", lambda _n: None, raising=False)
+    monkeypatch.setattr(web_a, "_sync_bounds", lambda: True, raising=False)
+    monkeypatch.setattr(web_a, "_maybe_fire_ready", lambda: None, raising=False)
+    monkeypatch.setattr(web_a, "_schedule_initial_load", lambda: None, raising=False)
+    monkeypatch.setattr(web_a, "_needs_event_poll", lambda: False, raising=False)
+    web_a._try_create()
+    assert session.app_root == app_a.resolve()
+
+    web_b = WebView(frame_b, width=400, height=300, app=app_b, session=session)
+    monkeypatch.setattr(web_b, "_layout_ready", lambda: True, raising=False)
+    monkeypatch.setattr(web_b, "_sync_bounds", lambda: True, raising=False)
+    monkeypatch.setattr(web_b, "_maybe_fire_ready", lambda: None, raising=False)
+    monkeypatch.setattr(web_b, "_schedule_initial_load", lambda: None, raising=False)
+    monkeypatch.setattr(web_b, "_needs_event_poll", lambda: False, raising=False)
+    monkeypatch.setattr(web_b, "_bind_native_gc", lambda _n: None, raising=False)
+    web_b._cancel_deferred_callbacks()
+    with pytest.raises(ValueError, match="cannot use"):
+        web_b._try_create()
+
     web_a.destroy()
     frame_a.destroy()
     frame_b.destroy()
+
+
+def test_session_app_root_bind_deferred_until_create(
+    tk_root, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "index.html").write_text("<p>x</p>", encoding="utf-8")
+    session = WebSession(data_directory=tmp_path / "profile")
+    frame = tk.Frame(tk_root, width=400, height=300)
+    frame.pack_propagate(False)
+    frame.pack()
+    web = WebView(frame, width=400, height=300, app=app, session=session)
+    assert session._app_root is None
+
+    class _Native:
+        def destroy(self) -> None:
+            pass
+
+        def gc_companion(self) -> object:
+            return object()
+
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+    monkeypatch.setattr(
+        "tkwry.webview.NativeWebView", lambda *args, **kwargs: _Native()
+    )
+    monkeypatch.setattr(web, "_bind_native_gc", lambda _n: None, raising=False)
+    monkeypatch.setattr(web, "_sync_bounds", lambda: True, raising=False)
+    monkeypatch.setattr(web, "_maybe_fire_ready", lambda: None, raising=False)
+    monkeypatch.setattr(web, "_schedule_initial_load", lambda: None, raising=False)
+    monkeypatch.setattr(web, "_needs_event_poll", lambda: False, raising=False)
+    web._try_create()
+    assert session.app_root == app.resolve()
+
+    web.destroy()
+    frame.destroy()
 
 
 def test_session_close_destroys_registered_webviews(tk_root) -> None:

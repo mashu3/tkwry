@@ -19,7 +19,7 @@ const CROSS_ORIGIN_RESOURCE_POLICY: HeaderName =
     HeaderName::from_static("cross-origin-resource-policy");
 
 /// Options for ``tkwry://`` static serving.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct AppServeOptions {
     pub spa_fallback: bool,
     pub cache_control: Option<String>,
@@ -564,8 +564,8 @@ fn is_tkwry_origin(value: &str) -> bool {
     )
 }
 
-/// Parse ``scheme`` and ``host`` from a Referer URL (authority only).
-fn parse_referer_host(value: &str) -> Option<(String, String)> {
+/// Parse ``scheme``, ``host``, and optional port from a Referer URL authority.
+fn parse_referer_authority(value: &str) -> Option<(String, String, Option<u16>)> {
     let trimmed = value.trim();
     let scheme_sep = trimmed.find("://")?;
     let scheme = trimmed[..scheme_sep].to_ascii_lowercase();
@@ -573,24 +573,38 @@ fn parse_referer_host(value: &str) -> Option<(String, String)> {
     let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let authority = &rest[..authority_end];
     let host_port = authority.rsplit('@').next()?;
-    let host = if host_port.starts_with('[') {
+    let (host, port) = if host_port.starts_with('[') {
         let end = host_port.find(']')?;
-        host_port[1..end].to_ascii_lowercase()
+        let host = host_port[1..end].to_ascii_lowercase();
+        let port = host_port[end + 1..]
+            .strip_prefix(':')
+            .and_then(|p| p.parse::<u16>().ok());
+        (host, port)
     } else if let Some(colon) = host_port.rfind(':') {
-        host_port[..colon].to_ascii_lowercase()
+        let host = host_port[..colon].to_ascii_lowercase();
+        let port = host_port[colon + 1..].parse::<u16>().ok();
+        (host, port)
     } else {
-        host_port.to_ascii_lowercase()
+        (host_port.to_ascii_lowercase(), None)
     };
-    Some((scheme, host))
+    Some((scheme, host, port))
+}
+
+fn is_default_http_port(scheme: &str, port: Option<u16>) -> bool {
+    match scheme {
+        "https" => port.is_none() || port == Some(443),
+        "http" => port.is_none() || port == Some(80),
+        _ => port.is_none(),
+    }
 }
 
 fn is_tkwry_referer(value: &str) -> bool {
-    let Some((scheme, host)) = parse_referer_host(value) else {
+    let Some((scheme, host, port)) = parse_referer_authority(value) else {
         return false;
     };
     match scheme.as_str() {
-        "tkwry" => matches!(host.as_str(), "localhost" | "app"),
-        "https" | "http" => host == "tkwry.localhost",
+        "tkwry" => matches!(host.as_str(), "localhost" | "app") && port.is_none(),
+        "https" | "http" => host == "tkwry.localhost" && is_default_http_port(&scheme, port),
         _ => false,
     }
 }
@@ -607,6 +621,23 @@ fn cross_origin_app_request(request: &Request<Vec<u8>>) -> bool {
         return !is_tkwry_referer(referer);
     }
     false
+}
+
+/// Shared-session ``app=`` views must agree on serve options (Linux registers once).
+pub(crate) fn validate_app_serve_options(
+    registered: Option<&AppServeOptions>,
+    incoming: &AppServeOptions,
+) -> Result<(), String> {
+    if let Some(existing) = registered {
+        if existing != incoming {
+            return Err(
+                "WebSession app= serve options (csp, coop, corp, spa_fallback, \
+cache_control) must match the first WebView on this session"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Serve a file from ``root`` for a ``tkwry://`` request.
@@ -1028,6 +1059,28 @@ mod tests {
             &options,
         );
         assert_eq!(valid_referer.status(), StatusCode::OK);
+
+        let non_default_port_referer = serve_app_request(
+            &root,
+            request_with(
+                Method::GET,
+                "/index.html",
+                &[("referer", "https://tkwry.localhost:8443/index.html")],
+            ),
+            &options,
+        );
+        assert_eq!(non_default_port_referer.status(), StatusCode::FORBIDDEN);
+
+        let default_port_referer = serve_app_request(
+            &root,
+            request_with(
+                Method::GET,
+                "/index.html",
+                &[("referer", "https://tkwry.localhost:443/index.html")],
+            ),
+            &options,
+        );
+        assert_eq!(default_port_referer.status(), StatusCode::OK);
 
         let same = serve_app_request(
             &root,
