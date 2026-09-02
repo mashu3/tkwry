@@ -93,6 +93,41 @@ def test_watch_app_rejects_string_filters(tk_root, tmp_path: Path) -> None:
     frame.destroy()
 
 
+def test_watch_app_defers_mtime_until_ready(
+    tk_root, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    from tkwry import WebView
+
+    (tmp_path / "index.html").write_text("<p>ok</p>", encoding="utf-8")
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, app=tmp_path)
+    web._app_watch_mtime = 1.0
+    ready = {"value": False}
+    monkeypatch.setattr(type(web), "ready", property(lambda self: ready["value"]))
+
+    reload_calls: list[str] = []
+    monkeypatch.setattr(web, "reload", lambda: reload_calls.append("reload"))
+    monkeypatch.setattr(web, "_scan_app_mtime", lambda: 2.0)
+
+    web._app_watch_tick(100)
+    assert web._app_watch_mtime == 1.0
+    assert reload_calls == []
+
+    ready["value"] = True
+    web._app_watch_tick(100)
+    assert reload_calls == ["reload"]
+    assert web._app_watch_mtime == 2.0
+
+    reload_calls.clear()
+    web._app_watch_tick(100)
+    assert reload_calls == []
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_scan_app_mtime_respects_max_files(tmp_path: Path) -> None:
     (tmp_path / "a.html").write_text("a", encoding="utf-8")
     (tmp_path / "b.html").write_text("b", encoding="utf-8")

@@ -56,6 +56,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the constructor
 - ``app=`` custom-protocol Referer checks reject non-default HTTP(S) ports on
   ``tkwry.localhost`` (for example ``:8443``)
+- ``watch_app()`` only advances the known mtime after a reload while
+  ``ready``; changes during initial layout no longer suppress the first
+  post-ready reload
 
 ## [0.1.7] - 2026-09-02
 

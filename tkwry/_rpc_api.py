@@ -619,19 +619,28 @@ class WebViewRpcMixin:
             )
         return latest
 
-    def _schedule_app_watch(self, interval_ms: int) -> None:
-        def _tick() -> None:
-            self._app_watch_after_id = None
-            if self._destroyed or self._app_root is None:
-                return
-            current = self._scan_app_mtime()
-            previous = self._app_watch_mtime
-            self._app_watch_mtime = current
-            if previous is not None and current > previous and self.ready:
+    def _app_watch_tick(self, interval_ms: int) -> None:
+        """Poll ``app=`` mtimes once; reload when ready and files changed."""
+        if self._destroyed or self._app_root is None:
+            return
+        current = self._scan_app_mtime()
+        previous = self._app_watch_mtime
+        if previous is not None and current > previous:
+            if self.ready:
                 try:
                     self.reload()
                 except Exception:
                     traceback.print_exc()
+                self._app_watch_mtime = current
+        elif previous is None:
+            self._app_watch_mtime = current
+
+    def _schedule_app_watch(self, interval_ms: int) -> None:
+        def _tick() -> None:
+            self._app_watch_after_id = None
+            self._app_watch_tick(interval_ms)
+            if self._destroyed or self._app_root is None:
+                return
             self._schedule_app_watch(interval_ms)
 
         try:
