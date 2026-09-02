@@ -133,8 +133,7 @@ def test_ipc_listening_when_context_menu_set(tk_root) -> None:
     assert web._page_load_listening_wanted() is True
     assert web._needs_event_poll() is True
     script = web._effective_initialization_script()
-    assert script is not None
-    assert "__tkwryContextMenu" in script
+    assert script is None or "__tkwryContextMenu" not in script
     web.destroy()
     frame.destroy()
 
@@ -202,7 +201,8 @@ def test_clearing_context_menu_removes_bridge(tk_root) -> None:
 
     assert evals == [CONTEXT_MENU_DISABLE_JS]
     assert web._context_menu_bridge_injected is False
-    assert web._page_load_listening_wanted() is False
+    assert web._page_load_listening_wanted() is True
+    assert web._context_menu_active() is False
     web.destroy()
     frame.destroy()
 
@@ -236,6 +236,42 @@ def test_clearing_context_menu_handler_removes_bridge_when_no_items(
 
     assert evals == [CONTEXT_MENU_DISABLE_JS]
     assert web._context_menu_bridge_injected is False
+    web.destroy()
+    frame.destroy()
+
+
+def test_context_menu_disabled_on_started_when_inactive(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>x</p>", default_context_menus=False)
+    evals: list[str] = []
+
+    class _Native:
+        def drain_page_load_events(self):
+            return [(PageLoadEvent.Started, "https://example.com/next")]
+
+        def set_ipc_listening(self, enabled: bool) -> None:
+            pass
+
+        def set_page_load_listening(self, enabled: bool) -> None:
+            pass
+
+        def eval_js(self, script: str) -> None:
+            evals.append(script)
+
+        def destroy(self) -> None:
+            pass
+
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+    web._webview = _Native()  # type: ignore[assignment]
+    web.set_context_menu([("Copy", lambda: None)])
+    web.set_context_menu(None)
+    evals.clear()
+
+    web._deliver_page_load_events()
+
+    assert evals == [CONTEXT_MENU_DISABLE_JS]
     web.destroy()
     frame.destroy()
 

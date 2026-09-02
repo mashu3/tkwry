@@ -902,8 +902,7 @@ def bind_rpc_arguments(
                 continue
             try:
                 bound.arguments[name] = tuple(
-                    _coerce_rpc_value(item, elem_hint)
-                    for item in bound.arguments[name]
+                    _coerce_rpc_value(item, elem_hint) for item in bound.arguments[name]
                 )
             except TypeError as exc:
                 raise TypeError(f"{name}: {exc}") from exc

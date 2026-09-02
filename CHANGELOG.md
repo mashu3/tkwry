@@ -43,6 +43,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``timeout`` / ``kwargs`` instead of binding them as positional params
 - ``bind_rpc_arguments`` coerces ``*args`` / ``**kwargs`` elements instead of
   applying the var-param annotation to the whole tuple or dict
+- Context-menu bridge is no longer embedded in the create-time init script;
+  ``PageLoadEvent.Started`` injects or disables it per document so clearing the
+  menu does not leave ``preventDefault`` on later navigations
+- ``untrusted=True`` rejects ``context_menu`` / ``on_context_menu`` at
+  construction and via the setters (IPC is off, so the bridge cannot deliver)
 
 ## [0.1.7] - 2026-09-02
 

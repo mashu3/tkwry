@@ -211,6 +211,13 @@ def test_untrusted_rejects_conflicting_constructor_args(
         )
     with pytest.raises(ValueError, match="untrusted"):
         WebView(frame, html="<p>x</p>", untrusted=True, bridge_allow=lambda _u: True)
+    with pytest.raises(ValueError, match="untrusted"):
+        WebView(
+            frame,
+            html="<p>x</p>",
+            untrusted=True,
+            context_menu=[("X", lambda: None)],
+        )
     frame.destroy()
 
 

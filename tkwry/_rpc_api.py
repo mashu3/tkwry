@@ -418,8 +418,6 @@ class WebViewRpcMixin:
 
     def _remove_context_menu_bridge(self) -> None:
         """Drop the context-menu JS hook from the current document."""
-        if not getattr(self, "_context_menu_bridge_injected", False):
-            return
         native = self._webview
         if native is not None:
             try:
@@ -435,15 +433,9 @@ class WebViewRpcMixin:
         self._ensure_event_poll()
 
     def _effective_initialization_script(self) -> str | None:
-        from tkwry.context_menu import merge_context_menu_script
-
-        script = merge_initialization_script(
+        return merge_initialization_script(
             self._user_initialization_script(),
             rpc_enabled=bool(self._rpc_methods) or self._rpc_bridge_wanted,
-        )
-        return merge_context_menu_script(
-            script,
-            context_menu_enabled=self._context_menu_active(),
         )
 
     def _get_rpc_executor(self) -> ThreadPoolExecutor:

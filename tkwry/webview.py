@@ -673,6 +673,10 @@ class WebView(WebViewRpcMixin):
                 raise ValueError(
                     "WebView: untrusted=True requires an ephemeral WebSession"
                 )
+            if context_menu is not None or on_context_menu is not None:
+                raise ValueError(
+                    "WebView: untrusted=True cannot use context_menu or on_context_menu"
+                )
         owned_session: WebSession | None = None
         if untrusted and session is None:
             owned_session = WebSession(ephemeral=True)
@@ -749,6 +753,9 @@ class WebView(WebViewRpcMixin):
         self._context_menu_items = normalize_context_menu_items(context_menu)
         self._context_menu_handler = on_context_menu
         self._context_menu_bridge_injected = False
+        self._context_menu_started_hook = (
+            context_menu is not None or on_context_menu is not None
+        )
         self._context_menu_tk: tk.Menu | None = None
         self._devtools = devtools
         self._clipboard = bool(clipboard)
@@ -2303,6 +2310,7 @@ class WebView(WebViewRpcMixin):
             or self._rpc_bridge_wanted
             or bool(self._rpc_methods)
             or self._context_menu_active()
+            or self._context_menu_started_hook
         )
 
     def _title_listening_wanted(self) -> bool:
@@ -2606,12 +2614,16 @@ class WebView(WebViewRpcMixin):
         takes priority.
         """
         self._require_not_destroyed("set_context_menu")
+        if self._untrusted:
+            raise ValueError("WebView: untrusted=True cannot use set_context_menu")
         if items is not None and self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call set_context_menu()"
             ) from self._creation_error
         self._context_menu_items = normalize_context_menu_items(items)
         self._dispose_context_menu_tk()
+        if items is not None:
+            self._context_menu_started_hook = True
         if self._context_menu_active():
             self._require_windows_context_menu_ready("set_context_menu")
             self._enable_context_menu_bridge()
@@ -2628,12 +2640,18 @@ class WebView(WebViewRpcMixin):
         takes priority over :meth:`set_context_menu`. Pass ``None`` to clear.
         """
         self._require_not_destroyed("set_context_menu_handler")
+        if self._untrusted:
+            raise ValueError(
+                "WebView: untrusted=True cannot use set_context_menu_handler"
+            )
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call set_context_menu_handler()"
             ) from self._creation_error
         self._context_menu_handler = handler
         self._dispose_context_menu_tk()
+        if handler is not None:
+            self._context_menu_started_hook = True
         if self._context_menu_active():
             self._require_windows_context_menu_ready("set_context_menu_handler")
             self._enable_context_menu_bridge()
@@ -3762,14 +3780,8 @@ class WebView(WebViewRpcMixin):
         native = self._webview
         if native is None:
             return
-        if (
-            page_load is None
-            and not self._inject_scripts
-            and not self._state_wanted
-            and not self._context_menu_active()
-        ):
-            if not self._rpc_bridge_wanted and not self._rpc_methods:
-                return
+        if not self._page_load_listening_wanted():
+            return
         pending = native.drain_page_load_events()
         for event, page_url in pending:
             if event == PageLoadEvent.Started:
@@ -3793,9 +3805,12 @@ class WebView(WebViewRpcMixin):
                     self._sync_rpc_epoch_to_js()
                 except Exception:
                     traceback.print_exc()
-            if event == PageLoadEvent.Started and self._context_menu_active():
+            if event == PageLoadEvent.Started:
                 try:
-                    self._inject_context_menu_bridge()
+                    if self._context_menu_active():
+                        self._inject_context_menu_bridge()
+                    else:
+                        self._remove_context_menu_bridge()
                 except Exception:
                     traceback.print_exc()
             if page_load is not None:
