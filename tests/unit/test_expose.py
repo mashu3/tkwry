@@ -639,3 +639,29 @@ def test_emit_rejects_non_json(tk_root) -> None:
 
     web.destroy()
     frame.destroy()
+
+
+def test_emit_same_turn_delivers_all(tk_root, monkeypatch: pytest.MonkeyPatch) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>rpc</p>")
+    evals: list[str] = []
+
+    class _Native:
+        def url(self) -> str:
+            return "about:blank"
+
+        def set_ipc_listening(self, _wanted: bool) -> None:
+            pass
+
+    monkeypatch.setattr(web, "_run_eval_js", lambda s, on_error=None: evals.append(s))
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+    monkeypatch.setattr(web, "_enable_rpc", lambda: None, raising=False)
+    web._webview = _Native()  # type: ignore[assignment]
+    web.emit("a", 1)
+    web.emit("b", 2)
+    assert len(evals) == 2
+    assert '"a"' in evals[0]
+    assert '"b"' in evals[1]
+
+    web.destroy()
+    frame.destroy()

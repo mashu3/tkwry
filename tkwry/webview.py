@@ -2284,7 +2284,7 @@ class WebView(WebViewRpcMixin):
         self._require_ready("inject_script")
         self._inject_scripts.append(script)
         self._sync_page_load_listening()
-        self.eval_js(script)
+        self._run_eval_js(script)
 
     def _user_initialization_script(self) -> str | None:
         parts: list[str] = []

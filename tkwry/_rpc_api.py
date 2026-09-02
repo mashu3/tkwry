@@ -296,7 +296,7 @@ class WebViewRpcMixin:
         self._require_ready("emit")
         self._rpc_bridge_wanted = True
         self._enable_rpc()
-        self.eval_js(script)
+        self._run_eval_js(script)
 
     def _emit_eligible(self) -> bool:
         """Whether :meth:`emit` / session broadcast may deliver to this view."""

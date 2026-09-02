@@ -34,6 +34,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - RPC from disallowed page origins is ignored without settling guessed inflight ids
 - IPC and RPC window messages drain in native enqueue order via
   ``drain_window_ipc_messages()``
+- Same-turn ``inject_script()`` and ``emit()`` use immediate ``_run_eval_js``
+  so they are not dropped by ``eval_js`` last-wins coalescing
 
 ## [0.1.7] - 2026-09-02
 

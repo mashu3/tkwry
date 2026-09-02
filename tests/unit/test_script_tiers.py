@@ -79,7 +79,7 @@ def test_inject_after_ready_stores_and_evals(
         def set_page_load_listening(self, wanted: bool) -> None:
             listening.append(wanted)
 
-    monkeypatch.setattr(web, "eval_js", lambda s, *, on_error=None: evals.append(s))
+    monkeypatch.setattr(web, "_run_eval_js", lambda s, on_error=None: evals.append(s))
     monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
     web._webview = _Native()  # type: ignore[assignment]
     web.inject_script("window.__p = 1;")
@@ -127,6 +127,29 @@ def test_inject_scripts_rerun_all_on_page_load_started(
     web._inject_scripts = ["window.__a = 1;", "window.__b = 2;"]
     web._deliver_page_load_events()
     assert evals == ["window.__a = 1;", "window.__b = 2;"]
+    web.destroy()
+    frame.destroy()
+
+
+def test_inject_scripts_same_turn_run_all(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>x</p>")
+    evals: list[str] = []
+
+    class _Native:
+        def set_page_load_listening(self, wanted: bool) -> None:
+            pass
+
+    monkeypatch.setattr(web, "_run_eval_js", lambda s, on_error=None: evals.append(s))
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+    web._webview = _Native()  # type: ignore[assignment]
+    web.inject_script("window.__a = 1;")
+    web.inject_script("window.__b = 2;")
+    assert evals == ["window.__a = 1;", "window.__b = 2;"]
+    assert web._inject_scripts == ["window.__a = 1;", "window.__b = 2;"]
+
     web.destroy()
     frame.destroy()
 
