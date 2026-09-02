@@ -2706,12 +2706,13 @@ WebViews that share a session must use the same app= root \
     fn force_destroy(&self) -> PyResult<()> {
         self.require_owner_thread()?;
         self.clear_callbacks_and_queues();
-        self.destroy_inner()?;
-        // Do not reset ``wry_call_depth`` — nested ``with_webview`` frames on the
-        // stack must unwind through ``leave_wry_call``. Clearing depth mid-flight
-        // underflows on unwind and drops deferred-teardown state.
+        let result = self.destroy_inner();
+        // Always clear the deferred latch — even when ``destroy_inner`` fails — so
+        // nested ``leave_wry_call`` does not wedge later destroy attempts.
+        // Do not reset ``wry_call_depth``; nested ``with_webview`` frames must
+        // unwind through ``leave_wry_call``.
         self.destroy_pending.set(false);
-        Ok(())
+        result
     }
 
     /// ``True`` while the native webview has not been torn down yet.
@@ -3193,6 +3194,19 @@ mod tests {
             destroy_runs.get(),
             1,
             "leave must not destroy again after force"
+        );
+    }
+
+    #[test]
+    fn force_destroy_clears_pending_when_teardown_fails() {
+        let destroy_pending = Cell::new(true);
+        let teardown = || -> Result<(), &'static str> { Err("teardown failed") };
+        let result = teardown();
+        destroy_pending.set(false);
+        assert!(result.is_err());
+        assert!(
+            !destroy_pending.get(),
+            "force_destroy must clear destroy_pending even when destroy_inner fails"
         );
     }
 }

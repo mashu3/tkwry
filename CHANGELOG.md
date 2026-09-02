@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   message so the Tk event poll keeps running after hostile deep JSON
 - Deferred ``destroy()`` during nested native calls now clears the wakeup write
   fd before Python closes the pipe, so late callbacks cannot write a reused fd
+- ``force_destroy()`` clears ``destroy_pending`` even when native teardown fails,
+  so nested unwind does not wedge later destroy attempts
 
 ## [0.1.7] - 2026-09-02
 
