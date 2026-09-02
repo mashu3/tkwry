@@ -21,6 +21,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Off-thread GC of the native ``WebView`` now runs Rust cleanup
   (invalidate wakeup, clear queues, leak native) via ``NativeGcCompanion`` and
   ``weakref.finalize`` when PyO3 ``unsendable`` skips ``Drop``
+- Off-thread sync-hook dispatch and ``_ensure_event_poll`` wake the Tk pipe only;
+  they no longer call ``winfo_exists`` / ``after`` from native callback threads
+- Event poll rescheduling tracks one live ``after`` id instead of appending every
+  tick to ``_deferred_after_ids``, so destroy does not cancel stale Tcl timers
 
 ## [0.1.7] - 2026-09-02
 

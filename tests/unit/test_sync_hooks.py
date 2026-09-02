@@ -378,3 +378,102 @@ def test_sync_hook_timeout_only_before_handler_starts(
     assert started.is_set(), "handler must start within pre-start timeout window"
     assert result_holder == [True]
     web.destroy()
+
+
+def test_ensure_event_poll_off_thread_wakes_only(tk_root, monkeypatch) -> None:
+    """``_ensure_event_poll`` must not touch Tcl from native/worker threads."""
+    _frame, web = _make_web(tk_root)
+    after_calls: list[object] = []
+    monkeypatch.setattr(
+        web._frame,
+        "after",
+        lambda *args: after_calls.append(args) or "after-id",
+    )
+    woke: list[bool] = []
+
+    def worker() -> None:
+        web._ensure_event_poll()
+        woke.append(True)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=1.0)
+    assert thread.is_alive() is False
+    assert woke == [True]
+    assert after_calls == []
+    assert web._event_poll_active is False
+    web.destroy()
+
+
+def test_dispatch_sync_hook_off_thread_does_not_ensure_poll(
+    tk_root, monkeypatch
+) -> None:
+    """Off-thread sync hooks wake the pipe; they do not arm Tcl ``after``."""
+    _frame, web = _make_web(tk_root)
+    ensure_calls: list[bool] = []
+    monkeypatch.setattr(
+        web,
+        "_ensure_event_poll",
+        lambda: ensure_calls.append(True),
+        raising=False,
+    )
+    monkeypatch.setattr(web, "_wake_tk_for_sync_hook", lambda: None, raising=False)
+
+    result_holder: list[bool] = []
+
+    def worker() -> None:
+        result_holder.append(web._dispatch_sync_hook(lambda: True, default=False))
+
+    worker_thread = threading.Thread(target=worker)
+    worker_thread.start()
+    for _ in range(50):
+        web._drain_sync_hooks()
+        tk_root.update_idletasks()
+        tk_root.update()
+        if not worker_thread.is_alive():
+            break
+    worker_thread.join(timeout=1.0)
+    assert not worker_thread.is_alive()
+    assert result_holder == [True]
+    assert ensure_calls == []
+    web.destroy()
+
+
+def test_event_poll_does_not_grow_deferred_after_ids(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Poll ticks must not append unbounded ids to ``_deferred_after_ids``."""
+    _frame, web = _make_web(tk_root)
+    poll_seq = 0
+
+    def after(delay, func=None, *args):
+        nonlocal poll_seq
+        if (
+            func is not None
+            and getattr(func, "__self__", None) is web
+            and getattr(func, "__name__", None) == "_poll_events"
+        ):
+            poll_seq += 1
+            return f"poll-{poll_seq}"
+        return ""
+
+    monkeypatch.setattr(web._frame, "after", after)
+    monkeypatch.setattr(web._frame, "winfo_exists", lambda: True)
+    cancel_calls: list[str] = []
+
+    def after_cancel(after_id: str) -> None:
+        cancel_calls.append(after_id)
+
+    monkeypatch.setattr(web._frame, "after_cancel", after_cancel)
+
+    web._event_poll_active = True
+    for _ in range(5):
+        web._schedule_event_poll(10)
+
+    assert web._deferred_after_ids == []
+    assert web._event_poll_after_id == "poll-5"
+    assert cancel_calls == ["poll-1", "poll-2", "poll-3", "poll-4"]
+
+    web._schedule_event_poll(10)
+    assert cancel_calls == ["poll-1", "poll-2", "poll-3", "poll-4", "poll-5"]
+    web.destroy()

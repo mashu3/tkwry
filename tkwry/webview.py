@@ -878,6 +878,7 @@ class WebView(WebViewRpcMixin):
         self._initial_load: _PendingLoad | None = None
         self._initial_load_attempt = 0
         self._initial_load_after_id: str | None = None
+        self._event_poll_after_id: str | None = None
         self._deferred_after_ids: list[str] = []
         self._native_teardown_pending: NativeWebView | None = None
         self._native_teardown_attempts = 0
@@ -2736,12 +2737,34 @@ class WebView(WebViewRpcMixin):
         else:
             self._track_after(self._frame.after(delay_ms, self._run_try_create))
 
+    def _cancel_event_poll_after(self) -> None:
+        after_id = self._event_poll_after_id
+        self._event_poll_after_id = None
+        if not after_id:
+            return
+        try:
+            self._frame.after_cancel(after_id)
+        except (tk.TclError, RuntimeError, ValueError):
+            pass
+
+    def _schedule_event_poll(self, delay_ms: int) -> None:
+        """Schedule the next poll tick without growing ``_deferred_after_ids``."""
+        self._cancel_event_poll_after()
+        try:
+            if not self._frame.winfo_exists():
+                self._disarm_event_poll()
+                return
+            self._event_poll_after_id = self._frame.after(delay_ms, self._poll_events)
+        except (tk.TclError, RuntimeError):
+            self._disarm_event_poll()
+
     def _track_after(self, after_id: str | None) -> str | None:
         if after_id:
             self._deferred_after_ids.append(after_id)
         return after_id
 
     def _cancel_deferred_callbacks(self) -> None:
+        self._disarm_event_poll()
         self._cancel_initial_load_timer()
         self._create_pending = False
         self._flush_load_scheduled = False
@@ -3556,7 +3579,6 @@ class WebView(WebViewRpcMixin):
                     handler_started_at,
                 )
             )
-            self._ensure_event_poll()
             self._schedule_sync_hook_drain()
             enqueued_at = time.monotonic()
             deadline = enqueued_at + _SYNC_HOOK_TIMEOUT_S
@@ -3890,6 +3912,7 @@ class WebView(WebViewRpcMixin):
     def _disarm_event_poll(self) -> None:
         """Unconditionally clear the poll latch (ignores remaining work)."""
         self._event_poll_active = False
+        self._cancel_event_poll_after()
 
     def _ensure_event_poll(self) -> None:
         """Arm the Tk poll when async work remains (including native teardown).
@@ -3897,6 +3920,9 @@ class WebView(WebViewRpcMixin):
         Destroyed instances still poll while ``_native_teardown_pending`` is set
         so deferred ``is_alive`` cleanup cannot stall forever.
         """
+        if threading.get_ident() != self._tk_thread_id:
+            self._wake_tk_for_sync_hook()
+            return
         if self._event_poll_active:
             return
         if self._destroyed and self._native_teardown_pending is None:
@@ -3908,7 +3934,7 @@ class WebView(WebViewRpcMixin):
             return
         self._event_poll_active = True
         try:
-            self._track_after(self._frame.after(1, self._poll_events))
+            self._schedule_event_poll(1)
         except (tk.TclError, RuntimeError):
             self._disarm_event_poll()
 
@@ -3942,6 +3968,7 @@ class WebView(WebViewRpcMixin):
             self._invoke_callback(expected_cb, result, kind="eval_js_with_callback")
 
     def _poll_events(self) -> None:
+        self._event_poll_after_id = None
         self._in_poll_events = True
         try:
             self._poll_events_impl()
@@ -3959,7 +3986,7 @@ class WebView(WebViewRpcMixin):
             if self._native_teardown_pending is not None:
                 try:
                     if self._frame.winfo_exists():
-                        self._track_after(self._frame.after(1, self._poll_events))
+                        self._schedule_event_poll(1)
                     else:
                         self._disarm_event_poll()
                 except (tk.TclError, RuntimeError):
@@ -4006,7 +4033,7 @@ class WebView(WebViewRpcMixin):
         if self._should_keep_polling():
             delay = 1 if sys.platform == "linux" else 10
             try:
-                self._track_after(self._frame.after(delay, self._poll_events))
+                self._schedule_event_poll(delay)
             except tk.TclError:
                 self._disarm_event_poll()
         else:
