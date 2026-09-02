@@ -1302,10 +1302,9 @@ struct NativeGcCompanion {
     core: Arc<WebViewCore>,
 }
 
-#[cfg(target_os = "macos")]
+// ``WebViewCore`` holds UI-thread webview state; we only touch it from the
+// owner thread or the documented off-thread leak path.
 unsafe impl Send for NativeGcCompanion {}
-
-#[cfg(target_os = "macos")]
 unsafe impl Sync for NativeGcCompanion {}
 
 #[pymethods]
