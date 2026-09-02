@@ -9,15 +9,11 @@ import threading
 import time
 
 import pytest
+from support.pytest_markers import apply_integration_markers
 
 
 def pytest_configure(config: pytest.Config) -> None:
     _ensure_windows_tcl_env()
-
-
-def _item_wants_integration_marker(path: str) -> bool:
-    """Return whether *path* (posix) should receive ``pytest.mark.integration``."""
-    return "/tests/integration/" in path or "/tests/macos/" in path
 
 
 def pytest_collection_modifyitems(
@@ -25,10 +21,7 @@ def pytest_collection_modifyitems(
 ) -> None:
     """Apply ``integration`` marker from path (conftest ``pytestmark`` does not)."""
     del config
-    integration = pytest.mark.integration
-    for item in items:
-        if _item_wants_integration_marker(item.path.as_posix()):
-            item.add_marker(integration)
+    apply_integration_markers(items)
 
 
 def _ensure_windows_tcl_env() -> None:

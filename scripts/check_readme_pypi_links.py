@@ -63,16 +63,14 @@ def main() -> int:
                 errors.append(f"missing README anchor [{label}]({url})")
             continue
         errors.append(
-            f"relative link not PyPI-safe: [{label}]({url}) "
-            f"(use {BLOB_PREFIX}…)"
+            f"relative link not PyPI-safe: [{label}]({url}) (use {BLOB_PREFIX}…)"
         )
 
     try:
         from readme_renderer.markdown import render as render_md
     except ImportError:
         errors.append(
-            "readme-renderer not installed "
-            '(pip install "readme-renderer[md]")'
+            'readme-renderer not installed (pip install "readme-renderer[md]")'
         )
     else:
         html = render_md(text)
