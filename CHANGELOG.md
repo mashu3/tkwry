@@ -36,6 +36,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``drain_window_ipc_messages()``
 - Same-turn ``inject_script()`` and ``emit()`` use immediate ``_run_eval_js``
   so they are not dropped by ``eval_js`` last-wins coalescing
+- ``window.tkwry.invoke(method, data)`` always treats a plain object as Python
+  kwargs (including ``{ timeout: N }``); use the third ``options`` argument
+  for JS-side timeouts
+- ``call`` / ``stream`` reject option-shaped trailing objects with invalid
+  ``timeout`` / ``kwargs`` instead of binding them as positional params
 
 ## [0.1.7] - 2026-09-02
 

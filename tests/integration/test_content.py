@@ -445,6 +445,93 @@ def test_rpc_kwargs_call_roundtrip(tk_root) -> None:
     frame.destroy()
 
 
+def test_invoke_timeout_object_is_kwargs(tk_root) -> None:
+    """``invoke(method, { timeout: N })`` passes timeout as a Python kwarg."""
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<title>rpc</title><p>rpc</p>")
+
+    @web.rpc
+    def capture(**kwargs) -> dict:
+        return dict(kwargs)
+
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=30)
+
+    web.eval_js(
+        """
+        (function () {
+          window.tkwry.invoke("capture", { timeout: 30 }).then(function (out) {
+            document.title = "out=" + JSON.stringify(out);
+          }).catch(function (e) {
+            document.title = "err=" + e;
+          });
+        })();
+        """
+    )
+
+    titles: list[str] = []
+
+    def read_title() -> None:
+        web.eval_js_with_callback("document.title", titles.append)
+
+    def title_ready() -> bool:
+        read_title()
+        return any(
+            "out=" in str(t) and "timeout" in str(t) and "30" in str(t) for t in titles
+        )
+
+    assert wait_until(tk_root, title_ready, steps=400), (
+        f"expected timeout kwarg in document.title, got {titles!r}"
+    )
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_call_rejects_invalid_timeout_option(tk_root) -> None:
+    """``call(..., { kwargs: {…}, timeout: 0 })`` rejects instead of binding."""
+    frame = host_frame(tk_root)
+    web = WebView(frame, html="<title>rpc</title><p>rpc</p>")
+    called: list[str] = []
+
+    @web.expose
+    def ping() -> str:
+        called.append("ping")
+        return "ok"
+
+    assert web.wait_until_ready(timeout=10.0)
+    pump(tk_root, steps=30)
+
+    web.eval_js(
+        """
+        (function () {
+          window.tkwry.call("ping", { kwargs: { n: 1 }, timeout: 0 }).then(
+            function () { document.title = "ok"; }
+          ).catch(function (e) {
+            document.title = "err=" + (e.name || e);
+          });
+        })();
+        """
+    )
+
+    titles: list[str] = []
+
+    def read_title() -> None:
+        web.eval_js_with_callback("document.title", titles.append)
+
+    def title_ready() -> bool:
+        read_title()
+        return any("err=" in str(t) for t in titles)
+
+    assert wait_until(tk_root, title_ready, steps=400), (
+        f"expected invalid-options rejection, got {titles!r}"
+    )
+    assert called == []
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_rpc_stream_roundtrip(tk_root) -> None:
     """``window.tkwry.stream`` consumes a sync generator as JSON chunks."""
     frame = host_frame(tk_root)

@@ -81,10 +81,19 @@ RPC_BOOTSTRAP_JS = """\
     }
     pending = Object.create(null);
   }
-  function isCallOptions(value) {
+  function isOptionShaped(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
     var keys = Object.keys(value);
     if (!keys.length) return false;
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      if (key !== "timeout" && key !== "kwargs") return false;
+    }
+    return true;
+  }
+  function isCallOptions(value) {
+    if (!isOptionShaped(value)) return false;
+    var keys = Object.keys(value);
     var hasTimeout = false;
     var hasKwargs = false;
     for (var i = 0; i < keys.length; i++) {
@@ -107,6 +116,43 @@ RPC_BOOTSTRAP_JS = """\
     }
     return hasTimeout || hasKwargs;
   }
+  function invalidCallOptionsError() {
+    return {
+      type: "TypeError",
+      message: "invalid call options; expected { timeout: ms, kwargs: {…} }"
+    };
+  }
+  function rejectRpcPromise(err) {
+    var promise = Promise.reject(makeError(err));
+    promise.id = "";
+    promise.cancel = function () {};
+    return promise;
+  }
+  function takeCallOptions(params) {
+    if (!params.length || !isOptionShaped(params[params.length - 1])) {
+      return { ok: true, options: null };
+    }
+    var candidate = params[params.length - 1];
+    if (!isCallOptions(candidate)) {
+      return { ok: false, error: invalidCallOptionsError() };
+    }
+    params.pop();
+    return { ok: true, options: candidate };
+  }
+  function makeStreamErrorIterator(err) {
+    var failed = {
+      id: "",
+      cancel: function () {},
+      next: function () { return Promise.reject(err); },
+      "return": function (value) {
+        return Promise.resolve({ done: true, value: value });
+      }
+    };
+    if (typeof Symbol === "function" && Symbol.asyncIterator) {
+      failed[Symbol.asyncIterator] = function () { return failed; };
+    }
+    return failed;
+  }
   function makeError(value) {
     if (value && typeof value === "object" && value.message != null) {
       var err = new Error(String(value.message));
@@ -120,10 +166,11 @@ RPC_BOOTSTRAP_JS = """\
   window.tkwry = {
     call: function (method) {
       var params = Array.prototype.slice.call(arguments, 1);
-      var options = null;
-      if (params.length && isCallOptions(params[params.length - 1])) {
-        options = params.pop();
+      var taken = takeCallOptions(params);
+      if (!taken.ok) {
+        return rejectRpcPromise(taken.error);
       }
+      var options = taken.options;
       var id = nextRpcId();
       var promise = new Promise(function (resolve, reject) {
         var settled = false;
@@ -176,9 +223,6 @@ RPC_BOOTSTRAP_JS = """\
         if (data === undefined || data === null) {
           return window.tkwry.call(method);
         }
-        if (isCallOptions(data)) {
-          return window.tkwry.call(method, data);
-        }
         if (typeof data === "object" && !Array.isArray(data)) {
           return window.tkwry.call(method, { kwargs: data });
         }
@@ -200,10 +244,11 @@ RPC_BOOTSTRAP_JS = """\
     },
     stream: function (method) {
       var params = Array.prototype.slice.call(arguments, 1);
-      var options = null;
-      if (params.length && isCallOptions(params[params.length - 1])) {
-        options = params.pop();
+      var taken = takeCallOptions(params);
+      if (!taken.ok) {
+        return makeStreamErrorIterator(makeError(taken.error));
       }
+      var options = taken.options;
       var id = nextRpcId();
       var queue = [];
       var waiters = [];

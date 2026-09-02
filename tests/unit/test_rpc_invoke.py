@@ -102,6 +102,16 @@ def test_rpc_untrusted_rejects(tk_root) -> None:
 def test_bootstrap_includes_invoke() -> None:
     assert "window.tkwry.invoke" in RPC_BOOTSTRAP_JS
     assert "kwargs: data" in RPC_BOOTSTRAP_JS
+    assert "isOptionShaped" in RPC_BOOTSTRAP_JS
+    assert "takeCallOptions" in RPC_BOOTSTRAP_JS
+
+
+def test_invoke_two_arg_never_treats_data_as_call_options() -> None:
+    invoke = RPC_BOOTSTRAP_JS.split("invoke: function", 1)[1]
+    two_arg = invoke.split("if (arguments.length === 2)", 1)[1].split(
+        "if (arguments.length === 2", 1
+    )[0]
+    assert "isCallOptions" not in two_arg
 
 
 def test_invoke_payload_binds_kwargs() -> None:
@@ -125,3 +135,10 @@ def test_invoke_payload_binds_kwargs() -> None:
     ok, value = dispatch_rpc({"get_data": get_data}, req)
     assert ok is True
     assert value == {"id": 123}
+
+
+def test_call_rejects_invalid_option_shaped_timeout() -> None:
+    call = RPC_BOOTSTRAP_JS.split("call: function", 1)[1]
+    assert "takeCallOptions" in call
+    assert "rejectRpcPromise" in call
+    assert "invalid call options" in RPC_BOOTSTRAP_JS

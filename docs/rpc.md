@@ -74,7 +74,10 @@ pending.cancel();
 ``@web.rpc("name")`` is sugar for ``@web.expose(name="name")``.
 ``window.tkwry.invoke(method, data)`` is sugar for
 ``window.tkwry.call(method, { kwargs: data })`` when *data* is a plain
-object. ``call`` remains the full positional / kwargs / timeout surface.
+object (including ``{ timeout: N }`` — that key is kwargs, not a JS
+timeout). Pass ``invoke(method, data, { timeout: ms })`` when you need a
+JS-side timeout. ``call`` remains the full positional / kwargs / timeout
+surface.
 
 ### Execution model
 
@@ -92,8 +95,9 @@ and `emit` payloads must be strict JSON (no `datetime`, custom objects,
 each top-level navigation advances an RPC **epoch** so ids look like
 ``0:r1``, ``1:r1`` — stale responses from an earlier page cannot settle a
 new document's Promises. Keyword args go in
-`{ kwargs: { … } }` (a trailing `{ timeout: ms }` is still call options, not
-a positional dict).
+`{ kwargs: { … } }` (a trailing `{ timeout: ms }` on ``call`` is options,
+not a positional dict). Option-shaped objects with invalid ``timeout`` or
+``kwargs`` reject the Promise instead of being sent as params.
 
 ### Timeout and cancel
 
