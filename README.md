@@ -24,7 +24,7 @@ Tkinter is still a solid GUI shell — it just had no first-class way to host mo
 
 - **True child embedding** — `build_as_child` via HWND, NSView, or X11 window ID
 - **One event loop** — Tk `mainloop` only; no separate app runtime
-- **Local apps** — `app=` serves HTML/CSS/JS via `tkwry://` (no localhost HTTP server)
+- **Local apps** — `app=` serves HTML/CSS/JS without a localhost HTTP server (`tkwry://` on macOS/Linux; Windows defaults to `https://tkwry.localhost`)
 - **IPC / RPC / emit** — JS↔Python events, request/response, and streams without freezing the UI
 - **Trust boundaries** — IPC/RPC default to the initial origin; `untrusted=True` for arbitrary sites
 - **Layout-aware** — tracks `pack` / `grid` / `place`, tabs, and `PanedWindow`
@@ -155,14 +155,14 @@ Trust (`untrusted`, `bridge_origins`): [docs/trust.md](https://github.com/mashu3
 
 **Local apps & bridge**
 
-- `app=` serves assets over `tkwry://` (no localhost HTTP server)
+- `app=` serves assets without a localhost HTTP server (`tkwry://` on macOS/Linux; Windows defaults to `https://tkwry.localhost`)
 - IPC / RPC / emit between JS and Python ([docs/rpc.md](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md))
 - Origin-scoped bridge by default; `untrusted=` for arbitrary sites ([docs/trust.md](https://github.com/mashu3/tkwry/blob/main/docs/trust.md))
 
 **Browser-ish APIs**
 
-- `WebSession` / profiles, cookies, navigation hooks, downloads, print, DevTools ([platforms](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md))
-- Native file drag & drop into the WebView area
+- `WebSession` / profiles, cookies ([Usage — Shared session](https://github.com/mashu3/tkwry/blob/main/docs/usage.md#shared-session-websession)); navigation hooks, downloads, print, DevTools ([platforms](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md))
+- Native file drag & drop into the WebView area (notify-only)
 
 **Host integration**
 
@@ -224,16 +224,16 @@ Short checklist — **details live in [Platform notes](https://github.com/mashu3
 - **Windows** — [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) required; missing → create-failed signals ([install notes](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#windows))
 - **Linux** — no PyPI wheel (by design); best-effort source install; prefer sequential `eval_js_with_callback` across multiple views ([Linux](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#linux))
 
-**Engine gaps** (wrap when wry ships them)
+**Engine gaps / partial wraps** (no invented shims)
 
-- **Print** — system dialog only; no PDF / no result ([Print](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#print))
+- **Print** — system dialog (`print()`; macOS also `print_with_options` for margins); no PDF / no result ([Print](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#print))
 - **Downloads** — start-deny only; no mid-flight abort, pause/resume, or progress % ([Downloads](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#downloads))
-- **Screenshot / find in page** — not exposed ([Screenshot](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#screenshot), [Find](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#find-in-page))
+- **Screenshot / find in page** — not exposed as tkwry APIs (Windows may still show engine Ctrl+F chrome) ([Screenshot](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#screenshot), [Find](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#find-in-page))
 
 **macOS / Windows quirks**
 
-- **macOS** — import `tkwry` before AppKit; IME/focus not Safari-parity; inline `url()` may be `None`; DevTools needs `devtools=True` then `open_devtools()` (private APIs — avoid Mac App Store) ([macOS embedding](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#macos-embedding), [DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools))
-- **Windows DevTools** — `open_devtools()` works; `close_devtools` / `is_devtools_open` are limited ([DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools))
+- **macOS** — import `tkwry` before AppKit; IME not Safari-parity; inline `url()` may be `None`; DevTools needs `devtools=True` then `open_devtools()` (private APIs — avoid Mac App Store) ([macOS embedding](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#macos-embedding), [DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools))
+- **Windows DevTools** — `open_devtools()` works; `close_devtools` is a no-op; `is_devtools_open` always `False` ([DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools))
 
 **Trust & session**
 
@@ -242,10 +242,10 @@ Short checklist — **details live in [Platform notes](https://github.com/mashu3
 
 **Lifecycle & IPC**
 
-- Sync `on_navigation` / `on_new_window` / create-time `permission_handler` may block WebKit ~60s; do not create a WebView from `on_new_window` ([lifecycle callbacks](https://github.com/mashu3/tkwry/blob/main/docs/usage.md#navigation--lifecycle-callbacks))
-- RPC cancel / `destroy()` are cooperative only; async queues cap at 2048; IPC/RPC messages at 10 MiB ([RPC timeout/cancel](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md#timeout-and-cancel))
+- Sync `on_navigation` / `on_new_window` / `on_download` / create-time `permission_handler` may block the engine until they return (wait capped ~60s); do not create a WebView from `on_new_window` ([lifecycle callbacks](https://github.com/mashu3/tkwry/blob/main/docs/usage.md#navigation--lifecycle-callbacks))
+- RPC cancel / `destroy()` are cooperative only; async queues cap at 2048 each; IPC/RPC messages at 10 MiB ([RPC limits](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md#limits), [timeout/cancel](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md#timeout-and-cancel))
 - Eval / navigation timeouts surface typed events/errors on the Tk thread (not raised on the WebKit thread)
-- Native drag & drop is **WebView area only** (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
+- Native drag & drop is **WebView area only** and **notify-only** (cannot deny from Python; use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
 
 See [CHANGELOG.md](https://github.com/mashu3/tkwry/blob/main/CHANGELOG.md) for release history.
 
