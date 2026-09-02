@@ -41,6 +41,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   for JS-side timeouts
 - ``call`` / ``stream`` reject option-shaped trailing objects with invalid
   ``timeout`` / ``kwargs`` instead of binding them as positional params
+- ``bind_rpc_arguments`` coerces ``*args`` / ``**kwargs`` elements instead of
+  applying the var-param annotation to the whole tuple or dict
 
 ## [0.1.7] - 2026-09-02
 

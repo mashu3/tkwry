@@ -430,6 +430,67 @@ def test_bind_rpc_arguments_coerces_integral_float() -> None:
     assert kwargs == {}
 
 
+def test_bind_rpc_arguments_coerces_var_args_and_kwargs() -> None:
+    def total(*nums: int) -> int:
+        return sum(nums)
+
+    args, kwargs = bind_rpc_arguments(total, (1.0, 2.0, 3), {})
+    assert args == (1, 2, 3)
+    assert kwargs == {}
+
+    def labeled(**tags: str) -> str:
+        return ",".join(tags)
+
+    args, kwargs = bind_rpc_arguments(labeled, (), {"a": "x", "b": "y"})
+    assert args == ()
+    assert kwargs == {"a": "x", "b": "y"}
+
+    def counts(**values: int) -> int:
+        return sum(values.values())
+
+    args, kwargs = bind_rpc_arguments(counts, (), {"a": 1.0, "b": 2.0})
+    assert kwargs == {"a": 1, "b": 2}
+
+
+def test_dispatch_rpc_var_args_and_kwargs() -> None:
+    def total(*nums: int) -> int:
+        return sum(nums)
+
+    req = parse_rpc_request(
+        json.dumps(
+            {
+                "__tkwry": "rpc",
+                "id": "1",
+                "method": "total",
+                "params": [1.0, 2.0, 3],
+            }
+        )
+    )
+    assert req is not None
+    ok, value = dispatch_rpc({"total": total}, req)
+    assert ok is True
+    assert value == 6
+
+    def join(**parts: str) -> str:
+        return "|".join(parts[k] for k in sorted(parts))
+
+    req2 = parse_rpc_request(
+        json.dumps(
+            {
+                "__tkwry": "rpc",
+                "id": "2",
+                "method": "join",
+                "params": [],
+                "kwargs": {"b": "2", "a": "1"},
+            }
+        )
+    )
+    assert req2 is not None
+    ok, value = dispatch_rpc({"join": join}, req2)
+    assert ok is True
+    assert value == "1|2"
+
+
 def test_dispatch_rpc_kwargs() -> None:
     def greet(message: str, times: int = 1) -> str:
         return message * int(times)

@@ -844,6 +844,18 @@ def _coerce_rpc_value(value: Any, hint: Any) -> Any:
     return value
 
 
+def _var_param_element_hint(hint: Any) -> Any | None:
+    """Per-element hint for ``*args`` / ``**kwargs``; ``None`` skips coercion."""
+    if hint is Any or hint is inspect.Parameter.empty:
+        return None
+    origin = get_origin(hint)
+    if origin is tuple:
+        args = get_args(hint)
+        if len(args) == 2 and args[1] is Ellipsis:
+            return args[0]
+    return hint
+
+
 def bind_rpc_arguments(
     handler: RpcHandler,
     params: Sequence[Any],
@@ -866,14 +878,50 @@ def bind_rpc_arguments(
         hints = get_type_hints(handler)
     except Exception:
         hints = {}
+    named_kinds = (
+        inspect.Parameter.POSITIONAL_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    )
+    named_params = {
+        name
+        for name, param in signature.parameters.items()
+        if param.kind in named_kinds
+    }
+    var_kw_hint: Any | None = None
     for name, parameter in signature.parameters.items():
-        if name not in bound.arguments:
-            continue
         hint = hints.get(name, parameter.annotation)
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            var_kw_hint = _var_param_element_hint(hint)
+            continue
+        if parameter.kind is inspect.Parameter.VAR_POSITIONAL:
+            if name not in bound.arguments:
+                continue
+            elem_hint = _var_param_element_hint(hint)
+            if elem_hint is None:
+                continue
+            try:
+                bound.arguments[name] = tuple(
+                    _coerce_rpc_value(item, elem_hint)
+                    for item in bound.arguments[name]
+                )
+            except TypeError as exc:
+                raise TypeError(f"{name}: {exc}") from exc
+            continue
+        if parameter.kind not in named_kinds or name not in bound.arguments:
+            continue
         try:
             bound.arguments[name] = _coerce_rpc_value(bound.arguments[name], hint)
         except TypeError as exc:
             raise TypeError(f"{name}: {exc}") from exc
+    if var_kw_hint is not None:
+        for key, item in list(bound.kwargs.items()):
+            if key in named_params:
+                continue
+            try:
+                bound.kwargs[key] = _coerce_rpc_value(item, var_kw_hint)
+            except TypeError as exc:
+                raise TypeError(f"{key}: {exc}") from exc
     return bound.args, dict(bound.kwargs)
 
 
