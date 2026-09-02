@@ -862,6 +862,12 @@ type PyCallback = Arc<Mutex<Option<Py<PyAny>>>>;
 type PageLoadPending = Arc<Mutex<VecDeque<(PageLoadEvent, String)>>>;
 type IpcEnvelope = (String, String); // (source_url, body)
 type IpcPending = Arc<Mutex<VecDeque<IpcEnvelope>>>;
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WindowIpcRoute {
+    Ipc,
+    Rpc,
+}
+type IpcOrderPending = Arc<Mutex<VecDeque<WindowIpcRoute>>>;
 type TitlePending = Arc<Mutex<VecDeque<String>>>;
 type DragDropPendingItem = (DragDropEvent, Vec<String>, (i32, i32));
 type DragDropPending = Arc<Mutex<VecDeque<DragDropPendingItem>>>;
@@ -907,14 +913,54 @@ fn try_compact_title_queue(queue: &mut VecDeque<String>) -> bool {
     false
 }
 
-fn try_compact_ipc_queue(queue: &mut VecDeque<IpcEnvelope>) -> bool {
+fn remove_ipc_route_at_ipc_index(order: &mut VecDeque<WindowIpcRoute>, ipc_index: usize) {
+    let mut seen = 0usize;
+    for pos in 0..order.len() {
+        if order[pos] == WindowIpcRoute::Ipc {
+            if seen == ipc_index {
+                order.remove(pos);
+                return;
+            }
+            seen += 1;
+        }
+    }
+}
+
+fn try_compact_ipc_queue_with_order(
+    order: &IpcOrderPending,
+    queue: &mut VecDeque<IpcEnvelope>,
+) -> bool {
     for index in 0..queue.len().saturating_sub(1) {
         if queue[index] == queue[index + 1] {
             queue.remove(index);
+            if let Ok(mut routes) = order.lock() {
+                remove_ipc_route_at_ipc_index(&mut routes, index);
+            }
             return true;
         }
     }
     false
+}
+
+fn drain_window_ipc_in_order(
+    order: &IpcOrderPending,
+    ipc_pending: &IpcPending,
+    rpc_pending: &IpcPending,
+) -> PyResult<Vec<IpcEnvelope>> {
+    let mut routes = order.lock().map_err(|_| queue_lock_poisoned())?;
+    let mut ipc = ipc_pending.lock().map_err(|_| queue_lock_poisoned())?;
+    let mut rpc = rpc_pending.lock().map_err(|_| queue_lock_poisoned())?;
+    let mut out = Vec::with_capacity(routes.len());
+    while let Some(route) = routes.pop_front() {
+        let msg = match route {
+            WindowIpcRoute::Rpc => rpc.pop_front(),
+            WindowIpcRoute::Ipc => ipc.pop_front(),
+        };
+        if let Some(envelope) = msg {
+            out.push(envelope);
+        }
+    }
+    Ok(out)
 }
 
 /// Schemes that must never navigate, even without a Python ``on_navigation``.
@@ -1007,6 +1053,7 @@ fn enqueue_window_ipc_body(
     ipc_dropped: &AtomicU64,
     rpc_pending: &IpcPending,
     rpc_dropped: &AtomicU64,
+    ipc_order: &IpcOrderPending,
     body: String,
     source_url: String,
     wakeup: Option<&Arc<AtomicI32>>,
@@ -1034,6 +1081,7 @@ fn enqueue_window_ipc_body(
                     ipc_dropped,
                     rpc_pending,
                     rpc_dropped,
+                    ipc_order,
                     envelope,
                     source_url,
                     wakeup,
@@ -1055,6 +1103,7 @@ fn enqueue_window_ipc_body(
         ipc_dropped,
         rpc_pending,
         rpc_dropped,
+        ipc_order,
         body,
         source_url,
         wakeup,
@@ -1068,12 +1117,14 @@ fn push_window_ipc_body(
     ipc_dropped: &AtomicU64,
     rpc_pending: &IpcPending,
     rpc_dropped: &AtomicU64,
+    ipc_order: &IpcOrderPending,
     body: String,
     source_url: String,
     wakeup: Option<&Arc<AtomicI32>>,
 ) -> Result<(), ()> {
     let envelope = (source_url, body);
-    if rpc_envelope::is_rpc_envelope(&envelope.1) {
+    let is_rpc = rpc_envelope::is_rpc_envelope(&envelope.1);
+    let result = if is_rpc {
         push_if_listening(
             listening,
             rpc_pending,
@@ -1085,6 +1136,7 @@ fn push_window_ipc_body(
             |_: &mut VecDeque<IpcEnvelope>| false,
         )
     } else {
+        let order = Arc::clone(ipc_order);
         push_if_listening(
             listening,
             ipc_pending,
@@ -1093,9 +1145,17 @@ fn push_window_ipc_body(
             MAX_IPC_PENDING,
             "IPC",
             wakeup,
-            try_compact_ipc_queue,
+            move |queue| try_compact_ipc_queue_with_order(&order, queue),
         )
+    };
+    if result.is_ok() {
+        ipc_order.lock().map_err(|_| ())?.push_back(if is_rpc {
+            WindowIpcRoute::Rpc
+        } else {
+            WindowIpcRoute::Ipc
+        });
     }
+    result
 }
 
 fn try_compact_page_load_queue(queue: &mut VecDeque<(PageLoadEvent, String)>) -> bool {
@@ -1240,6 +1300,7 @@ struct WebViewCore {
     page_load_pending: PageLoadPending,
     ipc_pending: IpcPending,
     rpc_pending: IpcPending,
+    ipc_order: IpcOrderPending,
     title_pending: TitlePending,
     drag_drop_pending: DragDropPending,
     download_complete_pending: DownloadCompletePending,
@@ -1593,6 +1654,7 @@ impl WebView {
         let page_load_pending: PageLoadPending = Arc::new(Mutex::new(VecDeque::new()));
         let ipc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
         let rpc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
+        let ipc_order: IpcOrderPending = Arc::new(Mutex::new(VecDeque::new()));
         let title_pending: TitlePending = Arc::new(Mutex::new(VecDeque::new()));
         let drag_drop_pending: DragDropPending = Arc::new(Mutex::new(VecDeque::new()));
         let download_complete_pending: DownloadCompletePending =
@@ -1940,6 +2002,7 @@ WebViews that share a session must use the same app= root \
         if with_ipc {
             let ipc_pending_for_handler = ipc_pending.clone();
             let rpc_pending_for_handler = rpc_pending.clone();
+            let ipc_order_for_handler = ipc_order.clone();
             let ipc_listening_for_handler = ipc_listening.clone();
             let ipc_overflow_for_handler = ipc_overflow_dropped.clone();
             let rpc_overflow_for_handler = rpc_overflow_dropped.clone();
@@ -1953,6 +2016,7 @@ WebViews that share a session must use the same app= root \
                     &ipc_overflow_for_handler,
                     &rpc_pending_for_handler,
                     &rpc_overflow_for_handler,
+                    &ipc_order_for_handler,
                     body,
                     source_url,
                     Some(&wakeup_for_handler),
@@ -2071,6 +2135,7 @@ WebViews that share a session must use the same app= root \
                 page_load_pending,
                 ipc_pending,
                 rpc_pending,
+                ipc_order,
                 title_pending,
                 drag_drop_pending,
                 download_complete_pending,
@@ -2377,7 +2442,13 @@ WebViews that share a session must use the same app= root \
     fn set_ipc_listening(&self, enabled: bool) -> PyResult<()> {
         self.require_owner_thread()?;
         set_listening_and_clear_queue(&self.ipc_listening, &self.ipc_pending, enabled)?;
-        set_listening_and_clear_queue(&self.ipc_listening, &self.rpc_pending, enabled)
+        set_listening_and_clear_queue(&self.ipc_listening, &self.rpc_pending, enabled)?;
+        if !enabled {
+            if let Ok(mut order) = self.ipc_order.lock() {
+                order.clear();
+            }
+        }
+        Ok(())
     }
 
     fn set_on_navigation(&self, handler: Py<PyAny>) -> PyResult<()> {
@@ -2419,6 +2490,11 @@ WebViews that share a session must use the same app= root \
     fn drain_rpc_messages(&self) -> PyResult<Vec<(String, String)>> {
         self.require_owner_thread()?;
         drain_queue(&self.rpc_pending)
+    }
+
+    fn drain_window_ipc_messages(&self) -> PyResult<Vec<(String, String)>> {
+        self.require_owner_thread()?;
+        drain_window_ipc_in_order(&self.ipc_order, &self.ipc_pending, &self.rpc_pending)
     }
 
     fn drain_title_events(&self) -> PyResult<Vec<String>> {
@@ -2504,6 +2580,7 @@ WebViews that share a session must use the same app= root \
                     &self.ipc_overflow_dropped,
                     &self.rpc_pending,
                     &self.rpc_overflow_dropped,
+                    &self.ipc_order,
                     envelope,
                     source_url,
                     None,
@@ -2527,6 +2604,7 @@ WebViews that share a session must use the same app= root \
             &self.ipc_overflow_dropped,
             &self.rpc_pending,
             &self.rpc_overflow_dropped,
+            &self.ipc_order,
             message,
             source_url,
             None,
@@ -3051,6 +3129,7 @@ mod tests {
         let listening = AtomicBool::new(true);
         let ipc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
         let rpc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
+        let ipc_order: IpcOrderPending = Arc::new(Mutex::new(VecDeque::new()));
         let ipc_dropped = AtomicU64::new(0);
         let rpc_dropped = AtomicU64::new(0);
         let padding = "x".repeat(MAX_RPC_MESSAGE_BYTES + 8);
@@ -3061,6 +3140,7 @@ mod tests {
             &ipc_dropped,
             &rpc_pending,
             &rpc_dropped,
+            &ipc_order,
             body,
             "https://example.com/".into(),
             None,
@@ -3080,6 +3160,7 @@ mod tests {
         let listening = AtomicBool::new(true);
         let ipc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
         let rpc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
+        let ipc_order: IpcOrderPending = Arc::new(Mutex::new(VecDeque::new()));
         let ipc_dropped = AtomicU64::new(0);
         let rpc_dropped = AtomicU64::new(0);
         for i in 0..MAX_IPC_PENDING {
@@ -3089,6 +3170,7 @@ mod tests {
                 &ipc_dropped,
                 &rpc_pending,
                 &rpc_dropped,
+                &ipc_order,
                 format!("ipc-{i}"),
                 String::new(),
                 None,
@@ -3101,6 +3183,7 @@ mod tests {
             &ipc_dropped,
             &rpc_pending,
             &rpc_dropped,
+            &ipc_order,
             "ipc-overflow".into(),
             String::new(),
             None,
@@ -3116,6 +3199,7 @@ mod tests {
             &ipc_dropped,
             &rpc_pending,
             &rpc_dropped,
+            &ipc_order,
             rpc_msg.into(),
             "tkwry://localhost/".into(),
             None,
@@ -3127,6 +3211,59 @@ mod tests {
             rpc_pending.lock().unwrap()[0],
             ("tkwry://localhost/".into(), rpc_msg.into())
         );
+    }
+
+    #[test]
+    fn window_ipc_messages_drain_in_enqueue_order() {
+        let listening = AtomicBool::new(true);
+        let ipc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
+        let rpc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
+        let ipc_order: IpcOrderPending = Arc::new(Mutex::new(VecDeque::new()));
+        let ipc_dropped = AtomicU64::new(0);
+        let rpc_dropped = AtomicU64::new(0);
+        let rpc_msg = r#"{"__tkwry":"rpc","id":"r1","method":"ping","params":[]}"#;
+        assert!(push_window_ipc_body(
+            &listening,
+            &ipc_pending,
+            &ipc_dropped,
+            &rpc_pending,
+            &rpc_dropped,
+            &ipc_order,
+            "ipc-first".into(),
+            String::new(),
+            None,
+        )
+        .is_ok());
+        assert!(push_window_ipc_body(
+            &listening,
+            &ipc_pending,
+            &ipc_dropped,
+            &rpc_pending,
+            &rpc_dropped,
+            &ipc_order,
+            rpc_msg.into(),
+            "about:blank".into(),
+            None,
+        )
+        .is_ok());
+        assert!(push_window_ipc_body(
+            &listening,
+            &ipc_pending,
+            &ipc_dropped,
+            &rpc_pending,
+            &rpc_dropped,
+            &ipc_order,
+            "ipc-second".into(),
+            String::new(),
+            None,
+        )
+        .is_ok());
+        let drained =
+            drain_window_ipc_in_order(&ipc_order, &ipc_pending, &rpc_pending).expect("drain");
+        assert_eq!(drained.len(), 3);
+        assert_eq!(drained[0].1, "ipc-first");
+        assert!(rpc_envelope::is_rpc_envelope(&drained[1].1));
+        assert_eq!(drained[2].1, "ipc-second");
     }
 
     #[test]

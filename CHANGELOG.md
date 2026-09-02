@@ -29,6 +29,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``window.tkwry`` survives after the create-time init script document is gone
 - RPC epoch now bumps on every ``Started`` (including before the first
   ``Finished``), then syncs to JS after bootstrap reinjection
+- Worker RPC stream chunks dropped when the Tk pending queue is full now reject
+  the open stream with ``RpcStreamOverflowError`` instead of settling successfully
+- RPC from disallowed page origins is ignored without settling guessed inflight ids
+- IPC and RPC window messages drain in native enqueue order via
+  ``drain_window_ipc_messages()``
 
 ## [0.1.7] - 2026-09-02
 

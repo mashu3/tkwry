@@ -88,6 +88,7 @@ class WebViewRpcMixin:
         )
         self._rpc_stream_queue: queue.SimpleQueue[tuple[str, Any]] = queue.SimpleQueue()
         self._rpc_stream_dropped = 0
+        self._rpc_stream_drop_reject: set[str] = set()
         self._rpc_stream_open: set[str] = set()
         self._rpc_timeout_after: dict[str, str] = {}
         self._rpc_cancel_events: dict[str, threading.Event] = {}
@@ -501,13 +502,36 @@ class WebViewRpcMixin:
         q = self._rpc_stream_queue
         if q.qsize() >= MAX_RPC_STREAM_PENDING:
             self._rpc_stream_dropped += 1
+            self._reject_rpc_stream_for_drop(req_id)
             return False
         try:
             q.put_nowait((req_id, item))
         except Exception:
             self._rpc_stream_dropped += 1
+            self._reject_rpc_stream_for_drop(req_id)
             return False
         return True
+
+    def _reject_rpc_stream_for_drop(self, req_id: str) -> None:
+        self._rpc_stream_drop_reject.add(req_id)
+        self._signal_rpc_cancel(req_id)
+
+    def _flush_rpc_stream_drop_rejects(self) -> None:
+        for req_id in list(self._rpc_stream_drop_reject):
+            self._rpc_stream_drop_reject.discard(req_id)
+            if req_id not in self._rpc_stream_open:
+                continue
+            self._settle_rpc(
+                req_id,
+                ok=False,
+                value=rpc_error(
+                    "RpcStreamOverflowError",
+                    "stream chunk dropped (pending queue full)",
+                ),
+            )
+
+    def _rpc_stream_was_dropped(self, req_id: str) -> bool:
+        return req_id in self._rpc_stream_drop_reject
 
     def _take_rpc_stream_dropped(self) -> int:
         n = self._rpc_stream_dropped
@@ -637,23 +661,12 @@ class WebViewRpcMixin:
         native = self._webview
         if native is None or not self._ipc_listening_wanted():
             return
-        rpc_messages = native.drain_rpc_messages()
-        ipc_messages = native.drain_ipc_messages()
-        for source_url, message in (*rpc_messages, *ipc_messages):
+        rpc_messages = native.drain_window_ipc_messages()
+        for source_url, message in rpc_messages:
             bridge_url = self._ipc_source_url_for_bridge(source_url)
             request = parse_rpc_request(message)
             if request is not None:
                 if not self._bridge_origin_allowed(bridge_url):
-                    if request.id and not request.cancel:
-                        self._settle_rpc(
-                            request.id,
-                            ok=False,
-                            value=rpc_error(
-                                "RpcOriginError",
-                                f"RPC from disallowed origin {source_url!r}; "
-                                "add it to bridge_origins (or a path prefix)",
-                            ),
-                        )
                     continue
                 self._handle_rpc_request(request)
                 continue
@@ -771,6 +784,17 @@ class WebViewRpcMixin:
         if self._destroyed:
             return
         self._drop_rpc_cancel(req_id)
+        if self._rpc_stream_was_dropped(req_id):
+            self._rpc_stream_drop_reject.discard(req_id)
+            self._settle_rpc(
+                req_id,
+                ok=False,
+                value=rpc_error(
+                    "RpcStreamOverflowError",
+                    "stream chunk dropped (pending queue full)",
+                ),
+            )
+            return
         try:
             value = done_fut.result()
         except Exception as exc:
@@ -805,6 +829,7 @@ class WebViewRpcMixin:
         if self._destroyed:
             self._discard_rpc_stream_queue()
             return
+        self._flush_rpc_stream_drop_rejects()
         while True:
             try:
                 req_id, item = self._rpc_stream_queue.get_nowait()
@@ -916,9 +941,11 @@ class WebViewRpcMixin:
             self._drop_rpc_cancel(req_id)
             self._rpc_inflight.pop(req_id, None)
             self._rpc_stream_open.discard(req_id)
+            self._rpc_stream_drop_reject.discard(req_id)
             return
         self._rpc_user_cancelled.discard(req_id)
         self._rpc_stream_open.discard(req_id)
+        self._rpc_stream_drop_reject.discard(req_id)
         try:
             script = settle_script(req_id, ok=ok, value=value)
         except RpcSerializationError:

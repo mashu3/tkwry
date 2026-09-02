@@ -225,20 +225,16 @@ def test_foreign_origin_rpc_is_rejected(tk_root) -> None:
         return "ok"
 
     native = MagicMock()
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         (
             "https://evil.example/",
             json.dumps({"__tkwry": "rpc", "id": "r1", "method": "ping", "params": []}),
         )
     ]
-    native.drain_ipc_messages.return_value = []
     web._webview = native
     web._deliver_ipc_messages()
     assert called == []
-    native.eval_js.assert_called()
-    script = native.eval_js.call_args[0][0]
-    assert "RpcOriginError" in script
-    assert "bridge_origins" in script
+    native.eval_js.assert_not_called()
     web.destroy()
     frame.destroy()
 
@@ -254,13 +250,12 @@ def test_inline_origin_rpc_is_allowed(tk_root) -> None:
         return "ok"
 
     native = MagicMock()
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         (
             "about:blank",
             json.dumps({"__tkwry": "rpc", "id": "r1", "method": "ping", "params": []}),
         )
     ]
-    native.drain_ipc_messages.return_value = []
     web._webview = native
     web._deliver_ipc_messages()
     assert called == ["ping"]
@@ -287,19 +282,16 @@ def test_opaque_document_rpc_is_rejected(tk_root, source_url: str) -> None:
         return "ok"
 
     native = MagicMock()
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         (
             source_url,
             json.dumps({"__tkwry": "rpc", "id": "r1", "method": "ping", "params": []}),
         )
     ]
-    native.drain_ipc_messages.return_value = []
     web._webview = native
     web._deliver_ipc_messages()
     assert called == []
-    native.eval_js.assert_called()
-    script = native.eval_js.call_args[0][0]
-    assert "RpcOriginError" in script
+    native.eval_js.assert_not_called()
     web.destroy()
     frame.destroy()
 
@@ -312,8 +304,9 @@ def test_bridge_origins_star_allows_any_page(tk_root) -> None:
     called: list[str] = []
     web.set_ipc_handler(called.append)
     native = MagicMock()
-    native.drain_rpc_messages.return_value = []
-    native.drain_ipc_messages.return_value = [("https://other.example/", "hello")]
+    native.drain_window_ipc_messages.return_value = [
+        ("https://other.example/", "hello"),
+    ]
     web._webview = native
     web._deliver_ipc_messages()
     assert called == ["hello"]
@@ -357,8 +350,7 @@ def test_ipc_empty_source_normalizes_for_html_bridge(tk_root) -> None:
     called: list[str] = []
     web.set_ipc_handler(called.append)
     native = MagicMock()
-    native.drain_rpc_messages.return_value = []
-    native.drain_ipc_messages.return_value = [("", "hello")]
+    native.drain_window_ipc_messages.return_value = [("", "hello")]
     web._webview = native
     web._deliver_ipc_messages()
     assert called == ["hello"]
@@ -372,8 +364,7 @@ def test_ipc_empty_source_stays_denied_for_url_bridge(tk_root) -> None:
     called: list[str] = []
     web.set_ipc_handler(called.append)
     native = MagicMock()
-    native.drain_rpc_messages.return_value = []
-    native.drain_ipc_messages.return_value = [("", "hello")]
+    native.drain_window_ipc_messages.return_value = [("", "hello")]
     web._webview = native
     web._deliver_ipc_messages()
     assert called == []

@@ -84,15 +84,15 @@ def test_rpc_delivered_from_dedicated_queue(tk_root) -> None:
 
     web.set_ipc_handler(ipc_seen.append)
     native = MagicMock()
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         (
             "about:blank",
             json.dumps(
                 {"__tkwry": "rpc", "id": "r1", "method": "add", "params": [2, 3]}
             ),
-        )
+        ),
+        ("about:blank", "flood"),
     ]
-    native.drain_ipc_messages.return_value = [("about:blank", "flood")]
     web._webview = native
     web._deliver_ipc_messages()
 
@@ -114,7 +114,7 @@ def test_rpc_stream_chunks_then_settles(tk_root) -> None:
         yield 2
 
     native = MagicMock()
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         (
             "about:blank",
             json.dumps(
@@ -128,7 +128,6 @@ def test_rpc_stream_chunks_then_settles(tk_root) -> None:
             ),
         )
     ]
-    native.drain_ipc_messages.return_value = []
     web._webview = native
     web._deliver_ipc_messages()
 
@@ -168,7 +167,7 @@ def test_rpc_stream_cancel_envelope_stops_generator(tk_root) -> None:
 
     web._cancel_deferred_callbacks()
     native = MagicMock()
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         (
             "about:blank",
             json.dumps(
@@ -182,7 +181,6 @@ def test_rpc_stream_cancel_envelope_stops_generator(tk_root) -> None:
             ),
         )
     ]
-    native.drain_ipc_messages.return_value = []
     web._webview = native
     web._deliver_ipc_messages()
     assert started.wait(timeout=2.0)
@@ -193,7 +191,7 @@ def test_rpc_stream_cancel_envelope_stops_generator(tk_root) -> None:
     assert first.is_set()
     web._drain_rpc_futures()
 
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         ("about:blank", json.dumps({"__tkwry": "rpc", "id": "s9", "cancel": True}))
     ]
     web._deliver_ipc_messages()
@@ -236,7 +234,7 @@ def test_rpc_stream_destroy_cancels_open_stream(tk_root) -> None:
         finished.set()
 
     native = MagicMock()
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         (
             "about:blank",
             json.dumps(
@@ -250,7 +248,6 @@ def test_rpc_stream_destroy_cancels_open_stream(tk_root) -> None:
             ),
         )
     ]
-    native.drain_ipc_messages.return_value = []
     web._webview = native
     web._deliver_ipc_messages()
     assert started.wait(timeout=2.0)
@@ -287,7 +284,7 @@ def test_rpc_stream_oversized_chunk_rejects(
         yield "x" * 80
 
     native = MagicMock()
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         (
             "about:blank",
             json.dumps(
@@ -301,7 +298,6 @@ def test_rpc_stream_oversized_chunk_rejects(
             ),
         )
     ]
-    native.drain_ipc_messages.return_value = []
     web._webview = native
     web._deliver_ipc_messages()
 
@@ -325,13 +321,12 @@ def test_rpc_call_rejects_generator(tk_root) -> None:
         yield 1
 
     native = MagicMock()
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         (
             "about:blank",
             json.dumps({"__tkwry": "rpc", "id": "r1", "method": "ticks", "params": []}),
         )
     ]
-    native.drain_ipc_messages.return_value = []
     web._webview = native
     web._deliver_ipc_messages()
 
@@ -358,7 +353,7 @@ def test_rpc_worker_stream_hops_to_tk(tk_root) -> None:
         yield 2
 
     native = MagicMock()
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         (
             "about:blank",
             json.dumps(
@@ -372,7 +367,6 @@ def test_rpc_worker_stream_hops_to_tk(tk_root) -> None:
             ),
         )
     ]
-    native.drain_ipc_messages.return_value = []
     web._webview = native
     web._deliver_ipc_messages()
     assert started.wait(timeout=2.0)
@@ -393,6 +387,34 @@ def test_rpc_worker_stream_hops_to_tk(tk_root) -> None:
     frame.destroy()
 
 
+def test_ipc_and_rpc_delivered_in_enqueue_order(tk_root) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>rpc</p>")
+    order: list[str] = []
+
+    @web.expose
+    def ping() -> str:
+        order.append("rpc")
+        return "ok"
+
+    web.set_ipc_handler(lambda msg: order.append(f"ipc:{msg}"))
+    native = MagicMock()
+    native.drain_window_ipc_messages.return_value = [
+        ("about:blank", "first"),
+        (
+            "about:blank",
+            json.dumps({"__tkwry": "rpc", "id": "r1", "method": "ping", "params": []}),
+        ),
+        ("about:blank", "second"),
+    ]
+    web._webview = native
+    web._deliver_ipc_messages()
+    assert order == ["ipc:first", "rpc", "ipc:second"]
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_rpc_stream_queue_caps_and_counts_drops(tk_root) -> None:
     from tkwry._rpc_api import MAX_RPC_STREAM_PENDING
 
@@ -406,6 +428,54 @@ def test_rpc_stream_queue_caps_and_counts_drops(tk_root) -> None:
     assert web._rpc_stream_queue.qsize() == MAX_RPC_STREAM_PENDING
     assert web._enqueue_rpc_stream_chunk("s1", "again") is False
     assert web._rpc_stream_dropped == 2
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_rpc_stream_drop_rejects_open_stream(tk_root) -> None:
+    from tkwry._rpc_api import MAX_RPC_STREAM_PENDING
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>rpc</p>")
+    started = threading.Event()
+    gate = threading.Event()
+
+    @web.expose(thread=True)
+    def ticks() -> object:
+        started.set()
+        yield 1
+        gate.wait(timeout=2.0)
+        yield 2
+
+    native = MagicMock()
+    native.drain_window_ipc_messages.return_value = [
+        (
+            "about:blank",
+            json.dumps(
+                {
+                    "__tkwry": "rpc",
+                    "id": "s1",
+                    "method": "ticks",
+                    "params": [],
+                    "stream": True,
+                }
+            ),
+        )
+    ]
+    web._webview = native
+    web._deliver_ipc_messages()
+    assert started.wait(timeout=2.0)
+    for i in range(MAX_RPC_STREAM_PENDING):
+        web._enqueue_rpc_stream_chunk("s1", i)
+    assert web._enqueue_rpc_stream_chunk("s1", "overflow") is False
+    web._drain_rpc_futures()
+    scripts = [call.args[0] for call in native.eval_js.call_args_list]
+    settles = [src for src in scripts if "_settle" in src]
+    assert len(settles) == 1
+    assert "false" in settles[0]
+    assert "RpcStreamOverflowError" in settles[0]
+    gate.set()
 
     web.destroy()
     frame.destroy()
@@ -430,13 +500,12 @@ def test_rpc_timeout_sets_cancel_flag(tk_root) -> None:
 
     web._cancel_deferred_callbacks()
     native = MagicMock()
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         (
             "about:blank",
             json.dumps({"__tkwry": "rpc", "id": "r1", "method": "slow", "params": []}),
         )
     ]
-    native.drain_ipc_messages.return_value = []
     web._webview = native
     web._deliver_ipc_messages()
     assert started.wait(timeout=2.0)
@@ -469,18 +538,17 @@ def test_rpc_cancel_envelope_sets_flag_and_rejects(tk_root) -> None:
 
     web._cancel_deferred_callbacks()
     native = MagicMock()
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         (
             "about:blank",
             json.dumps({"__tkwry": "rpc", "id": "r9", "method": "slow", "params": []}),
         )
     ]
-    native.drain_ipc_messages.return_value = []
     web._webview = native
     web._deliver_ipc_messages()
     assert started.wait(timeout=2.0)
 
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         ("about:blank", json.dumps({"__tkwry": "rpc", "id": "r9", "cancel": True}))
     ]
     web._deliver_ipc_messages()
@@ -513,13 +581,12 @@ def test_rpc_worker_done_after_destroy_skips_tk(tk_root) -> None:
         return "done"
 
     native = MagicMock()
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         (
             "about:blank",
             json.dumps({"__tkwry": "rpc", "id": "r1", "method": "slow", "params": []}),
         )
     ]
-    native.drain_ipc_messages.return_value = []
     web._webview = native
     web._deliver_ipc_messages()
     assert started.wait(timeout=2.0)
@@ -542,13 +609,12 @@ def test_rpc_worker_settles_on_poll(tk_root) -> None:
         return "pong"
 
     native = MagicMock()
-    native.drain_rpc_messages.return_value = [
+    native.drain_window_ipc_messages.return_value = [
         (
             "about:blank",
             json.dumps({"__tkwry": "rpc", "id": "r1", "method": "ping", "params": []}),
         )
     ]
-    native.drain_ipc_messages.return_value = []
     web._webview = native
     web._deliver_ipc_messages()
     assert done.wait(timeout=2.0)
