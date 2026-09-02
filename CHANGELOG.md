@@ -73,6 +73,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Unannotated ``on_navigation`` handlers whose sole parameter is named
   ``event`` receive :class:`~tkwry.NavigationEvent` (legacy ``url: str`` form
   unchanged)
+- Linux CI runs every ``tests/integration/test_*.py`` module (including
+  ``test_create_options`` and ``test_notebook``)
+- ``integration`` pytest marker is applied from test path via
+  ``pytest_collection_modifyitems`` (``-m integration`` / ``-m 'not integration'``
+  work as documented)
+- macOS release wheels set ``MACOSX_DEPLOYMENT_TARGET=11.0`` to match the
+  documented minimum OS version
 
 ## [0.1.7] - 2026-09-02
 

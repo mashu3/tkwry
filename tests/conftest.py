@@ -15,6 +15,18 @@ def pytest_configure(config: pytest.Config) -> None:
     _ensure_windows_tcl_env()
 
 
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Apply ``integration`` marker from path (conftest ``pytestmark`` does not)."""
+    del config
+    integration = pytest.mark.integration
+    for item in items:
+        path = item.path.as_posix()
+        if "/tests/integration/" in path or "/tests/macos/" in path:
+            item.add_marker(integration)
+
+
 def _ensure_windows_tcl_env() -> None:
     """Point Tcl/Tk at the bundled runtime (GHA can fail to auto-detect)."""
     if os.name != "nt":

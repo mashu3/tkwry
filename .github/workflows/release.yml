@@ -98,6 +98,8 @@ jobs:
 
       - name: Build abi3 wheel
         uses: PyO3/maturin-action@v1
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ startsWith(matrix.os, 'macos') && '11.0' || '' }}
         with:
           target: ${{ matrix.target }}
           args: --release --out dist

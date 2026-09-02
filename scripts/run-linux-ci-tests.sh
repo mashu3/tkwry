@@ -20,14 +20,7 @@ cleanup_webkit
 # WebKitGTK hangs in a single pytest process after many WebViews; split suites.
 pytest tests/unit/ --ignore=tests/unit/test_sync_hooks.py -v --tb=short
 cleanup_webkit
-pytest tests/integration/test_content.py -v --tb=short
-cleanup_webkit
-pytest tests/integration/test_layout.py -v --tb=short
-cleanup_webkit
-pytest tests/integration/test_viewport.py -v --tb=short
-cleanup_webkit
-pytest tests/integration/test_multi_webview.py -v --tb=short
-cleanup_webkit
-pytest tests/integration/test_lifecycle.py -v --tb=short
-cleanup_webkit
-pytest tests/integration/test_browser_essentials.py -v --tb=short
+for integration_test in tests/integration/test_*.py; do
+  pytest "$integration_test" -v --tb=short
+  cleanup_webkit
+done

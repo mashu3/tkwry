@@ -2,8 +2,6 @@ import sys
 
 import pytest
 
-pytestmark = pytest.mark.integration
-
 
 @pytest.fixture(autouse=True)
 def _linux_integration_teardown(tk_root) -> None:
