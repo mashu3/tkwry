@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   RPC envelopes; nesting beyond 128 levels is treated as non-RPC
 - ``parse_rpc_request`` treats ``json.loads`` ``RecursionError`` as a non-RPC
   message so the Tk event poll keeps running after hostile deep JSON
+- Deferred ``destroy()`` during nested native calls now clears the wakeup write
+  fd before Python closes the pipe, so late callbacks cannot write a reused fd
 
 ## [0.1.7] - 2026-09-02
 

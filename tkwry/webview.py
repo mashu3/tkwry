@@ -3449,6 +3449,18 @@ class WebView(WebViewRpcMixin):
         if native is not None and self._tk_wakeup_write_fd is not None:
             native.set_mac_wakeup_write_fd(self._tk_wakeup_write_fd)
 
+    def _invalidate_native_wakeup_fd(self) -> None:
+        """Tell native callbacks not to write a pipe Python is about to close."""
+        native = self._webview
+        if native is None and self._native_teardown_pending is not None:
+            native = self._native_teardown_pending
+        if native is None:
+            return
+        try:
+            native.set_mac_wakeup_write_fd(-1)
+        except Exception:
+            traceback.print_exc()
+
     def _release_tk_wakeup_pipe_registration(self) -> None:
         """Drop this WebView's share of the Win/Linux shared wakeup pipe (D24)."""
         if sys.platform == "darwin" or not self._tk_wakeup_pipe_attached:
@@ -3462,6 +3474,7 @@ class WebView(WebViewRpcMixin):
 
     def _release_wakeup_pipe_and_linux_pump(self) -> None:
         """Shared Win/Linux wakeup pipe + GtkPump cleanup for any teardown path."""
+        self._invalidate_native_wakeup_fd()
         self._release_tk_wakeup_pipe_registration()
         if sys.platform == "linux":
             GtkPump.detach(self._frame)

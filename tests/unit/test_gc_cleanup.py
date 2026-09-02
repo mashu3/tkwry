@@ -6,6 +6,7 @@ import gc
 import os
 import sys
 import tkinter as tk
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -488,3 +489,33 @@ def test_wakeup_pipe_simulated_linux_double_create_path(tk_root) -> None:
         os.fstat(read_fd)
     with pytest.raises(OSError):
         os.fstat(write_fd)
+
+
+def test_release_wakeup_invalidates_native_fd_before_closing_pipe(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=400, height=300)
+    native = MagicMock()
+    web._webview = None
+    web._native_teardown_pending = native
+    web._tk_wakeup_pipe_attached = True
+    web._tk_wakeup_write_fd = 99
+    order: list[str] = []
+
+    def track_native(fd: int) -> None:
+        order.append(f"native:{fd}")
+
+    native.set_mac_wakeup_write_fd.side_effect = track_native
+
+    def track_release(_toplevel: tk.Misc) -> None:
+        order.append("close_pipe")
+
+    monkeypatch.setattr("tkwry.webview._release_tk_wakeup_pipe", track_release)
+
+    web._release_wakeup_pipe_and_linux_pump()
+
+    if sys.platform == "darwin":
+        assert order == ["native:-1"]
+    else:
+        assert order == ["native:-1", "close_pipe"]

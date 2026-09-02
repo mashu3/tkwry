@@ -2693,6 +2693,8 @@ WebViews that share a session must use the same app= root \
         self.require_owner_thread()?;
         if self.wry_call_depth.get() > 0 {
             self.clear_callbacks_and_queues();
+            // Python may close the wakeup pipe before nested wry calls unwind.
+            self.wakeup_write_fd.store(-1, Ordering::SeqCst);
             self.destroy_pending.set(true);
             return Ok(());
         }
