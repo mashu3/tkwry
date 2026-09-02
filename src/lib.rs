@@ -2,6 +2,7 @@
 
 mod app_protocol;
 mod cookie_api;
+mod gtk_init;
 #[cfg(target_os = "macos")]
 mod macos;
 mod rpc_envelope;
@@ -2107,13 +2108,8 @@ WebViews that share a session must use the same app= root \
 
         #[cfg(all(unix, not(target_os = "macos")))]
         {
-            if let Err(e) = gtk::init() {
-                if !gtk::is_initialized() {
-                    return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
-                        "GTK init failed: {e}. Is $DISPLAY set?"
-                    )));
-                }
-            }
+            gtk_init::ensure_gtk_initialized()
+                .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
         }
 
         let webview = builder
@@ -2992,7 +2988,7 @@ fn pump_events(max_iterations: Option<usize>) -> bool {
         const DEFAULT_ITERATIONS: usize = 128;
         const MAX_ITERATIONS: usize = 512;
         // Tests / pumps may run before any WebView attaches GtkPump.
-        let _ = gtk::init();
+        let _ = gtk_init::ensure_gtk_initialized();
         // Bound work per Tk tick — WebKitGTK can enqueue continuously and
         // an unbounded drain would hang nested inside Tcl's update().
         let limit = max_iterations
@@ -3014,10 +3010,7 @@ fn pump_events(max_iterations: Option<usize>) -> bool {
 
 #[pyfunction]
 fn ensure_gtk_init() {
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let _ = gtk::init();
-    }
+    let _ = gtk_init::ensure_gtk_initialized();
 }
 
 /// Mark a wakeup-pipe write FD non-blocking (``O_NONBLOCK`` / ``PIPE_NOWAIT``).
