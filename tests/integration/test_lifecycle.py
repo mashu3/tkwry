@@ -461,17 +461,18 @@ def test_native_drop_off_owner_thread_leaks_without_crash(tk_root) -> None:
     layout_bare_frame(frame, width=400, height=300)
     assert web.wait_until_ready(timeout=10.0)
 
-    native = web.native
-    assert native is not None
-    assert native.is_alive()
-    native_holder = [native]
+    native_holder: list[object] = [web.native]
+    assert native_holder[0] is not None
+    assert web.native is not None
+    assert web.native.is_alive()
     errors: list[str] = []
     done = threading.Event()
 
     def worker() -> None:
         try:
             web._webview = None  # type: ignore[assignment]
-            native_holder.clear()
+            n = native_holder.pop()
+            del n
             gc.collect()
         except BaseException as exc:
             errors.append(str(exc))
@@ -483,6 +484,8 @@ def test_native_drop_off_owner_thread_leaks_without_crash(tk_root) -> None:
     assert done.wait(timeout=10.0)
     assert errors == []
     assert web._webview is None
+    assert web._native_gc_companion is not None
+    assert not web._native_gc_companion.is_alive()
 
     web._destroyed = True
     frame.destroy()

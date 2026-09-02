@@ -29,6 +29,7 @@ from tkwry._core import (
     PermissionResponse,
 )
 from tkwry._core import (
+    NativeGcCompanion,
     WebView as NativeWebView,
 )
 from tkwry._host import (
@@ -713,6 +714,7 @@ class WebView(WebViewRpcMixin):
         self._flush_load_attempt = 0
         self._embed = tk_embed_parent(frame)
         self._webview: NativeWebView | None = None
+        self._native_gc_companion: NativeGcCompanion | None = None
         self._init_rpc_state(
             ipc_handler=ipc_handler,
             rpc_traceback=rpc_traceback,
@@ -1649,6 +1651,15 @@ class WebView(WebViewRpcMixin):
         except Exception:
             return False
 
+    def _bind_native_gc(self, native: NativeWebView) -> None:
+        """Hook off-thread native GC so Rust cleanup still runs (D57)."""
+        companion = native.gc_companion()
+        self._native_gc_companion = companion
+        weakref.finalize(native, companion.on_native_deallocated)
+
+    def _clear_native_gc(self) -> None:
+        self._native_gc_companion = None
+
     def _arm_native_teardown(self, native: NativeWebView) -> None:
         """Remember a native that did not die on ``destroy()`` yet."""
         self._native_teardown_pending = native
@@ -1674,6 +1685,7 @@ class WebView(WebViewRpcMixin):
         self._webview = None
         if self._native_teardown_pending is not None:
             self._ensure_event_poll()
+        self._clear_native_gc()
 
     def _force_native_teardown(self) -> None:
         """Best-effort native release when Tk-thread destroy is unavailable."""
@@ -1688,6 +1700,7 @@ class WebView(WebViewRpcMixin):
             traceback.print_exc()
         self._clear_native_teardown()
         self._webview = None
+        self._clear_native_gc()
 
     def _finish_native_teardown(self) -> None:
         native = self._native_teardown_pending
@@ -4160,6 +4173,7 @@ class WebView(WebViewRpcMixin):
         self._create_attempt = 0
         if sys.platform != "darwin":
             self._ensure_tk_wakeup_pipe()
+        self._bind_native_gc(self._webview)
         self._sync_async_listening()
         self._ensure_gtk_pump_attached()
         self._clear_precreate_pending()

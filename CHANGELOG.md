@@ -18,6 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   so nested unwind does not wedge later destroy attempts
 - ``force_destroy()`` during a reentrant native call (e.g. DevTools) no longer
   reports success while leaving the WebView alive in the reentrant frame
+- Off-thread GC of the native ``WebView`` now runs Rust cleanup
+  (invalidate wakeup, clear queues, leak native) via ``NativeGcCompanion`` and
+  ``weakref.finalize`` when PyO3 ``unsendable`` skips ``Drop``
 
 ## [0.1.7] - 2026-09-02
 

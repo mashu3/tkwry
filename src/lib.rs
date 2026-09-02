@@ -1226,8 +1226,12 @@ fn python_thread_id() -> PyResult<u64> {
     })
 }
 
-#[pyclass(unsendable)]
+#[pyclass(unsendable, weakref)]
 struct WebView {
+    core: Arc<WebViewCore>,
+}
+
+struct WebViewCore {
     /// Python ``threading.get_ident()`` for the owning Tk thread.
     owner_thread: u64,
     /// macOS focus monitor clones this; GTK WebView is UI-thread-only.
@@ -1282,7 +1286,47 @@ struct WebView {
     session: Option<session::SessionRefs>,
 }
 
-impl WebView {
+impl std::ops::Deref for WebView {
+    type Target = WebViewCore;
+
+    fn deref(&self) -> &WebViewCore {
+        &self.core
+    }
+}
+
+/// Sendable companion for ``weakref.finalize`` when the native ``WebView`` is
+/// collected off the Tk thread (PyO3 ``unsendable`` skips ``Drop`` there).
+#[pyclass]
+#[allow(clippy::arc_with_non_send_sync)]
+struct NativeGcCompanion {
+    core: Arc<WebViewCore>,
+}
+
+#[cfg(target_os = "macos")]
+unsafe impl Send for NativeGcCompanion {}
+
+#[cfg(target_os = "macos")]
+unsafe impl Sync for NativeGcCompanion {}
+
+#[pymethods]
+impl NativeGcCompanion {
+    /// Run off-owner cleanup when the native ``WebView`` object is finalized.
+    fn on_native_deallocated(&self) -> PyResult<()> {
+        if self.core.is_owner_thread() {
+            return Ok(());
+        }
+        self.core.clear_callbacks_and_queues();
+        self.core.leak_native_off_owner_thread();
+        Ok(())
+    }
+
+    /// ``True`` while the native webview has not been torn down yet.
+    fn is_alive(&self) -> bool {
+        self.core.native_is_alive()
+    }
+}
+
+impl WebViewCore {
     fn is_owner_thread(&self) -> bool {
         python_thread_id()
             .ok()
@@ -2020,7 +2064,9 @@ WebViews that share a session must use the same app= root \
         )
         .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
 
-        Ok(Self {
+        #[allow(clippy::arc_with_non_send_sync)]
+        Ok(WebView {
+            core: Arc::new(WebViewCore {
             owner_thread,
             inner,
             page_load_pending,
@@ -2061,7 +2107,15 @@ WebViews that share a session must use the same app= root \
             destroyed_during_reentrant: Cell::new(false),
             https_scheme,
             session: session_refs,
+            }),
         })
+    }
+
+    /// Companion for off-thread native GC cleanup (see ``NativeGcCompanion``).
+    fn gc_companion(&self) -> NativeGcCompanion {
+        NativeGcCompanion {
+            core: Arc::clone(&self.core),
+        }
     }
 
     fn load_url(&self, url: &str) -> PyResult<()> {
@@ -2897,6 +2951,7 @@ fn disable_macos_window_tabbing(parent: usize) -> PyResult<()> {
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<WebView>()?;
+    m.add_class::<NativeGcCompanion>()?;
     m.add_class::<session::WebSession>()?;
     m.add_class::<cookie_api::Cookie>()?;
     m.add_class::<PageLoadEvent>()?;
