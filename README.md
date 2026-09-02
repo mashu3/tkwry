@@ -29,20 +29,26 @@ Tkinter is still a solid GUI shell — it just had no first-class way to host mo
 - **Trust boundaries** — IPC/RPC default to the initial origin; `untrusted=True` for arbitrary sites
 - **Layout-aware** — tracks `pack` / `grid` / `place`, tabs, and `PanedWindow`
 
-Pre-built **abi3** wheels ship for **Windows** and **macOS**. **Linux** is source-only (**best-effort** by design) — see [Platform notes](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md).
+---
+
+## 💡 Why child-window embedding?
+
+Tkinter apps already have a window and a layout. The web belongs **inside** a `Frame` — same `mainloop`, same tabs and panes — not in a separate top-level webview that floats beside your UI. tkwry wraps wry's `build_as_child` against the native surface Tk gives your widgets.
 
 ---
 
-## 🗂 Documentation
+## 🌐 Platform notes
 
-| Topic | Doc |
-|-------|-----|
-| Usage (minimal app, `app=`, hidden hosts, UA, API) | [docs/usage.md](https://github.com/mashu3/tkwry/blob/main/docs/usage.md) |
-| Trust boundaries (`untrusted`, `bridge_origins`, recipes) | [docs/trust.md](https://github.com/mashu3/tkwry/blob/main/docs/trust.md) |
-| IPC / RPC / emit (`expose`, `call` / `stream`, cancel, limits) | [docs/rpc.md](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md) |
-| Platform notes (Windows / macOS / Linux, print, window chrome) | [docs/platforms.md](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md) |
-| wry embedding / API ownership map | [docs/wry-embedding.md](https://github.com/mashu3/tkwry/blob/main/docs/wry-embedding.md) |
-| Packaging (PyInstaller / Nuitka notes — not CI-verified in 0.1.x) | [docs/packaging.md](https://github.com/mashu3/tkwry/blob/main/docs/packaging.md) |
+Pre-built **abi3** wheels: **Windows** and **macOS**. **Linux** is source-only (**best-effort** by design).
+
+| OS | Arch | Parent handle | Engine |
+|----|------|---------------|--------|
+| **Windows** | x86_64, arm64 | `Frame.winfo_id()` → HWND | WebView2 |
+| **macOS** | arm64, x86_64 | Toplevel content `NSView` | WKWebView |
+| **Linux** | — | `winfo_id()` → X11 window ID | WebKitGTK |
+
+DPI, WebView2, macOS embedding / IME / import order, and Linux eval caveats:
+[Platform notes](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md).
 
 ---
 
@@ -139,63 +145,6 @@ Trust (`untrusted`, `bridge_origins`): [docs/trust.md](https://github.com/mashu3
 
 ---
 
-## ⚠️ Known limitations
-
-Short checklist — **details live in [Platform notes](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md)** (especially [macOS embedding](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#macos-embedding)).
-
-**Platforms**
-
-- **Windows** — [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) required; missing → create-failed signals ([install notes](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#windows))
-- **Linux** — no PyPI wheel (by design); best-effort source install; prefer sequential `eval_js_with_callback` across multiple views ([Linux](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#linux))
-
-**Engine gaps** (wrap when wry ships them)
-
-- **Print** — system dialog only; no PDF / no result ([Print](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#print))
-- **Downloads** — start-deny only; no mid-flight abort, pause/resume, or progress % ([Downloads](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#downloads))
-- **Screenshot / find in page** — not exposed ([Screenshot](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#screenshot), [Find](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#find-in-page))
-
-**macOS / Windows quirks**
-
-- **macOS** — import `tkwry` before AppKit; IME/focus not Safari-parity; inline `url()` may be `None`; DevTools needs `devtools=True` then `open_devtools()` (private APIs — avoid Mac App Store) ([macOS embedding](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#macos-embedding), [DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools))
-- **Windows DevTools** — `open_devtools()` works; `close_devtools` / `is_devtools_open` are limited ([DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools))
-
-**Trust & session**
-
-- Shared non-ephemeral `WebSession` + `app=` must use the same root; do not share a persistent profile with untrusted sites
-- External content / IPC defaults and `untrusted=` — [Trust boundaries](https://github.com/mashu3/tkwry/blob/main/docs/trust.md)
-
-**Lifecycle & IPC**
-
-- Sync `on_navigation` / `on_new_window` / create-time `permission_handler` may block WebKit ~60s; do not create a WebView from `on_new_window` ([lifecycle callbacks](https://github.com/mashu3/tkwry/blob/main/docs/usage.md#navigation--lifecycle-callbacks))
-- RPC cancel / `destroy()` are cooperative only; async queues cap at 2048; IPC/RPC messages at 10 MiB ([RPC timeout/cancel](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md#timeout-and-cancel))
-- Eval / navigation timeouts surface typed events/errors on the Tk thread (not raised on the WebKit thread)
-- Native drag & drop is **WebView area only** (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
-
-See [CHANGELOG.md](https://github.com/mashu3/tkwry/blob/main/CHANGELOG.md) for release history.
-
----
-
-## 🌐 Platform notes
-
-Pre-built wheels: **Windows** and **macOS**. **Linux** is source-only (best-effort).
-
-| OS | Arch | Parent handle | Engine |
-|----|------|---------------|--------|
-| **Windows** | x86_64, arm64 | `Frame.winfo_id()` → HWND | WebView2 |
-| **macOS** | arm64, x86_64 | Toplevel content `NSView` | WKWebView |
-| **Linux** | — | `winfo_id()` → X11 window ID | WebKitGTK |
-
-DPI, WebView2, macOS embedding / IME / import order, and Linux eval caveats:
-[Platform notes](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md).
-
----
-
-## 💡 Why child-window embedding?
-
-Tkinter apps already have a window and a layout. The web belongs **inside** a `Frame` — same `mainloop`, same tabs and panes — not in a separate top-level webview that floats beside your UI. tkwry wraps wry's `build_as_child` against the native surface Tk gives your widgets.
-
----
-
 ## 🧩 Features
 
 **Embedding & layout**
@@ -263,6 +212,55 @@ Built on tkwry. Use when you want the usual **ipywidgets / anywidget** stack in 
 | [`ipyleaflet_demo.py`](https://github.com/mashu3/tkipw/blob/main/examples/ipyleaflet_demo.py) | Live ipyleaflet map |
 
 See the [tkipw examples](https://github.com/mashu3/tkipw/tree/main/examples) for more.
+
+---
+
+## ⚠️ Known limitations
+
+Short checklist — **details live in [Platform notes](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md)** (especially [macOS embedding](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#macos-embedding)).
+
+**Platforms**
+
+- **Windows** — [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) required; missing → create-failed signals ([install notes](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#windows))
+- **Linux** — no PyPI wheel (by design); best-effort source install; prefer sequential `eval_js_with_callback` across multiple views ([Linux](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#linux))
+
+**Engine gaps** (wrap when wry ships them)
+
+- **Print** — system dialog only; no PDF / no result ([Print](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#print))
+- **Downloads** — start-deny only; no mid-flight abort, pause/resume, or progress % ([Downloads](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#downloads))
+- **Screenshot / find in page** — not exposed ([Screenshot](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#screenshot), [Find](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#find-in-page))
+
+**macOS / Windows quirks**
+
+- **macOS** — import `tkwry` before AppKit; IME/focus not Safari-parity; inline `url()` may be `None`; DevTools needs `devtools=True` then `open_devtools()` (private APIs — avoid Mac App Store) ([macOS embedding](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#macos-embedding), [DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools))
+- **Windows DevTools** — `open_devtools()` works; `close_devtools` / `is_devtools_open` are limited ([DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools))
+
+**Trust & session**
+
+- Shared non-ephemeral `WebSession` + `app=` must use the same root; do not share a persistent profile with untrusted sites
+- External content / IPC defaults and `untrusted=` — [Trust boundaries](https://github.com/mashu3/tkwry/blob/main/docs/trust.md)
+
+**Lifecycle & IPC**
+
+- Sync `on_navigation` / `on_new_window` / create-time `permission_handler` may block WebKit ~60s; do not create a WebView from `on_new_window` ([lifecycle callbacks](https://github.com/mashu3/tkwry/blob/main/docs/usage.md#navigation--lifecycle-callbacks))
+- RPC cancel / `destroy()` are cooperative only; async queues cap at 2048; IPC/RPC messages at 10 MiB ([RPC timeout/cancel](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md#timeout-and-cancel))
+- Eval / navigation timeouts surface typed events/errors on the Tk thread (not raised on the WebKit thread)
+- Native drag & drop is **WebView area only** (use [tkinterdnd2](https://pypi.org/project/tkinterdnd2/) for arbitrary Tk widgets)
+
+See [CHANGELOG.md](https://github.com/mashu3/tkwry/blob/main/CHANGELOG.md) for release history.
+
+---
+
+## 🗂 Documentation
+
+| Topic | Doc |
+|-------|-----|
+| Usage (minimal app, `app=`, hidden hosts, UA, API) | [docs/usage.md](https://github.com/mashu3/tkwry/blob/main/docs/usage.md) |
+| Trust boundaries (`untrusted`, `bridge_origins`, recipes) | [docs/trust.md](https://github.com/mashu3/tkwry/blob/main/docs/trust.md) |
+| IPC / RPC / emit (`expose`, `call` / `stream`, cancel, limits) | [docs/rpc.md](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md) |
+| Platform notes (Windows / macOS / Linux, print, window chrome) | [docs/platforms.md](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md) |
+| wry embedding / API ownership map | [docs/wry-embedding.md](https://github.com/mashu3/tkwry/blob/main/docs/wry-embedding.md) |
+| Packaging (PyInstaller / Nuitka notes — not CI-verified in 0.1.x) | [docs/packaging.md](https://github.com/mashu3/tkwry/blob/main/docs/packaging.md) |
 
 ---
 
