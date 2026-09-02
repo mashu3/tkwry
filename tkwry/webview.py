@@ -2085,8 +2085,9 @@ class WebView(WebViewRpcMixin):
 
         Pass a :class:`~tkwry.Cookie`, or a cookie *name* plus the page *url*
         it belongs to. The name+url form builds ``Cookie(name, "", domain,
-        path)`` from the URL hostname and path (empty path → ``/``). Matching
-        is engine-defined (typically name + domain + path). Tk-thread only.
+        path="/")`` from the URL hostname (the URL path is ignored for
+        matching). Matching is engine-defined (typically name + domain +
+        path). Tk-thread only.
         """
         native = self._require_ready("delete_cookie")
         if url is not None:
@@ -2099,8 +2100,7 @@ class WebView(WebViewRpcMixin):
             host = parsed.hostname
             if not host:
                 raise ValueError("delete_cookie url must include a hostname")
-            path = parsed.path if parsed.path else "/"
-            native.delete_cookie(Cookie(cookie, "", domain=host, path=path))
+            native.delete_cookie(Cookie(cookie, "", domain=host, path="/"))
             return
         if isinstance(cookie, str):
             raise TypeError("delete_cookie(name, url) requires a url")
@@ -4422,6 +4422,11 @@ class WebView(WebViewRpcMixin):
             self._sync_bounds()
         try:
             self._apply_load_to_native(load)
+        except (ValueError, TypeError):
+            traceback.print_exc()
+            self._clear_pending_load()
+            self._flush_load_attempt = 0
+            return
         except Exception:
             traceback.print_exc()
             self._flush_load_attempt += 1

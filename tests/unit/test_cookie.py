@@ -91,7 +91,7 @@ def test_cookie_methods_delegate_to_native(
         assert built.name == "sid"
         assert built.value == ""
         assert built.domain == "example.com"
-        assert built.path == "/app"
+        assert built.path == "/"
         web.clear_all_browsing_data()
         native.clear_all_browsing_data.assert_called_once_with()
     finally:

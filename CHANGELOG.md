@@ -59,6 +59,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ``watch_app()`` only advances the known mtime after a reload while
   ``ready``; changes during initial layout no longer suppress the first
   post-ready reload
+- ``Download.save_as`` rejects relative paths before CWD resolution
+- ``file://`` normalization preserves query strings and fragments
+- ``app_url()`` percent-encodes path segments (spaces, ``#``, ``?``, …)
+- ``load_url(headers=)`` rejects invalid HTTP header field names up front;
+  validation failures no longer retry in ``_flush_load``
+- ``delete_cookie(name, url)`` matches host cookies with ``Path=/`` (URL path
+  is used for the domain only)
 
 ## [0.1.7] - 2026-09-02
 

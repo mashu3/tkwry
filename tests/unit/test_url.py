@@ -77,6 +77,15 @@ def test_normalize_file_uri(tmp_path: Path) -> None:
     assert _normalize_url(file_url) == file_url
 
 
+def test_normalize_file_uri_preserves_query_and_fragment(tmp_path: Path) -> None:
+    page = tmp_path / "index.html"
+    page.write_text("<p>local</p>", encoding="utf-8")
+    base = page.absolute().as_uri()
+    assert _normalize_url(f"{base}?mode=1") == f"{base}?mode=1"
+    assert _normalize_url(f"{base}#section") == f"{base}#section"
+    assert _normalize_url(f"{base}?mode=1#section") == f"{base}?mode=1#section"
+
+
 def test_validate_accepts_file_uri(tmp_path: Path) -> None:
     page = tmp_path / "index.html"
     page.write_text("<p>local</p>", encoding="utf-8")

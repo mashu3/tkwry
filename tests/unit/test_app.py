@@ -22,6 +22,12 @@ def test_app_url_default() -> None:
     assert app_url("assets/main.js") == "tkwry://localhost/assets/main.js"
 
 
+def test_app_url_encodes_special_characters() -> None:
+    assert app_url("my page.html") == "tkwry://localhost/my%20page.html"
+    assert app_url("a#b") == "tkwry://localhost/a%23b"
+    assert app_url("path?x=1") == "tkwry://localhost/path%3Fx%3D1"
+
+
 def test_resolve_app_directory(tmp_path: Path) -> None:
     (tmp_path / "index.html").write_text("<p>ok</p>", encoding="utf-8")
     root, url = resolve_app(tmp_path)

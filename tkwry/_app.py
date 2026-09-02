@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from collections.abc import Collection
 from pathlib import Path
+from urllib.parse import quote
 
 APP_SCHEME = "tkwry"
 APP_HOST = "localhost"
@@ -115,7 +116,8 @@ def app_url(entry: str = "index.html") -> str:
     rel = entry.replace("\\", "/").lstrip("/")
     if not rel:
         rel = "index.html"
-    return f"{APP_SCHEME}://{APP_HOST}/{rel}"
+    encoded = "/".join(quote(part, safe="") for part in rel.split("/"))
+    return f"{APP_SCHEME}://{APP_HOST}/{encoded}"
 
 
 def resolve_app(app: str | Path) -> tuple[str, str]:

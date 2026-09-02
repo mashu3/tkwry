@@ -57,6 +57,8 @@ _HOSTNAME_RE = re.compile(
     r"[a-zA-Z0-9_]([a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?$"
 )
 _WINDOWS_DRIVE_ONLY_RE = re.compile(r"^[A-Za-z]:$")
+# RFC 7230 ``tchar`` — HTTP header field-name token.
+_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 
 
 def _contains_non_ascii(value: str) -> bool:
@@ -442,7 +444,20 @@ def _normalize_file_url(url: str) -> str:
         and not _is_windows_drive_netloc(parsed.netloc)
     ):
         return _normalize_unc_file_url(parsed)
-    return _file_uri_from_path(local_path)
+    normalized = _file_uri_from_path(local_path)
+    if not parsed.query and not parsed.fragment:
+        return normalized
+    base = urlparse(normalized)
+    return urlunparse(
+        (
+            base.scheme,
+            base.netloc,
+            base.path,
+            base.params,
+            parsed.query,
+            parsed.fragment,
+        )
+    )
 
 
 def _normalize_url(url: str) -> str:
@@ -607,6 +622,8 @@ def _normalize_load_headers(
         if not name:
             raise ValueError("header name must be non-empty")
         if any(ch in name for ch in ("\r", "\n", "\x00")):
+            raise ValueError(f"invalid header name: {name!r}")
+        if not _HEADER_NAME_RE.fullmatch(name):
             raise ValueError(f"invalid header name: {name!r}")
         if any(ch in raw_value for ch in ("\r", "\n", "\x00")):
             # Do not echo the value.

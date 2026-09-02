@@ -458,6 +458,17 @@ def test_download_save_returns_absolute_path(tmp_path: Path) -> None:
     assert (tmp_path / "downloads").is_dir()
 
 
+def test_save_as_rejects_relative_path(tmp_path: Path) -> None:
+    download = Download(
+        url="https://example.com/report.pdf",
+        suggested_dest=str(tmp_path / "report.pdf"),
+    )
+    with pytest.raises(ValueError, match="absolute"):
+        download.save_as("report.pdf")
+    with pytest.raises(ValueError, match="absolute"):
+        download.save_as("../escape.pdf")
+
+
 def test_on_download_accepts_download_object(tk_root, tmp_path: Path) -> None:
     seen: list[Download] = []
 

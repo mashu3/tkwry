@@ -54,10 +54,10 @@ class Download:
 
     def save_as(self, path: str | Path) -> str:
         """Return an absolute save path from *path*."""
-        resolved = Path(path).expanduser().resolve()
-        if not resolved.is_absolute():
-            raise ValueError("save_as: path must resolve to an absolute path")
-        return str(resolved)
+        expanded = Path(path).expanduser()
+        if not expanded.is_absolute():
+            raise ValueError("save_as: path must be an absolute path")
+        return str(expanded.resolve())
 
 
 def call_download_handler(

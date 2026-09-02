@@ -32,6 +32,11 @@ def test_normalize_load_headers_error_omits_secret() -> None:
     assert "SECRET" not in str(excinfo.value)
 
 
+def test_normalize_load_headers_rejects_invalid_token_name() -> None:
+    with pytest.raises(ValueError, match="invalid header name"):
+        _normalize_load_headers({"Bad Name": "1"})
+
+
 def test_load_url_headers_requires_https(tk_root, tmp_path) -> None:
     import tkinter as tk
 
@@ -96,6 +101,32 @@ def test_load_url_headers_last_wins(tk_root, monkeypatch: pytest.MonkeyPatch) ->
         native.load_url_with_headers.assert_called_once_with(
             "https://example.com/b", [("X-B", "2")]
         )
+    finally:
+        web._webview = None
+        web.destroy()
+
+
+def test_flush_load_skips_retry_on_value_error(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame)
+    native = MagicMock()
+    native.load_url.side_effect = ValueError("engine rejected load")
+    web._webview = native
+    web._pending_load = ("url", "https://example.com", None)
+    retries: list[int] = []
+
+    def _track_retry(**_kwargs: object) -> None:
+        retries.append(1)
+
+    monkeypatch.setattr(web, "_schedule_flush_load", _track_retry)
+    try:
+        web._flush_load()
+        assert retries == []
+        assert web._pending_load is None
     finally:
         web._webview = None
         web.destroy()
