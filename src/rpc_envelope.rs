@@ -2,6 +2,12 @@
 
 use std::borrow::Cow;
 
+/// Maximum nesting depth when skipping JSON values for envelope detection.
+///
+/// Deeper payloads are treated as non-RPC so a hostile IPC message cannot blow
+/// the Rust stack (see MAINTAINERS §3.2 **D52**).
+const MAX_JSON_SKIP_DEPTH: usize = 128;
+
 /// True when *body* is a JSON object whose ``__tkwry`` field is the string ``rpc``.
 ///
 /// Used only to pick the dedicated RPC queue so IPC overflow cannot drop
@@ -89,17 +95,124 @@ fn parse_json_string(s: &str) -> Option<(Cow<'_, str>, &str)> {
     }
 }
 
+/// Context for the iterative JSON value skipper.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SkipCtx {
+    /// Inside `{` — need key or `}`.
+    ObjectKey,
+    /// After key — need `:` then value.
+    ObjectColon,
+    /// After value — need `,` or `}`.
+    ObjectComma,
+    /// Inside `[` — need value or `]`.
+    ArrayValue,
+    /// After value — need `,` or `]`.
+    ArrayComma,
+}
+
 fn skip_json_value(s: &str) -> Option<&str> {
+    let mut rest = s;
+    let mut stack: Vec<SkipCtx> = Vec::new();
+
+    loop {
+        rest = skip_ws(rest);
+        if stack.is_empty() {
+            rest = skip_json_atom(rest, &mut stack)?;
+            if stack.is_empty() {
+                return Some(rest);
+            }
+            continue;
+        }
+
+        match *stack.last().unwrap() {
+            SkipCtx::ObjectKey => {
+                if rest.starts_with('}') {
+                    rest = skip_ws(rest.strip_prefix('}')?);
+                    stack.pop();
+                    continue;
+                }
+                let (_, after_key) = parse_json_string(rest)?;
+                rest = skip_ws(after_key);
+                rest = rest.strip_prefix(':')?;
+                if let Some(slot) = stack.last_mut() {
+                    *slot = SkipCtx::ObjectColon;
+                }
+            }
+            SkipCtx::ObjectColon => {
+                rest = skip_json_atom(rest, &mut stack)?;
+                if let Some(slot) = stack.last_mut() {
+                    *slot = SkipCtx::ObjectComma;
+                }
+            }
+            SkipCtx::ObjectComma => {
+                if rest.starts_with(',') {
+                    rest = skip_ws(&rest[1..]);
+                    if let Some(slot) = stack.last_mut() {
+                        *slot = SkipCtx::ObjectKey;
+                    }
+                } else if rest.starts_with('}') {
+                    rest = skip_ws(rest.strip_prefix('}')?);
+                    stack.pop();
+                } else {
+                    return None;
+                }
+            }
+            SkipCtx::ArrayValue => {
+                if rest.starts_with(']') {
+                    rest = skip_ws(rest.strip_prefix(']')?);
+                    stack.pop();
+                    continue;
+                }
+                rest = skip_json_atom(rest, &mut stack)?;
+                if let Some(slot) = stack.last_mut() {
+                    *slot = SkipCtx::ArrayComma;
+                }
+            }
+            SkipCtx::ArrayComma => {
+                if rest.starts_with(',') {
+                    rest = skip_ws(&rest[1..]);
+                    if let Some(slot) = stack.last_mut() {
+                        *slot = SkipCtx::ArrayValue;
+                    }
+                } else if rest.starts_with(']') {
+                    rest = skip_ws(rest.strip_prefix(']')?);
+                    stack.pop();
+                } else {
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+/// Skip one JSON value atom (scalar or container opener).
+fn skip_json_atom<'a>(s: &'a str, stack: &mut Vec<SkipCtx>) -> Option<&'a str> {
     let s = skip_ws(s);
     if s.starts_with('"') {
         let (_, rest) = parse_json_string(s)?;
         return Some(rest);
     }
     if let Some(rest) = s.strip_prefix('{') {
-        return skip_json_object(rest);
+        if stack.len() >= MAX_JSON_SKIP_DEPTH {
+            return None;
+        }
+        let rest = skip_ws(rest);
+        if rest.starts_with('}') {
+            return rest.strip_prefix('}').map(skip_ws);
+        }
+        stack.push(SkipCtx::ObjectKey);
+        return Some(rest);
     }
     if let Some(rest) = s.strip_prefix('[') {
-        return skip_json_array(rest);
+        if stack.len() >= MAX_JSON_SKIP_DEPTH {
+            return None;
+        }
+        let rest = skip_ws(rest);
+        if rest.starts_with(']') {
+            return rest.strip_prefix(']').map(skip_ws);
+        }
+        stack.push(SkipCtx::ArrayValue);
+        return Some(rest);
     }
     if let Some(rest) = s.strip_prefix("true") {
         return Some(rest);
@@ -111,41 +224,6 @@ fn skip_json_value(s: &str) -> Option<&str> {
         return Some(rest);
     }
     skip_json_number(s)
-}
-
-fn skip_json_object(s: &str) -> Option<&str> {
-    let mut rest = skip_ws(s);
-    if let Some(tail) = rest.strip_prefix('}') {
-        return Some(tail);
-    }
-    loop {
-        let (_, after_key) = parse_json_string(rest)?;
-        rest = skip_ws(after_key);
-        rest = rest.strip_prefix(':')?;
-        rest = skip_json_value(skip_ws(rest))?;
-        rest = skip_ws(rest);
-        if rest.starts_with(',') {
-            rest = skip_ws(&rest[1..]);
-            continue;
-        }
-        return rest.strip_prefix('}').map(skip_ws);
-    }
-}
-
-fn skip_json_array(s: &str) -> Option<&str> {
-    let mut rest = skip_ws(s);
-    if let Some(tail) = rest.strip_prefix(']') {
-        return Some(tail);
-    }
-    loop {
-        rest = skip_json_value(rest)?;
-        rest = skip_ws(rest);
-        if rest.starts_with(',') {
-            rest = skip_ws(&rest[1..]);
-            continue;
-        }
-        return rest.strip_prefix(']').map(skip_ws);
-    }
 }
 
 fn skip_json_number(s: &str) -> Option<&str> {
@@ -207,5 +285,23 @@ mod tests {
         assert!(!is_rpc_envelope(
             r#"{"payload":"{\"__tkwry\":\"rpc\"} is not the root"}"#
         ));
+    }
+
+    #[test]
+    fn deep_nesting_does_not_stack_overflow() {
+        let depth = 10_000;
+        let nested = format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+        assert!(!is_rpc_envelope(&nested));
+        let object_nested = format!("{}{}", "{".repeat(depth), "}".repeat(depth));
+        assert!(!is_rpc_envelope(&object_nested));
+    }
+
+    #[test]
+    fn depth_at_cap_still_skips_nested_rpc_marker() {
+        let mut inner = String::from(r#""__tkwry":"rpc""#);
+        for _ in 0..MAX_JSON_SKIP_DEPTH {
+            inner = format!("{{{inner}}}");
+        }
+        assert!(!is_rpc_envelope(&inner));
     }
 }
