@@ -5,13 +5,10 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import tkinter as tk
 import weakref
 from ctypes import CDLL, Structure, byref, c_char_p, c_short, c_void_p, sizeof
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import tkinter as tk
 
 # Tcl interpreter id / widget id -> owning thread id (bound only on the Tk thread).
 _interp_threads: dict[int, int] = {}

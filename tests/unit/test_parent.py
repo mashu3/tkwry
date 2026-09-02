@@ -262,6 +262,16 @@ def test_mac_root_relative_when_handles_differ() -> None:
     assert _parent._mac_root_relative(handle=100, top_ns=200) is False
 
 
+def test_mac_widget_ready_for_native_bounds_handles_destroyed_widget(
+    tk_root,
+) -> None:
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root)
+    frame.destroy()
+    assert _parent._mac_widget_ready_for_native_bounds(frame) is False
+
+
 def test_mac_drawable_from_tk_window_probes_offsets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

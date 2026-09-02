@@ -66,6 +66,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   validation failures no longer retry in ``_flush_load``
 - ``delete_cookie(name, url)`` matches host cookies with ``Path=/`` (URL path
   is used for the domain only)
+- macOS embed bounds probe catches destroyed-widget ``TclError`` instead of
+  raising ``NameError`` when ``tkinter`` was import-time only
 
 ## [0.1.7] - 2026-09-02
 
