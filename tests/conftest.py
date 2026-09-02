@@ -15,6 +15,11 @@ def pytest_configure(config: pytest.Config) -> None:
     _ensure_windows_tcl_env()
 
 
+def _item_wants_integration_marker(path: str) -> bool:
+    """Return whether *path* (posix) should receive ``pytest.mark.integration``."""
+    return "/tests/integration/" in path or "/tests/macos/" in path
+
+
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
@@ -22,8 +27,7 @@ def pytest_collection_modifyitems(
     del config
     integration = pytest.mark.integration
     for item in items:
-        path = item.path.as_posix()
-        if "/tests/integration/" in path or "/tests/macos/" in path:
+        if _item_wants_integration_marker(item.path.as_posix()):
             item.add_marker(integration)
 
 
