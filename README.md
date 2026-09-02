@@ -253,6 +253,17 @@ python examples/markdown_demo.py
 python examples/dnd_demo.py
 ```
 
+### Related: Jupyter-style widgets ([tkipw](https://github.com/mashu3/tkipw))
+
+Built on tkwry. Use when you want the usual **ipywidgets / anywidget** stack in Tk (not plain HTML + JS):
+
+| Script | Description |
+|--------|-------------|
+| [`plotly_demo.py`](https://github.com/mashu3/tkipw/blob/main/examples/plotly_demo.py) | Plotly `FigureWidget` |
+| [`ipyleaflet_demo.py`](https://github.com/mashu3/tkipw/blob/main/examples/ipyleaflet_demo.py) | Live ipyleaflet map |
+
+See the [tkipw examples](https://github.com/mashu3/tkipw/tree/main/examples) for more.
+
 ---
 
 ## 📝 License
