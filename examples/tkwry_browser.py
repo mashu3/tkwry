@@ -701,11 +701,87 @@ html, body {
     editing = true;
     urlInput.value = state.url || urlInput.value;
     schemeEl.hidden = true;
+    call("url_editing", { active: true }).catch(() => {});
     requestAnimationFrame(() => urlInput.select());
   });
   urlInput.addEventListener("blur", () => {
     editing = false;
+    call("url_editing", { active: false }).catch(() => {});
     paintUrlField();
+  });
+
+  function insertAtSelection(text) {
+    const start = urlInput.selectionStart ?? urlInput.value.length;
+    const end = urlInput.selectionEnd ?? start;
+    const before = urlInput.value.slice(0, start);
+    const after = urlInput.value.slice(end);
+    urlInput.value = before + text + after;
+    const caret = start + text.length;
+    urlInput.setSelectionRange(caret, caret);
+    editing = true;
+  }
+
+  function selectedUrlText() {
+    const start = urlInput.selectionStart ?? 0;
+    const end = urlInput.selectionEnd ?? 0;
+    if (end > start) return urlInput.value.slice(start, end);
+    return urlInput.value;
+  }
+
+  window.chromePasteUrl = function (text) {
+    if (document.activeElement !== urlInput && !editing) return false;
+    urlInput.focus();
+    insertAtSelection(String(text ?? ""));
+    return true;
+  };
+
+  window.chromeCopyUrl = function () {
+    if (document.activeElement !== urlInput && !editing) return "";
+    return selectedUrlText();
+  };
+
+  window.chromeCutUrl = function () {
+    if (document.activeElement !== urlInput && !editing) return "";
+    const start = urlInput.selectionStart ?? 0;
+    const end = urlInput.selectionEnd ?? 0;
+    const text = selectedUrlText();
+    if (end > start) {
+      urlInput.value = urlInput.value.slice(0, start) + urlInput.value.slice(end);
+      urlInput.setSelectionRange(start, start);
+      editing = true;
+    }
+    return text;
+  };
+
+  urlInput.addEventListener("keydown", (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (!mod) return;
+    const key = e.key.toLowerCase();
+    if (key === "v") {
+      e.preventDefault();
+      e.stopPropagation();
+      call("clipboard_get", {})
+        .then((text) => insertAtSelection(String(text || "")))
+        .catch(console.error);
+      return;
+    }
+    if (key === "c") {
+      e.preventDefault();
+      e.stopPropagation();
+      call("clipboard_set", { text: selectedUrlText() }).catch(console.error);
+      return;
+    }
+    if (key === "x") {
+      e.preventDefault();
+      e.stopPropagation();
+      const text = window.chromeCutUrl();
+      call("clipboard_set", { text }).catch(console.error);
+      return;
+    }
+    if (key === "a") {
+      e.preventDefault();
+      urlInput.select();
+    }
   });
 
   $("#url-form").addEventListener("submit", (e) => {
@@ -2363,6 +2439,140 @@ class Tab:
     kind: str = "content"
 
 
+class BrowserShortcutBindings:
+    """Global browser shortcuts (same pattern as ``markdown_demo``).
+
+    When a content WKWebView is first responder, some keys may be consumed by
+    WebKit and never reach Tk — same trade-off as other tkwry demos.
+    """
+
+    NEW_TAB = ("<Command-t>", "<Command-T>", "<Control-t>", "<Control-T>")
+    CLOSE_TAB = ("<Command-w>", "<Command-W>", "<Control-w>", "<Control-W>")
+    FOCUS_URL = ("<Command-l>", "<Command-L>", "<Control-l>", "<Control-L>")
+    RELOAD = (
+        "<F5>",
+        "<Command-r>",
+        "<Command-R>",
+        "<Control-r>",
+        "<Control-R>",
+    )
+    BOOKMARK = ("<Command-d>", "<Command-D>", "<Control-d>", "<Control-D>")
+    SIDE_PANE = ("<Command-b>", "<Command-B>", "<Control-b>", "<Control-B>")
+    HISTORY = ("<Command-h>", "<Command-H>", "<Control-h>", "<Control-H>")
+    BACK = (
+        "<Alt-Left>",
+        "<Meta-Left>",
+        "<Command-bracketleft>",
+        "<Control-bracketleft>",
+    )
+    FORWARD = (
+        "<Alt-Right>",
+        "<Meta-Right>",
+        "<Command-bracketright>",
+        "<Control-bracketright>",
+    )
+    HOME = ("<Alt-Home>", "<Meta-Home>")
+    NEXT_TAB = ("<Control-Tab>", "<Control-Next>")
+    PREV_TAB = (
+        "<Control-Shift-Tab>",
+        "<Control-ISO_Left_Tab>",
+        "<Control-Prior>",
+    )
+    ZOOM_IN = (
+        "<Command-equal>",
+        "<Command-plus>",
+        "<Control-equal>",
+        "<Control-plus>",
+        "<Control-KP_Add>",
+    )
+    ZOOM_OUT = (
+        "<Command-minus>",
+        "<Control-minus>",
+        "<Control-KP_Subtract>",
+    )
+    ZOOM_RESET = (
+        "<Command-0>",
+        "<Control-0>",
+        "<Command-KP_0>",
+        "<Control-KP_0>",
+    )
+    PRINT = ("<Command-p>", "<Command-P>", "<Control-p>", "<Control-P>")
+    DEVTOOLS = (
+        "<F12>",
+        "<Command-Shift-i>",
+        "<Command-Shift-I>",
+        "<Control-Shift-i>",
+        "<Control-Shift-I>",
+    )
+    SETTINGS = ("<Command-comma>", "<Control-comma>")
+    PRIVATE = (
+        "<Command-Shift-n>",
+        "<Command-Shift-N>",
+        "<Control-Shift-n>",
+        "<Control-Shift-N>",
+    )
+    TAB_1 = ("<Command-1>", "<Control-1>", "<Command-KP_1>", "<Control-KP_1>")
+    TAB_2 = ("<Command-2>", "<Control-2>", "<Command-KP_2>", "<Control-KP_2>")
+    TAB_3 = ("<Command-3>", "<Control-3>", "<Command-KP_3>", "<Control-KP_3>")
+    TAB_4 = ("<Command-4>", "<Control-4>", "<Command-KP_4>", "<Control-KP_4>")
+    TAB_5 = ("<Command-5>", "<Control-5>", "<Command-KP_5>", "<Control-KP_5>")
+    TAB_6 = ("<Command-6>", "<Control-6>", "<Command-KP_6>", "<Control-KP_6>")
+    TAB_7 = ("<Command-7>", "<Control-7>", "<Command-KP_7>", "<Control-KP_7>")
+    TAB_8 = ("<Command-8>", "<Control-8>", "<Command-KP_8>", "<Control-KP_8>")
+    TAB_LAST = ("<Command-9>", "<Control-9>", "<Command-KP_9>", "<Control-KP_9>")
+    COPY = (
+        "<Command-c>",
+        "<Command-C>",
+        "<Control-c>",
+        "<Control-C>",
+        "<<Copy>>",
+    )
+    CUT = (
+        "<Command-x>",
+        "<Command-X>",
+        "<Control-x>",
+        "<Control-X>",
+        "<<Cut>>",
+    )
+    PASTE = (
+        "<Command-v>",
+        "<Command-V>",
+        "<Control-v>",
+        "<Control-V>",
+        "<<Paste>>",
+    )
+
+    @classmethod
+    def install(
+        cls,
+        root: tk.Misc,
+        bindings: list[tuple[tuple[str, ...], Callable[[tk.Event], str | None]]],
+    ) -> None:
+        for sequences, handler in bindings:
+            for sequence in sequences:
+                root.bind_all(sequence, handler, add="+")
+
+    @staticmethod
+    def wrap(action: Callable[[], None]) -> Callable[[tk.Event], str]:
+        def handler(_event: tk.Event) -> str:
+            action()
+            return "break"
+
+        return handler
+
+    @staticmethod
+    def wrap_if(
+        predicate: Callable[[], bool], action: Callable[[], None]
+    ) -> Callable[[tk.Event], str | None]:
+        def handler(_event: tk.Event) -> str | None:
+            if not predicate():
+                return None
+            action()
+            return "break"
+
+        return handler
+
+
 @dataclass
 class BrowserApp:
     """Mini-browser wiring Tk widgets to tkwry WebViews via RPC."""
@@ -2384,6 +2594,7 @@ class BrowserApp:
     _settings_active_section: str = "general-section"
     _ui_epoch: int = 0
     _after_ids: list[str] = field(default_factory=list)
+    _url_editing: bool = False
 
     chrome: WebView = field(init=False)
     side: WebView = field(init=False)
@@ -2446,24 +2657,100 @@ class BrowserApp:
             self.root, title=title, geometry="1100x720", minsize=(720, 480)
         )
 
+        mod = "Command" if sys.platform == "darwin" else "Ctrl"
         menubar = tk.Menu(self.root, tearoff=0)
         file_m = tk.Menu(menubar, tearoff=0)
         file_m.add_command(
-            label="New Tab", accelerator="Ctrl+T", command=self.new_blank_tab
+            label="New Tab",
+            accelerator=f"{mod}+T",
+            command=self.new_blank_tab,
         )
-        file_m.add_command(label="New Private Window", command=self.open_private_window)
+        file_m.add_command(
+            label="New Private Window",
+            accelerator=f"{mod}+Shift+N",
+            command=self.open_private_window,
+        )
+        file_m.add_command(
+            label="Close Tab",
+            accelerator=f"{mod}+W",
+            command=self.close_selected,
+        )
+        file_m.add_separator()
+        file_m.add_command(
+            label="Print…",
+            accelerator=f"{mod}+P",
+            command=self.print_current,
+        )
         file_m.add_separator()
         file_m.add_command(label="Quit", command=self.on_quit)
         menubar.add_cascade(label="File", menu=file_m)
+
         view_m = tk.Menu(menubar, tearoff=0)
         view_m.add_command(
+            label="Back",
+            accelerator="Alt+Left",
+            command=self.go_back,
+        )
+        view_m.add_command(
+            label="Forward",
+            accelerator="Alt+Right",
+            command=self.go_forward,
+        )
+        view_m.add_command(
+            label="Reload",
+            accelerator=f"{mod}+R",
+            command=self.reload_or_stop,
+        )
+        view_m.add_command(label="Home", command=self.go_home)
+        view_m.add_separator()
+        view_m.add_command(
+            label="Focus Address Bar",
+            accelerator=f"{mod}+L",
+            command=self.focus_url,
+        )
+        view_m.add_command(
             label="Toggle Side Pane",
-            accelerator="Ctrl+B",
+            accelerator=f"{mod}+B",
             command=self.toggle_side_pane,
         )
+        view_m.add_command(
+            label="History",
+            accelerator=f"{mod}+H",
+            command=self.show_history_section,
+        )
         view_m.add_separator()
-        view_m.add_command(label="Settings", command=self.open_settings)
+        view_m.add_command(
+            label="Zoom In",
+            accelerator=f"{mod}+=",
+            command=lambda: self.nudge_zoom(0.1),
+        )
+        view_m.add_command(
+            label="Zoom Out",
+            accelerator=f"{mod}+-",
+            command=lambda: self.nudge_zoom(-0.1),
+        )
+        view_m.add_command(
+            label="Reset Zoom",
+            accelerator=f"{mod}+0",
+            command=self.reset_zoom,
+        )
+        view_m.add_separator()
+        view_m.add_command(
+            label="Open DevTools",
+            accelerator="F12",
+            command=self.open_devtools,
+        )
+        settings_kw: dict[str, object] = {
+            "label": "Settings",
+            "command": self.open_settings,
+        }
+        if sys.platform == "darwin":
+            settings_kw["accelerator"] = "Command+,"
+        else:
+            settings_kw["accelerator"] = "Ctrl+,"
+        view_m.add_command(**settings_kw)
         menubar.add_cascade(label="View", menu=view_m)
+
         help_m = tk.Menu(menubar, tearoff=0)
         help_m.add_command(label="About", command=self.show_about)
         menubar.add_cascade(label="Help", menu=help_m)
@@ -2501,6 +2788,7 @@ class BrowserApp:
             focused=False,
             background_color=ui_bg,
             csp=CHROME_CSP,
+            clipboard=True,
             user_agent="tkwry-browser-chrome/1.0",
             on_creation_failed=lambda exc: messagebox.showerror(
                 "Chrome WebView failed", str(exc), parent=self.root
@@ -2520,20 +2808,8 @@ class BrowserApp:
         )
         self._bind_chrome_rpc()
         self._bind_side_rpc()
+        self._install_shortcuts()
 
-        self.root.bind_all("<Control-t>", lambda _e: self.new_blank_tab())
-        self.root.bind_all("<Command-t>", lambda _e: self.new_blank_tab())
-        self.root.bind_all("<Control-w>", lambda _e: self.close_selected())
-        self.root.bind_all("<Command-w>", lambda _e: self.close_selected())
-        self.root.bind_all("<Control-l>", lambda _e: self.focus_url())
-        self.root.bind_all("<Command-l>", lambda _e: self.focus_url())
-        self.root.bind_all("<F5>", lambda _e: self.reload_or_stop())
-        self.root.bind_all("<Control-r>", lambda _e: self.reload_or_stop())
-        self.root.bind_all("<Command-r>", lambda _e: self.reload_or_stop())
-        self.root.bind_all("<Control-d>", lambda _e: self.toggle_favorite())
-        self.root.bind_all("<Command-d>", lambda _e: self.toggle_favorite())
-        self.root.bind_all("<Control-b>", lambda _e: self.toggle_side_pane())
-        self.root.bind_all("<Command-b>", lambda _e: self.toggle_side_pane())
         self.root.protocol("WM_DELETE_WINDOW", self.on_quit)
 
         self.add_tab(self.store.settings.home)
@@ -2541,6 +2817,105 @@ class BrowserApp:
         self._safe_when_ready(self.side, self.push_side_state)
         self._schedule_chrome_refresh()
         self._schedule_after(50, lambda: self.content_split.sashpos(0, SIDE_PANE_WIDTH))
+
+    def _install_shortcuts(self) -> None:
+        wrap = BrowserShortcutBindings.wrap
+        B = BrowserShortcutBindings
+        BrowserShortcutBindings.install(
+            self.root,
+            [
+                (B.NEW_TAB, wrap(self.new_blank_tab)),
+                (B.CLOSE_TAB, wrap(self.close_selected)),
+                (B.FOCUS_URL, wrap(self.focus_url)),
+                (B.RELOAD, wrap(self.reload_or_stop)),
+                (B.BOOKMARK, wrap(self.toggle_favorite)),
+                (B.SIDE_PANE, wrap(self.toggle_side_pane)),
+                (B.HISTORY, wrap(self.show_history_section)),
+                (B.BACK, wrap(self.go_back)),
+                (B.FORWARD, wrap(self.go_forward)),
+                (B.HOME, wrap(self.go_home)),
+                (B.NEXT_TAB, wrap(lambda: self.cycle_tab(1))),
+                (B.PREV_TAB, wrap(lambda: self.cycle_tab(-1))),
+                (B.ZOOM_IN, wrap(lambda: self.nudge_zoom(0.1))),
+                (B.ZOOM_OUT, wrap(lambda: self.nudge_zoom(-0.1))),
+                (B.ZOOM_RESET, wrap(self.reset_zoom)),
+                (B.PRINT, wrap(self.print_current)),
+                (B.DEVTOOLS, wrap(self.open_devtools)),
+                (B.SETTINGS, wrap(self.open_settings)),
+                (B.PRIVATE, wrap(self.open_private_window)),
+                (B.TAB_1, wrap(lambda: self.select_tab_at(0))),
+                (B.TAB_2, wrap(lambda: self.select_tab_at(1))),
+                (B.TAB_3, wrap(lambda: self.select_tab_at(2))),
+                (B.TAB_4, wrap(lambda: self.select_tab_at(3))),
+                (B.TAB_5, wrap(lambda: self.select_tab_at(4))),
+                (B.TAB_6, wrap(lambda: self.select_tab_at(5))),
+                (B.TAB_7, wrap(lambda: self.select_tab_at(6))),
+                (B.TAB_8, wrap(lambda: self.select_tab_at(7))),
+                (B.TAB_LAST, wrap(self.select_last_tab)),
+                (B.COPY, B.wrap_if(lambda: self._url_editing, self._copy_url_bar)),
+                (B.CUT, B.wrap_if(lambda: self._url_editing, self._cut_url_bar)),
+                (B.PASTE, B.wrap_if(lambda: self._url_editing, self._paste_url_bar)),
+            ],
+        )
+
+    def _paste_url_bar(self) -> None:
+        if self.chrome.destroyed or not self.chrome.ready:
+            return
+        try:
+            text = self.root.clipboard_get()
+        except tk.TclError:
+            return
+        try:
+            self.chrome.focus()
+        except Exception:
+            pass
+        self.chrome.eval_js(
+            f"window.chromePasteUrl && window.chromePasteUrl({json.dumps(text)});"
+        )
+
+    def _copy_url_bar(self) -> None:
+        if self.chrome.destroyed or not self.chrome.ready:
+            return
+
+        def on_text(raw: str) -> None:
+            try:
+                text = json.loads(raw) if isinstance(raw, str) else str(raw)
+            except (json.JSONDecodeError, TypeError):
+                text = str(raw or "")
+            if not text:
+                return
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(text)
+            except tk.TclError:
+                pass
+
+        self.chrome.eval_js_with_callback(
+            "(window.chromeCopyUrl && window.chromeCopyUrl()) || ''",
+            on_text,
+        )
+
+    def _cut_url_bar(self) -> None:
+        if self.chrome.destroyed or not self.chrome.ready:
+            return
+
+        def on_text(raw: str) -> None:
+            try:
+                text = json.loads(raw) if isinstance(raw, str) else str(raw)
+            except (json.JSONDecodeError, TypeError):
+                text = str(raw or "")
+            if not text:
+                return
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(text)
+            except tk.TclError:
+                pass
+
+        self.chrome.eval_js_with_callback(
+            "(window.chromeCutUrl && window.chromeCutUrl()) || ''",
+            on_text,
+        )
 
     def _bind_chrome_rpc(self) -> None:
         chrome = self.chrome
@@ -2603,6 +2978,25 @@ class BrowserApp:
         @chrome.expose
         def set_ui_theme(dark: bool = False) -> None:
             self.apply_ui_theme(bool(dark))
+
+        @chrome.expose
+        def url_editing(active: bool = False) -> None:
+            self._url_editing = bool(active)
+
+        @chrome.expose
+        def clipboard_get() -> str:
+            try:
+                return str(self.root.clipboard_get())
+            except tk.TclError:
+                return ""
+
+        @chrome.expose
+        def clipboard_set(text: str = "") -> None:
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(str(text))
+            except tk.TclError:
+                pass
 
     def _bind_side_rpc(self) -> None:
         side = self.side
@@ -2807,6 +3201,7 @@ class BrowserApp:
 
     def focus_url(self) -> None:
         if self.chrome.ready:
+            self._url_editing = True
             self.chrome.eval_js(
                 "var i=document.getElementById('url');if(i){i.focus();i.select();}"
             )
@@ -3160,6 +3555,26 @@ class BrowserApp:
         self.push_chrome_state()
         self.push_side_state()
 
+    def select_tab_at(self, index: int) -> None:
+        ids = list(self.tabs)
+        if 0 <= index < len(ids):
+            self.select_tab(ids[index])
+
+    def select_last_tab(self) -> None:
+        ids = list(self.tabs)
+        if ids:
+            self.select_tab(ids[-1])
+
+    def cycle_tab(self, delta: int) -> None:
+        ids = list(self.tabs)
+        if not ids:
+            return
+        if self.selected_id in ids:
+            idx = ids.index(self.selected_id)
+        else:
+            idx = 0
+        self.select_tab(ids[(idx + delta) % len(ids)])
+
     def close_tab(self, tab_id: str) -> None:
         tab = self.tabs.get(tab_id)
         if tab is None:
@@ -3341,6 +3756,15 @@ class BrowserApp:
         self._zoom = max(0.25, min(3.0, round(self._zoom + delta, 2)))
         web.set_zoom(self._zoom)
         self.status_var.set(f"Zoom {int(self._zoom * 100)}%")
+        self.push_chrome_state()
+
+    def reset_zoom(self) -> None:
+        web = self.content_web()
+        if web is None or not web.ready:
+            return
+        self._zoom = 1.0
+        web.set_zoom(1.0)
+        self.status_var.set("Zoom 100%")
         self.push_chrome_state()
 
     def toggle_favorite(self) -> bool:
