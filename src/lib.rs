@@ -9,12 +9,12 @@ mod rpc_envelope;
 mod session;
 mod wakeup;
 
+#[cfg(target_os = "macos")]
+use objc2_app_kit::NSView;
 use pyo3::prelude::*;
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-#[cfg(target_os = "macos")]
-use objc2_app_kit::NSView;
 #[cfg(target_os = "macos")]
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
@@ -2775,17 +2775,24 @@ WebViews that share a session must use the same app= root \
         })
     }
 
-    #[cfg(target_os = "macos")]
     fn raise_to_front(&self) -> PyResult<()> {
-        if let Ok(clip) = self.mac_clip.lock() {
-            if let Some(host) = clip.as_ref() {
-                host.raise_to_front();
-                return Ok(());
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(clip) = self.mac_clip.lock() {
+                if let Some(host) = clip.as_ref() {
+                    host.raise_to_front();
+                    return Ok(());
+                }
             }
+            with_webview(self, |wv| {
+                macos::raise_webview(wv).map_err(pyo3::exceptions::PyRuntimeError::new_err)
+            })
         }
-        with_webview(self, |wv| {
-            macos::raise_webview(wv).map_err(pyo3::exceptions::PyRuntimeError::new_err)
-        })
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = self;
+            Ok(())
+        }
     }
 
     fn bounds(&self) -> PyResult<(f64, f64, f64, f64)> {
