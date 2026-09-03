@@ -68,6 +68,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is used for the domain only)
 - macOS embed bounds probe catches destroyed-widget ``TclError`` instead of
   raising ``NameError`` when ``tkinter`` was import-time only
+- macOS shared-host embeds (Tk child frames on one ``NSView``): each WebView
+  is wrapped in a fixed-size clip container so ``set_bounds`` / DevTools stay
+  inside the host frame instead of expanding to the toplevel view; bounds sync
+  uses ``TkMacOSXWinBounds`` for the full ``(x, y, width, height)`` rect
+- macOS DevTools open/close re-applies the last ``set_bounds`` rect and keeps
+  sibling WebViews synced while the inspector is visible
+- macOS focus hit-testing treats DevTools / clip-container subviews as part of
+  the owning WebView
+- ``raise_to_front`` is always present on the native ``WebView`` (no-op off
+  macOS) so Linux stubtest matches ``_core.pyi``
+- Off-thread native leak no longer tears down the macOS clip container
+  (``removeFromSuperview`` is main-thread only)
 - Linux missing ``_core`` on ``import tkwry`` now surfaces the build hint even
   when the failure is reached via ``profile`` / ``session``
 - Unannotated ``on_navigation`` handlers whose sole parameter is named
@@ -80,6 +92,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   work as documented)
 - macOS release wheels set ``MACOSX_DEPLOYMENT_TARGET=11.0`` to match the
   documented minimum OS version
+
+### Changed
+
+- Renamed ``examples/browser_demo.py`` → ``examples/tkwry_browser.py``; UI
+  assets (``browser_chrome/``, ``browser_side/``, ``browser_settings/``) are
+  now embedded as Python string constants and extracted to a temp directory at
+  startup — the demo is a single file
 
 ## [0.1.7] - 2026-09-02
 

@@ -1454,10 +1454,13 @@ impl WebViewCore {
     fn leak_native_off_owner_thread(&self) {
         #[cfg(target_os = "macos")]
         self.mac.teardown();
+        // Do not call ``MacClipHost::teardown`` here — ``removeFromSuperview``
+        // is AppKit UI work and will trap off the main thread. Leak the clip
+        // host with the native webview.
         #[cfg(target_os = "macos")]
-        if let Ok(clip) = self.mac_clip.lock() {
-            if let Some(host) = clip.as_ref() {
-                host.teardown();
+        if let Ok(mut clip) = self.mac_clip.lock() {
+            if let Some(host) = clip.take() {
+                std::mem::forget(host);
             }
         }
         self.wakeup_write_fd.store(-1, Ordering::SeqCst);
