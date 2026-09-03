@@ -63,6 +63,9 @@ line-length = 88
 select = ["E", "F", "I", "UP"]
 ignore = ["UP045"]
 
+[tool.ruff.lint.per-file-ignores]
+"examples/tkwry_browser.py" = ["E501"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]
