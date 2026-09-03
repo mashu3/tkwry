@@ -8,8 +8,8 @@
 use std::cell::Cell;
 use std::ptr::NonNull;
 
-use objc2::MainThreadMarker;
 use objc2::rc::Retained;
+use objc2::MainThreadMarker;
 use objc2_app_kit::{NSAutoresizingMaskOptions, NSView, NSWindowOrderingMode};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use wry::WebViewExtMacOS;
