@@ -109,12 +109,15 @@ the runtime supports the inspector (headless / Xvfb may lack a UI).
 Tk child `Frame`s usually **do not** get their own `NSView` (Tk Aqua). tkwry
 attaches to the **toplevel content view**, positions with `set_bounds` on
 `<Configure>`, and hides with `set_visible(False)` on `<Unmap>` (e.g.
-another Notebook tab). Per-frame native views would need upstream Tk changes.
+another Notebook tab). Each WKWebView is wrapped in a **fixed-size clip
+container** (`NSView` with `masksToBounds`) so `set_bounds` and DevTools stay
+inside the owning Frame instead of expanding to the full toplevel view.
+Per-frame native views would need upstream Tk changes.
 
 **Keyboard focus:** clicks are hit-tested at the `NSEvent` layer; Python
 drains focus signals on the Tk main thread. Use `web.focus()` /
 `web.focus_parent()` for explicit control
-([`examples/browser_demo.py`](../examples/browser_demo.py)). On
+([`examples/tkwry_browser.py`](../examples/tkwry_browser.py)). On
 macOS/Windows, `focused=True` waits for `<<WebViewReady>>`, then calls
 `focus()` (create-time focus breaks child WKWebView / WebView2). Call
 `focus()` yourself after later layout changes.
@@ -135,7 +138,9 @@ WKWebView has no document `NSURL`. After `load_url`, it becomes the concrete
 URI.
 
 **DevTools:** see [DevTools](#devtools) — need `devtools=True` then
-`open_devtools()` (private APIs; avoid Mac App Store builds).
+`open_devtools()` (private APIs; avoid Mac App Store builds). Opening or
+closing the inspector re-applies the last `set_bounds` rect and keeps sibling
+WebViews synced, so DevTools no longer push the content outside its Frame.
 
 **Notebook / tabs:** unmapped tabs hide the native view (`set_visible(False)`)
 and show again on `<Map>` — required because frames share the toplevel

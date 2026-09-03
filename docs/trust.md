@@ -155,7 +155,7 @@ share a persistent `WebSession` / `data_directory` between a local app and
 an external site. Prefer vendored JS (`app=`) over CDN scripts in pages that
 have a bridge — XSS in a CDN script is the page origin.
 
-[`examples/browser_demo.py`](../examples/browser_demo.py) sets
+[`examples/tkwry_browser.py`](../examples/tkwry_browser.py) sets
 `bridge_origins="*"` on purpose (link interception only; expect the
 security warning). Copy that only if every page is trusted, and do not
 `expose()` desktop APIs without `allow_any_origin=True`.

@@ -87,12 +87,12 @@ root.mainloop()
 Next steps:
 
 - Shared cookies / tabs: [Shared session](#shared-session-websession) and
-  [`examples/browser_demo.py`](../examples/browser_demo.py)
+  [`examples/tkwry_browser.py`](../examples/tkwry_browser.py)
 - JS↔Python streams / cancel: [IPC / RPC / emit](rpc.md) and
   [`examples/ipc_demo.py`](../examples/ipc_demo.py)
 - Trust for arbitrary URLs: [Trust boundaries](trust.md)
 
-Real-device smoke stays in the examples (`browser_demo` print/download/destroy;
+Real-device smoke stays in the examples (`tkwry_browser` print/download/destroy;
 `ipc_demo` stream+cancel). Automated Notebook hide/show:
 `tests/integration/test_notebook.py`.
 
@@ -234,7 +234,7 @@ is no longer needed (or destroy every WebView first). Keep the session open
 while any WebView uses it (especially with `app=` on macOS). Isolation rules (same `app=`
 root, do not share a persistent profile with untrusted sites):
 [Trust boundaries — Session isolation](trust.md#session-isolation).
-See also [`examples/browser_demo.py`](../examples/browser_demo.py).
+See also [`examples/tkwry_browser.py`](../examples/tkwry_browser.py).
 
 ## Load HTML / evaluate JavaScript
 
@@ -542,7 +542,7 @@ but WebKit **blocks** until they return a value — keep them fast (heavy work
 → return deny/default and defer with `root.after`). Do **not** create another
 WebView from `on_new_window` (even deferred): WKWebView deadlocks. Prefer
 `open_external=True` or `open_in_browser(url)`; intercept links in JS for
-in-app tabs (see [`examples/browser_demo.py`](../examples/browser_demo.py)).
+in-app tabs (see [`examples/tkwry_browser.py`](../examples/tkwry_browser.py)).
 Timed-out sync hooks are canceled after about **60s** total wait. Navigation /
 new-window timeouts still return the default (deny) and signal
 `WebViewNavigationError` via `<<WebViewNavigationFailed>>` /
@@ -625,7 +625,7 @@ idempotent; snapshot properties, `get_state()`, and
 `take_queue_drop_stats()` stay readable). In-flight RPC / streams are
 cancelled cooperatively.
 
-See [`examples/browser_demo.py`](../examples/browser_demo.py) quit path.
+See [`examples/tkwry_browser.py`](../examples/tkwry_browser.py) quit path.
 Regression: existing destroy / session tests (`tests/unit/test_destroy_api.py`,
 `tests/unit/test_session.py`).
 

@@ -29,7 +29,7 @@ OS.” Prefer wrapping wry; document gaps here and in [platforms.md](platforms.m
 
 | OS | wry internal | Parent placement | tkwry parent handle |
 |----|--------------|------------------|---------------------|
-| **macOS** | `WKWebView` as `NSView` subview | Added under the given `NSView` | Toplevel content `NSView` via `TkMacOSXGetRootControl` (`tkwry/_parent.py`) — child `Frame`s usually share one view |
+| **macOS** | `WKWebView` as `NSView` subview | Added under the given `NSView` | Toplevel content `NSView` via `TkMacOSXGetRootControl` (`tkwry/_parent.py`) — child `Frame`s usually share one view; each WebView is wrapped in a clip container (`NSView` with `masksToBounds`) |
 | **Windows** | WebView2 container `HWND` | Win32 child window (`SetParent`) | `Frame.winfo_id()` → HWND |
 | **Linux (X11)** | X11 child window + GTK window + `WebKitWebView` | X11 child of the Tk window | `winfo_id()` → X11 window ID |
 | **Linux (`gtk::Fixed`)** | wry `build_gtk` path | GTK container put | **Unused** — tkwry always uses `build_as_child` |

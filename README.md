@@ -184,7 +184,12 @@ pip install -e .
 
 | Script | Description |
 |--------|-------------|
-| [`examples/browser_demo.py`](https://github.com/mashu3/tkwry/blob/main/examples/browser_demo.py) | URL bar, tabs, shared `WebSession`, print / downloads / `emit_all` (`bridge_origins="*"`; no `expose`) |
+| [`examples/tkwry_browser.py`](https://github.com/mashu3/tkwry/blob/main/examples/tkwry_browser.py) | Mini-browser (single file): WebView chrome + side library tree; Settings tab; Tk ☰; separate content session |
+
+
+
+
+
 | [`examples/ipc_demo.py`](https://github.com/mashu3/tkwry/blob/main/examples/ipc_demo.py) | IPC events, RPC (`call` / kwargs / worker), stream (`ticks` + cancel), and `emit` |
 | [`examples/multi_demo.py`](https://github.com/mashu3/tkwry/blob/main/examples/multi_demo.py) | Multiple WebViews, tabs, panes; `emit_all` flash |
 | [`examples/plotly_demo.py`](https://github.com/mashu3/tkwry/blob/main/examples/plotly_demo.py) | Plotly charts — CDN or local `app=` (`pip install plotly`) |
@@ -193,7 +198,7 @@ pip install -e .
 | [`examples/dnd_demo.py`](https://github.com/mashu3/tkwry/blob/main/examples/dnd_demo.py) | Native file drag & drop into WebView |
 
 ```bash
-python examples/browser_demo.py
+python examples/tkwry_browser.py
 python examples/ipc_demo.py
 python examples/multi_demo.py
 python examples/plotly_demo.py
