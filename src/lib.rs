@@ -2935,6 +2935,7 @@ WebViews that share a session must use the same app= root \
         // DevTools open/close can run a nested AppKit/WebKit turn that re-enters
         // tkwry queues. Holding `inner` across that nests into deadlock (seen on
         // macOS after prior WebView create/destroy in the same process).
+        #[cfg(target_os = "macos")]
         let saved = self.last_logical_bounds.get();
         let result = with_webview_reentrant(self, |wv| {
             wv.open_devtools();
@@ -2957,6 +2958,7 @@ WebViews that share a session must use the same app= root \
     }
 
     fn close_devtools(&self) -> PyResult<()> {
+        #[cfg(target_os = "macos")]
         let saved = self.last_logical_bounds.get();
         let result = with_webview_reentrant(self, |wv| {
             wv.close_devtools();
