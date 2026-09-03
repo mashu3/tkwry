@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import sys
+
 from tkwry import WebView
-from tkwry._parent import tk_embed_origin, tk_embed_parent
+from tkwry._parent import tk_embed_bounds, tk_embed_origin, tk_embed_parent
 
 BOUNDS_TOLERANCE = 4
 
@@ -11,6 +13,9 @@ BOUNDS_TOLERANCE = 4
 def expected_bounds(frame) -> tuple[float, float, float, float]:
     frame.update_idletasks()
     embed = tk_embed_parent(frame)
+    if sys.platform == "darwin" and embed.root_relative:
+        x, y, width, height = tk_embed_bounds(frame, root_relative=True)
+        return (float(x), float(y), float(width), float(height))
     x, y = tk_embed_origin(frame, root_relative=embed.root_relative)
     width = max(frame.winfo_width(), 1)
     height = max(frame.winfo_height(), 1)

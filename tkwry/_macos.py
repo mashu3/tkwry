@@ -218,6 +218,74 @@ def _release_tk_keyboard_focus(toplevel: tk.Misc) -> None:
             return
 
 
+_MAC_PUMP_IDLE_DELAY_MS = 32
+_DEVTOOLS_BOUNDS_WATCH_MS = 50
+_DEVTOOLS_BOUNDS_WATCH_MAX_TICKS = 60
+
+
+def sync_mac_webview_layout(
+    toplevel: tk.Misc, *, devtools_web: WebView | None = None
+) -> None:
+    """Push Tk bounds to every sibling WebView on macOS."""
+    for web in _mac_webviews(toplevel):
+        if not web.ready or web.destroyed:
+            continue
+        try:
+            web.sync_bounds()
+        except Exception:
+            pass
+    if devtools_web is None or devtools_web.destroyed or not devtools_web.ready:
+        return
+    try:
+        devtools_web.sync_bounds()
+    except Exception:
+        return
+    native = devtools_web.native
+    if native is None:
+        return
+    try:
+        if devtools_web.is_devtools_open():
+            native.raise_to_front()
+    except Exception:
+        pass
+
+
+def prepare_mac_devtools_open(web: WebView) -> None:
+    try:
+        toplevel = web._frame.winfo_toplevel()
+    except tk.TclError:
+        return
+    sync_mac_webview_layout(toplevel, devtools_web=web)
+
+
+def _mac_devtools_bounds_watch(web: WebView, *, tick: int = 0) -> None:
+    if web.destroyed:
+        return
+    try:
+        toplevel = web._frame.winfo_toplevel()
+    except tk.TclError:
+        return
+    if not _toplevel_alive(toplevel):
+        return
+    sync_mac_webview_layout(toplevel, devtools_web=web)
+    if tick >= _DEVTOOLS_BOUNDS_WATCH_MAX_TICKS:
+        return
+    try:
+        if not web.is_devtools_open():
+            return
+    except Exception:
+        return
+    _mac_after(
+        toplevel,
+        _DEVTOOLS_BOUNDS_WATCH_MS,
+        lambda w=web, next_tick=tick + 1: _mac_devtools_bounds_watch(w, tick=next_tick),
+    )
+
+
+def watch_mac_devtools_bounds(web: WebView) -> None:
+    _mac_devtools_bounds_watch(web, tick=0)
+
+
 def _mac_webviews(toplevel: tk.Misc) -> list[WebView]:
     registered = getattr(toplevel, "_tkwry_mac_webviews", None) or []
     alive: list[WebView] = []

@@ -662,6 +662,37 @@ def test_sync_bounds_shows_via_show_native_view(
     assert shown == [web._webview]
 
 
+def test_sync_bounds_uses_mac_sync_rect_on_macos(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, width=300, height=200)
+    bounds: list[tuple[int, int, int, int]] = []
+
+    class Native:
+        def set_bounds(self, x: int, y: int, w: int, h: int) -> None:
+            bounds.append((x, y, w, h))
+
+    web._webview = Native()  # type: ignore[assignment]
+    web._embed = web._embed.__class__(handle=1, root_relative=True)
+    monkeypatch.setattr(web, "_frame_should_show", lambda: True)
+    monkeypatch.setattr(web, "_show_native_view", lambda _native: True, raising=False)
+    if sys.platform == "darwin":
+        monkeypatch.setattr(web, "_mac_sync_bounds_rect", lambda: (5, 80, 640, 400))
+    else:
+        monkeypatch.setattr(web, "_mac_sync_bounds_rect", lambda: None)
+        monkeypatch.setattr(web, "_bounds_size", lambda: (640, 400))
+        monkeypatch.setattr(
+            "tkwry.webview.tk_embed_origin",
+            lambda _frame, root_relative=False: (5, 80),
+        )
+
+    assert web._sync_bounds() is True
+    assert bounds == [(5, 80, 640, 400)]
+
+
 def test_bounds_property_reads_native(tk_root, monkeypatch: pytest.MonkeyPatch) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=300, height=200)

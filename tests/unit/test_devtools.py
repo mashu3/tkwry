@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import MagicMock
 
 import pytest
@@ -32,14 +33,30 @@ def test_devtools_methods_delegate_to_native(
     assert web.is_devtools_open() is False
     native.is_devtools_open.assert_called_once_with()
 
+    schedule_sync = MagicMock()
+    prepare = MagicMock()
+    watch = MagicMock()
+    monkeypatch.setattr(web, "_schedule_bounds_sync", schedule_sync)
+    monkeypatch.setattr("tkwry._macos.prepare_mac_devtools_open", prepare)
+    monkeypatch.setattr("tkwry._macos.watch_mac_devtools_bounds", watch)
     web.open_devtools()
     native.open_devtools.assert_called_once_with()
+    if sys.platform == "darwin":
+        prepare.assert_called_once_with(web)
+        watch.assert_called_once_with(web)
+        schedule_sync.assert_not_called()
+    else:
+        schedule_sync.assert_called_once_with()
 
     native.is_devtools_open.return_value = True
     assert web.is_devtools_open() is True
 
     web.close_devtools()
     native.close_devtools.assert_called_once_with()
+    if sys.platform == "darwin":
+        assert watch.call_count == 2
+    else:
+        assert schedule_sync.call_count == 2
 
     frame.destroy()
 

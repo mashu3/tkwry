@@ -14,6 +14,8 @@ use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 #[cfg(target_os = "macos")]
+use objc2_app_kit::NSView;
+#[cfg(target_os = "macos")]
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -1333,6 +1335,12 @@ struct WebViewCore {
     download_cb: PyCallback,
     #[cfg(target_os = "macos")]
     mac: macos::MacPlatformState,
+    /// Toplevel ``NSView`` passed at create (shared by Tk child frames).
+    #[cfg(target_os = "macos")]
+    embed_parent: NonNull<NSView>,
+    /// Clip container isolating each ``WKWebView`` inside the shared host view.
+    #[cfg(target_os = "macos")]
+    mac_clip: Mutex<Option<macos::MacClipHost>>,
     /// Nested wry calls (e.g. sync navigation hooks during ``load_url``).
     wry_call_depth: Cell<u32>,
     /// ``destroy()`` requested while a nested wry call is active.
@@ -1343,9 +1351,49 @@ struct WebViewCore {
     destroyed_during_reentrant: Cell<bool>,
     /// Windows ``app=``: rewrite ``tkwry://`` → ``http(s)://tkwry.localhost``.
     https_scheme: bool,
+    /// Last ``set_bounds`` from Python (Tk layout space); used to restore after DevTools.
+    last_logical_bounds: Cell<Option<(f64, f64, f64, f64)>>,
     /// Keeps the shared ``WebContext`` alive (custom protocol / profile).
     #[allow(dead_code)]
     session: Option<session::SessionRefs>,
+}
+
+#[cfg(target_os = "macos")]
+fn pin_mac_child_autoresizing(wv: &wry::WebView) {
+    use objc2_app_kit::NSAutoresizingMaskOptions;
+    use wry::WebViewExtMacOS;
+    wv.webview()
+        .setAutoresizingMask(NSAutoresizingMaskOptions::ViewNotSizable);
+}
+
+#[cfg(target_os = "macos")]
+fn apply_mac_embed_bounds(
+    core: &WebViewCore,
+    wv: &wry::WebView,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    pin_mac_child_autoresizing(wv);
+    let mut clip = core
+        .mac_clip
+        .lock()
+        .map_err(|_| "webview clip lock poisoned".to_string())?;
+    if clip.is_none() {
+        *clip = Some(macos::MacClipHost::new(core.embed_parent)?);
+    }
+    clip.as_ref()
+        .expect("clip host just initialized")
+        .set_bounds(wv, x, y, width, height)
+}
+
+#[cfg(target_os = "macos")]
+fn restore_mac_embed_bounds(core: &WebViewCore, wv: &wry::WebView, bounds: (f64, f64, f64, f64)) {
+    let (x, y, width, height) = bounds;
+    if let Err(err) = apply_mac_embed_bounds(core, wv, x, y, width, height) {
+        eprintln!("tkwry: devtools bounds restore failed: {err}");
+    }
 }
 
 impl std::ops::Deref for WebView {
@@ -1406,6 +1454,12 @@ impl WebViewCore {
     fn leak_native_off_owner_thread(&self) {
         #[cfg(target_os = "macos")]
         self.mac.teardown();
+        #[cfg(target_os = "macos")]
+        if let Ok(clip) = self.mac_clip.lock() {
+            if let Some(host) = clip.as_ref() {
+                host.teardown();
+            }
+        }
         self.wakeup_write_fd.store(-1, Ordering::SeqCst);
         let Ok(mut guard) = self.inner.lock() else {
             return;
@@ -1496,6 +1550,12 @@ call destroy() on the Tk thread before GC"
         }
         #[cfg(target_os = "macos")]
         self.mac.teardown();
+        #[cfg(target_os = "macos")]
+        if let Ok(clip) = self.mac_clip.lock() {
+            if let Some(host) = clip.as_ref() {
+                host.teardown();
+            }
+        }
         self.wakeup_write_fd.store(-1, Ordering::SeqCst);
 
         let mut guard = self
@@ -2116,6 +2176,9 @@ WebViews that share a session must use the same app= root \
             .build_as_child(&window_handle)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
+        #[cfg(target_os = "macos")]
+        pin_mac_child_autoresizing(&webview);
+
         // Release context borrow before re-locking session meta or storing refs on Self.
         drop(session_context);
 
@@ -2180,6 +2243,10 @@ WebViews that share a session must use the same app= root \
                 wakeup_write_fd,
                 #[cfg(target_os = "macos")]
                 mac,
+                #[cfg(target_os = "macos")]
+                embed_parent: parent_ns_view,
+                #[cfg(target_os = "macos")]
+                mac_clip: Mutex::new(None),
                 nav_cb,
                 newwin_cb,
                 permission_cb,
@@ -2189,6 +2256,7 @@ WebViews that share a session must use the same app= root \
                 reentrant_active: Cell::new(false),
                 destroyed_during_reentrant: Cell::new(false),
                 https_scheme,
+                last_logical_bounds: Cell::new(None),
                 session: session_for_webview,
             }),
         })
@@ -2692,13 +2760,38 @@ WebViews that share a session must use the same app= root \
     }
 
     fn set_bounds(&self, x: f64, y: f64, width: f64, height: f64) -> PyResult<()> {
+        self.last_logical_bounds.set(Some((x, y, width, height)));
         with_webview(self, |wv| {
-            wv.set_bounds(make_rect(x, y, width, height))
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+            #[cfg(target_os = "macos")]
+            {
+                apply_mac_embed_bounds(self, wv, x, y, width, height)
+                    .map_err(pyo3::exceptions::PyRuntimeError::new_err)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                wv.set_bounds(make_rect(x, y, width, height))
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+            }
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn raise_to_front(&self) -> PyResult<()> {
+        if let Ok(clip) = self.mac_clip.lock() {
+            if let Some(host) = clip.as_ref() {
+                host.raise_to_front();
+                return Ok(());
+            }
+        }
+        with_webview(self, |wv| {
+            macos::raise_webview(wv).map_err(pyo3::exceptions::PyRuntimeError::new_err)
         })
     }
 
     fn bounds(&self) -> PyResult<(f64, f64, f64, f64)> {
+        if let Some(tuple) = self.last_logical_bounds.get() {
+            return Ok(tuple);
+        }
         with_webview(self, |wv| {
             let rect = wv
                 .bounds()
@@ -2709,6 +2802,13 @@ WebViews that share a session must use the same app= root \
 
     fn set_visible(&self, visible: bool) -> PyResult<()> {
         with_webview(self, |wv| {
+            #[cfg(target_os = "macos")]
+            if let Ok(clip) = self.mac_clip.lock() {
+                if let Some(host) = clip.as_ref() {
+                    host.set_visible(wv, visible);
+                    return Ok(());
+                }
+            }
             wv.set_visible(visible)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
         })
@@ -2793,6 +2893,9 @@ WebViews that share a session must use the same app= root \
         self.require_owner_thread()?;
         #[cfg(target_os = "macos")]
         {
+            if let Some((bx, by, bw, bh)) = self.last_logical_bounds.get() {
+                return Ok(x >= bx && x < bx + bw && y >= by && y < by + bh);
+            }
             Ok(macos::hit_test_wry_point(&self.inner, x, y))
         }
         #[cfg(not(target_os = "macos"))]
@@ -2822,17 +2925,47 @@ WebViews that share a session must use the same app= root \
         // DevTools open/close can run a nested AppKit/WebKit turn that re-enters
         // tkwry queues. Holding `inner` across that nests into deadlock (seen on
         // macOS after prior WebView create/destroy in the same process).
-        with_webview_reentrant(self, |wv| {
+        let saved = self.last_logical_bounds.get();
+        let result = with_webview_reentrant(self, |wv| {
             wv.open_devtools();
+            #[cfg(target_os = "macos")]
+            if let Some(bounds) = saved {
+                restore_mac_embed_bounds(self, wv, bounds);
+            }
             Ok(())
-        })
+        });
+        #[cfg(target_os = "macos")]
+        if result.is_ok() {
+            if let Some(bounds) = saved {
+                let _ = with_webview(self, |wv| {
+                    restore_mac_embed_bounds(self, wv, bounds);
+                    Ok(())
+                });
+            }
+        }
+        result
     }
 
     fn close_devtools(&self) -> PyResult<()> {
-        with_webview_reentrant(self, |wv| {
+        let saved = self.last_logical_bounds.get();
+        let result = with_webview_reentrant(self, |wv| {
             wv.close_devtools();
+            #[cfg(target_os = "macos")]
+            if let Some(bounds) = saved {
+                restore_mac_embed_bounds(self, wv, bounds);
+            }
             Ok(())
-        })
+        });
+        #[cfg(target_os = "macos")]
+        if result.is_ok() {
+            if let Some(bounds) = saved {
+                let _ = with_webview(self, |wv| {
+                    restore_mac_embed_bounds(self, wv, bounds);
+                    Ok(())
+                });
+            }
+        }
+        result
     }
 
     fn is_devtools_open(&self) -> PyResult<bool> {

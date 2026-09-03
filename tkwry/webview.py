@@ -2330,7 +2330,20 @@ class WebView(WebViewRpcMixin):
         open. See platform notes for ``close_devtools`` /
         ``is_devtools_open`` quirks (Windows WebView2).
         """
-        self._require_ready("open_devtools").open_devtools()
+        native = self._require_ready("open_devtools")
+        if sys.platform == "darwin":
+            from tkwry._macos import (
+                prepare_mac_devtools_open,
+                watch_mac_devtools_bounds,
+            )
+
+            self.sync_bounds()
+            prepare_mac_devtools_open(self)
+        native.open_devtools()
+        if sys.platform == "darwin":
+            watch_mac_devtools_bounds(self)
+        else:
+            self._schedule_bounds_sync()
 
     def close_devtools(self) -> None:
         """Close DevTools if open.
@@ -2338,7 +2351,14 @@ class WebView(WebViewRpcMixin):
         On Windows (WebView2 via wry), this is a no-op — close the inspector
         UI manually. macOS / Linux forward to the engine.
         """
-        self._require_ready("close_devtools").close_devtools()
+        native = self._require_ready("close_devtools")
+        native.close_devtools()
+        if sys.platform == "darwin":
+            from tkwry._macos import watch_mac_devtools_bounds
+
+            watch_mac_devtools_bounds(self)
+        else:
+            self._schedule_bounds_sync()
 
     def is_devtools_open(self) -> bool:
         """Return whether DevTools is currently open.
@@ -4454,6 +4474,36 @@ class WebView(WebViewRpcMixin):
         if self._page_load_listening_wanted():
             self._ensure_event_poll()
 
+    def _mac_sync_bounds_rect(self) -> tuple[int, int, int, int] | None:
+        """Return full ``set_bounds`` rect for macOS root-relative embeds.
+
+        Position always comes from ``TkMacOSXWinBounds``.  Size uses native
+        width/height for pack/grid/paned hosts (``winfo_*`` can disagree on
+        macOS); ``place`` hosts keep the ``_bounds_size`` contract so explicit
+        ``place`` / constructor dimensions win over native when ``winfo_* > 1``.
+        """
+        if sys.platform != "darwin" or not self._embed.root_relative:
+            return None
+        try:
+            from tkwry._parent import tk_embed_bounds
+
+            self._frame.update_idletasks()
+            x, y, native_w, native_h = tk_embed_bounds(self._frame, root_relative=True)
+            native_w = int(native_w)
+            native_h = int(native_h)
+            if native_w <= 1 or native_h <= 1:
+                return None
+            if self._frame.winfo_manager() == "place":
+                size = self._bounds_size()
+                if size is None:
+                    return None
+                width, height = size
+            else:
+                width, height = native_w, native_h
+            return int(x), int(y), width, height
+        except tk.TclError:
+            return None
+
     def _bounds_size(self) -> tuple[int, int] | None:
         """Return the width/height to push, or None when geometry is not meaningful.
 
@@ -4561,16 +4611,22 @@ class WebView(WebViewRpcMixin):
         if not self._frame_should_show():
             self._hide_native_view(self._webview)
             return False
-        size = self._bounds_size()
-        if size is None:
-            self._hide_native_view(self._webview)
-            return False
-        width, height = size
-        try:
-            self._frame.update_idletasks()
-            x, y = tk_embed_origin(self._frame, root_relative=self._embed.root_relative)
-        except tk.TclError:
-            return False
+        native_bounds = self._mac_sync_bounds_rect()
+        if native_bounds is not None:
+            x, y, width, height = native_bounds
+        else:
+            size = self._bounds_size()
+            if size is None:
+                self._hide_native_view(self._webview)
+                return False
+            width, height = size
+            try:
+                self._frame.update_idletasks()
+                x, y = tk_embed_origin(
+                    self._frame, root_relative=self._embed.root_relative
+                )
+            except tk.TclError:
+                return False
         try:
             self._webview.set_bounds(x, y, width, height)
         except Exception:

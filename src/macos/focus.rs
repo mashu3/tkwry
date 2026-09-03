@@ -549,6 +549,20 @@ fn entry_index_matching_view(entries: &[FocusEntry], view: &NSView) -> Option<us
         .find_map(|(idx, entry)| view_belongs_to_entry(view, entry).then_some(idx))
 }
 
+fn view_is_descendant_of(view: &NSView, ancestor: &NSView) -> bool {
+    if std::ptr::eq(view, ancestor) {
+        return true;
+    }
+    let mut walk = unsafe { view.superview() };
+    while let Some(v) = walk {
+        if std::ptr::eq(v.as_ref(), ancestor) {
+            return true;
+        }
+        walk = unsafe { v.superview() };
+    }
+    false
+}
+
 fn view_belongs_to_entry(view: &NSView, entry: &FocusEntry) -> bool {
     let Ok(guard) = entry.inner.lock() else {
         return false;
@@ -560,7 +574,17 @@ fn view_belongs_to_entry(view: &NSView, entry: &FocusEntry) -> bool {
         return true;
     }
     let wk = wv.webview();
-    std::ptr::eq(view, Retained::as_ptr(&wk).cast::<NSView>())
+    let wk_ptr = Retained::as_ptr(&wk).cast::<NSView>();
+    let wk_view = unsafe { &*wk_ptr };
+    if std::ptr::eq(view, wk_ptr) || view_is_descendant_of(view, wk_view) {
+        return true;
+    }
+    if let Some(container) = unsafe { wk.superview() } {
+        if std::ptr::eq(view, Retained::as_ptr(&container)) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Hit-test using wry top-left coordinates (same space as ``set_bounds``).
