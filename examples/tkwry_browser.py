@@ -4,7 +4,7 @@ Chrome (tabs / URL / nav) and the side pane (bookmarks / history) are local
 ``app=`` WebViews with RPC. Each uses its own UI ``WebSession`` (shared
 ``app=`` roots on one session are not allowed). Content tabs use a
 **separate** ``WebSession`` and ``bridge_origins="*"`` for link interception
-only (no ``expose()`` on content).
+plus a small clipboard RPC surface (Tk pasteboard bridge).
 
 Run::
 
@@ -59,17 +59,38 @@ except ImportError as exc:
 # Content tabs only — chrome uses a separate session + app= (no "*").
 warnings.filterwarnings("ignore", category=TkwrySecurityWarning)
 
-DEFAULT_HOME = "https://github.com/mashu3/tkwry"
+DEFAULT_HOME = "about:blank"
 DEFAULT_SEARCH = "https://www.bing.com/search?q={query}"
 DEFAULT_PROFILE = "default"
 PROFILES_DIR = Path.home() / ".tkwry"
 BLANK_TAB_URL = "about:blank"
-BLANK_TAB_HTML = (
-    "<!DOCTYPE html><html><head>"
-    '<meta charset="utf-8"><title>New Tab</title>'
-    "</head><body></body></html>"
+# Icon-only crop of wry-logo.svg (tauri-apps/wry, MIT OR Apache-2.0).
+WRY_TAB_ICON = (
+    "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg"
+    "%22%20viewBox%3D%2220%2040%20140%20120%22%20fill%3D%22none%22%3E%3Cpath%20d%3D"
+    "%22M119.04%2069.86a18.3%2018.3%200%2011-36.6%200%2018.3%2018.3%200%200136.6%200z"
+    "%22%20fill%3D%22%23FFC131%22%2F%3E%3Ccircle%20cx%3D%2269.97%22%20cy%3D%22122.25"
+    "%22%20transform%3D%22rotate%28180%2069.97%20122.25%29%22%20fill%3D%22%23FFC131"
+    "%22%20r%3D%2218.3%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D"
+    "%22evenodd%22%20d%3D%22M138.66%20128.53a69.85%2069.85%200%2001-24.1%209.8%2049%2049"
+    "%200%20002.33-22.12%2049.08%2049.08%200%2010-56.04-74.96%2081.5%2081.5%200%2000-"
+    "26.78%207.78%2069.86%2069.86%200%2011104.6%2079.5zM34.9%2061.77l17.12%202.1c.41-"
+    "3.32%201.15-6.57%202.21-9.7a69.88%2069.88%200%2000-19.33%207.6z%22%20fill%3D%22"
+    "%23FFC131%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd"
+    "%22%20d%3D%22M31.94%2063.58a69.85%2069.85%200%200124.3-9.85%2048.97%2048.97%200"
+    "%2000-2.74%2022.23%2049.09%2049.09%200%201056.26%2074.88%2081.48%2081.48%200%2000"
+    "26.8-7.83A69.86%2069.86%200%201131.94%2063.58zm84.44%2074.33z%22%20fill%3D%22"
+    "%23FFC131%22%2F%3E%3C%2Fsvg%3E"
 )
+
+
+def _is_ntp_url(url: str | None) -> bool:
+    text = (url or "").strip().lower()
+    return text in ("", BLANK_TAB_URL, "about:blank")
+
+
 MAX_HISTORY = 500
+MAX_CLOSED_TABS = 25
 MUTED = "#666666"
 CHROME_HEIGHT = 96
 SIDE_PANE_WIDTH = 220
@@ -215,7 +236,7 @@ html, body {
   align-items: flex-end;
   padding: 6px 8px 0 8px;
   min-height: 34px;
-  overflow-x: auto;
+  overflow: hidden;
   background: linear-gradient(var(--bg-2), var(--bg));
 }
 
@@ -223,6 +244,8 @@ html, body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: 1 1 0;
+  min-width: 48px;
   max-width: 180px;
   padding: 6px 8px 7px;
   border: 1px solid transparent;
@@ -230,8 +253,10 @@ html, body {
   border-radius: 8px 8px 0 0;
   background: transparent;
   color: var(--muted);
-  cursor: pointer;
+  cursor: grab;
   white-space: nowrap;
+  touch-action: none;
+  overflow: hidden;
 }
 
 .tab:hover { background: var(--tab-hover); color: var(--text); }
@@ -243,10 +268,20 @@ html, body {
   box-shadow: 0 -1px 0 var(--surface) inset;
 }
 
+.tab.dragging {
+  opacity: 0.55;
+  cursor: grabbing;
+}
+
+.tab.drag-target {
+  box-shadow: -2px 0 0 var(--accent);
+}
+
 .tab .title {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 112px;
 }
 
 .tab-icon {
@@ -300,6 +335,13 @@ html, body {
   cursor: pointer;
   line-height: 1;
   padding: 0;
+  flex-shrink: 0;
+  opacity: 0;
+}
+
+.tab.active .close,
+.tab:hover .close {
+  opacity: 1;
 }
 
 .tab .close:hover { background: var(--bg-2); color: var(--text); }
@@ -315,6 +357,7 @@ html, body {
   margin: 4px 4px 4px 2px;
   width: 28px;
   height: 26px;
+  flex: 0 0 auto;
   border: 1px dashed var(--line);
   border-radius: 6px;
   background: transparent;
@@ -589,6 +632,89 @@ html, body {
     call("navigate", { url: target }).catch(console.error);
   }
 
+  let draggingId = null;
+  let dragMoved = false;
+  let dragPointerId = null;
+  let dragStartX = 0;
+
+  function tabEls() {
+    return [...tabsEl.querySelectorAll(".tab")];
+  }
+
+  function clearDragTarget() {
+    for (const t of tabEls()) t.classList.remove("drag-target");
+  }
+
+  function dragAfterTab(x) {
+    const tabs = tabEls().filter((t) => t.dataset.id !== draggingId);
+    let closest = null;
+    let closestOffset = Number.NEGATIVE_INFINITY;
+    for (const tab of tabs) {
+      const box = tab.getBoundingClientRect();
+      const offset = x - box.left - box.width / 2;
+      if (offset < 0 && offset > closestOffset) {
+        closestOffset = offset;
+        closest = tab;
+      }
+    }
+    return closest;
+  }
+
+  function placeDraggingTab(clientX) {
+    const dragging = tabEls().find((t) => t.dataset.id === draggingId);
+    if (!dragging) return;
+    const after = dragAfterTab(clientX);
+    clearDragTarget();
+    const neu = $("#btn-new-tab");
+    if (after == null) {
+      tabsEl.insertBefore(dragging, neu);
+    } else {
+      after.classList.add("drag-target");
+      tabsEl.insertBefore(dragging, after);
+    }
+  }
+
+  function commitTabOrder() {
+    const order = tabEls().map((t) => t.dataset.id).filter(Boolean);
+    const dragging = tabEls().find((t) => t.dataset.id === draggingId);
+    if (dragging) dragging.classList.remove("dragging");
+    clearDragTarget();
+    const moved = dragMoved;
+    draggingId = null;
+    dragPointerId = null;
+    if (!moved || !order.length) return;
+    call("reorder_tabs", { order }).catch(console.error);
+  }
+
+  function endTabDrag() {
+    if (!draggingId) {
+      dragPointerId = null;
+      return;
+    }
+    commitTabOrder();
+    setTimeout(() => {
+      dragMoved = false;
+    }, 0);
+  }
+
+  function onTabPointerMove(e) {
+    if (dragPointerId == null || e.pointerId !== dragPointerId || !draggingId) return;
+    if (!dragMoved && Math.abs(e.clientX - dragStartX) < 6) return;
+    dragMoved = true;
+    e.preventDefault();
+    const dragging = tabEls().find((t) => t.dataset.id === draggingId);
+    if (dragging) dragging.classList.add("dragging");
+    placeDraggingTab(e.clientX);
+  }
+
+  function onTabPointerUp(e) {
+    if (dragPointerId == null || e.pointerId !== dragPointerId) return;
+    window.removeEventListener("pointermove", onTabPointerMove, true);
+    window.removeEventListener("pointerup", onTabPointerUp, true);
+    window.removeEventListener("pointercancel", onTabPointerUp, true);
+    endTabDrag();
+  }
+
   function renderTabs() {
     tabsEl.innerHTML = "";
     for (const tab of state.tabs) {
@@ -599,6 +725,7 @@ html, body {
         (tab.loading ? " loading" : "");
       el.dataset.id = tab.id;
       el.title = tab.title || "New Tab";
+      el.style.touchAction = "none";
 
       const iconWrap = document.createElement("span");
       iconWrap.className = "tab-icon";
@@ -612,6 +739,7 @@ html, body {
         img.src = tab.icon;
         img.alt = "";
         img.className = "tab-icon-img";
+        img.draggable = false;
         img.addEventListener("error", () => {
           img.remove();
         });
@@ -635,7 +763,12 @@ html, body {
       });
       el.appendChild(close);
 
-      el.addEventListener("click", () => {
+      el.addEventListener("click", (e) => {
+        if (dragMoved) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         call("select_tab", { tab_id: tab.id }).catch(console.error);
       });
       el.addEventListener("auxclick", (e) => {
@@ -643,6 +776,17 @@ html, body {
           e.preventDefault();
           call("close_tab", { tab_id: tab.id }).catch(console.error);
         }
+      });
+      el.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest(".close")) return;
+        draggingId = tab.id;
+        dragMoved = false;
+        dragPointerId = e.pointerId;
+        dragStartX = e.clientX;
+        window.addEventListener("pointermove", onTabPointerMove, true);
+        window.addEventListener("pointerup", onTabPointerUp, true);
+        window.addEventListener("pointercancel", onTabPointerUp, true);
       });
       tabsEl.appendChild(el);
     }
@@ -670,7 +814,8 @@ html, body {
     }
     btnFav.classList.toggle("on", !!state.isFavorite);
     btnFav.title = state.isFavorite ? "Remove bookmark" : "Add bookmark";
-    renderTabs();
+    // Avoid wiping an in-progress tab drag (chrome state ticks ~350ms).
+    if (!draggingId) renderTabs();
   }
 
   function menuAnchor(el) {
@@ -1213,7 +1358,19 @@ html, body {
       return;
     }
     window.tkwry.on("state", applyState);
-    call("get_state", {}).then(applyState).catch(console.error);
+
+    async function loadState(retries = 40) {
+      try {
+        applyState(await call("get_state", {}));
+      } catch (err) {
+        if (retries > 0) {
+          setTimeout(() => loadState(retries - 1), 50);
+        } else {
+          console.error(err);
+        }
+      }
+    }
+    loadState();
 
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const syncTheme = () =>
@@ -1247,6 +1404,7 @@ html, body {
       <div class="field">
         <label for="home-url">Home URL</label>
         <input id="home-url" type="text" spellcheck="false" />
+        <p class="hint">Use <code>about:blank</code> for the New Tab start page.</p>
       </div>
       <div class="field">
         <label for="search-url">Search URL</label>
@@ -1750,6 +1908,281 @@ DEFAULT_BOOKMARKS: tuple[tuple[str, str], ...] = (
     ("mashu3", "https://github.com/mashu3"),
 )
 
+
+def _flatten_bookmark_links(nodes: list[Any], *, limit: int = 8) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+
+    def walk(items: list[Any]) -> None:
+        for node in items:
+            if len(out) >= limit:
+                return
+            kind = getattr(node, "kind", "")
+            if kind == "bookmark":
+                url = (getattr(node, "url", None) or "").strip()
+                if url:
+                    title = getattr(node, "title", None) or url
+                    out.append({"title": str(title), "url": url})
+            elif kind == "folder":
+                walk(list(getattr(node, "children", []) or []))
+
+    walk(nodes)
+    return out
+
+
+def _blank_tab_html(*, dark: bool = False) -> str:
+    """Self-contained new-tab page (search + shortcuts); state via IPC/emit."""
+    theme = "dark" if dark else "light"
+    seeds = [
+        {"title": title, "url": url} for title, url in DEFAULT_BOOKMARKS
+    ]
+    seed_json = json.dumps(seeds, ensure_ascii=False)
+    return f"""<!DOCTYPE html>
+<html lang="en" data-theme="{theme}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>New Tab</title>
+  <link rel="icon" href="{WRY_TAB_ICON}" />
+  <style>
+    :root {{
+      --ink: #15202b;
+      --muted: #5a6878;
+      --accent: #2a6fd6;
+      --accent-soft: rgba(42, 111, 214, 0.14);
+      --field: rgba(255, 255, 255, 0.55);
+      --field-border: rgba(21, 32, 43, 0.12);
+      --chip: #1d4f91;
+      --glow-a: #b9d0ea;
+      --glow-b: #c5ddd4;
+      --base-0: #eef2f6;
+      --base-1: #e3e9f0;
+      --base-2: #d7e0ea;
+      --font-display: "Avenir Next", "Segoe UI Variable Display", "Trebuchet MS", sans-serif;
+      --font-body: "Avenir Next", "Segoe UI Variable", "Trebuchet MS", sans-serif;
+    }}
+    html[data-theme="dark"] {{
+      --ink: #e8eef5;
+      --muted: #9aa8b8;
+      --accent: #7eb0ff;
+      --accent-soft: rgba(126, 176, 255, 0.16);
+      --field: rgba(20, 24, 32, 0.55);
+      --field-border: rgba(232, 238, 245, 0.12);
+      --chip: #8eb7ef;
+      --glow-a: #1a3352;
+      --glow-b: #163832;
+      --base-0: #12151a;
+      --base-1: #171b22;
+      --base-2: #1c222c;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      html:not([data-theme="light"]) {{
+        --ink: #e8eef5;
+        --muted: #9aa8b8;
+        --accent: #7eb0ff;
+        --accent-soft: rgba(126, 176, 255, 0.16);
+        --field: rgba(20, 24, 32, 0.55);
+        --field-border: rgba(232, 238, 245, 0.12);
+        --chip: #8eb7ef;
+        --glow-a: #1a3352;
+        --glow-b: #163832;
+        --base-0: #12151a;
+        --base-1: #171b22;
+        --base-2: #1c222c;
+      }}
+    }}
+    * {{ box-sizing: border-box; }}
+    html, body {{
+      margin: 0;
+      min-height: 100%;
+      color: var(--ink);
+      font: 15px/1.45 var(--font-body);
+      background:
+        radial-gradient(ellipse 90% 55% at 50% -8%, var(--glow-a) 0%, transparent 58%),
+        radial-gradient(ellipse 55% 45% at 100% 100%, var(--glow-b) 0%, transparent 50%),
+        linear-gradient(168deg, var(--base-0) 0%, var(--base-1) 48%, var(--base-2) 100%);
+      background-attachment: fixed;
+    }}
+    body {{
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: clamp(24px, 6vh, 64px) 20px 48px;
+      min-height: 100vh;
+    }}
+    .stage {{
+      width: min(100%, 36rem);
+      text-align: center;
+      animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }}
+    @keyframes rise {{
+      from {{ opacity: 0; transform: translateY(14px); }}
+      to {{ opacity: 1; transform: none; }}
+    }}
+    .brand {{
+      margin: 0 0 0.35rem;
+      font: 600 clamp(2.6rem, 7vw, 3.6rem)/1.05 var(--font-display);
+      letter-spacing: -0.045em;
+      color: var(--ink);
+    }}
+    .tag {{
+      margin: 0 0 1.75rem;
+      color: var(--muted);
+      font-size: 1.02rem;
+      letter-spacing: 0.01em;
+      animation: rise 0.75s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both;
+    }}
+    form.search {{
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      width: 100%;
+      padding: 0.15rem 0 0.55rem;
+      border-bottom: 1.5px solid var(--field-border);
+      background: transparent;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      animation: rise 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.14s both;
+    }}
+    form.search:focus-within {{
+      border-bottom-color: var(--accent);
+      box-shadow: 0 1px 0 var(--accent-soft);
+    }}
+    form.search input {{
+      flex: 1;
+      min-width: 0;
+      border: 0;
+      outline: none;
+      background: transparent;
+      color: var(--ink);
+      font: 1.05rem/1.4 var(--font-body);
+      padding: 0.55rem 0;
+    }}
+    form.search input::placeholder {{ color: var(--muted); opacity: 0.85; }}
+    form.search button {{
+      border: 0;
+      background: transparent;
+      color: var(--accent);
+      font: 600 0.92rem/1 var(--font-body);
+      letter-spacing: 0.02em;
+      cursor: pointer;
+      padding: 0.45rem 0.15rem;
+      opacity: 0.9;
+    }}
+    form.search button:hover {{ opacity: 1; }}
+    .shortcuts {{
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 0.35rem 1.35rem;
+      margin: 2rem 0 0;
+      padding: 0;
+      list-style: none;
+      animation: rise 0.85s cubic-bezier(0.22, 1, 0.36, 1) 0.22s both;
+    }}
+    .shortcuts a {{
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      color: var(--ink);
+      text-decoration: none;
+      padding: 0.35rem 0.1rem;
+      border-radius: 0;
+      opacity: 0.88;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }}
+    .shortcuts a:hover {{ opacity: 1; transform: translateY(-1px); }}
+    .mark {{
+      display: inline-grid;
+      place-items: center;
+      width: 1.7rem;
+      height: 1.7rem;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--chip);
+      font: 600 0.78rem/1 var(--font-display);
+      letter-spacing: 0.02em;
+    }}
+    .label {{
+      font-size: 0.95rem;
+      letter-spacing: 0.01em;
+    }}
+  </style>
+</head>
+<body>
+  <main class="stage">
+    <h1 class="brand">tkwry</h1>
+    <p class="tag">Search the web or open a page</p>
+    <form class="search" id="search" autocomplete="off">
+      <input id="q" type="search" name="q" placeholder="Search or enter address"
+        spellcheck="false" autofocus enterkeyhint="go" />
+      <button type="submit">Go</button>
+    </form>
+    <ul class="shortcuts" id="shortcuts" aria-label="Shortcuts"></ul>
+  </main>
+  <script>
+    const SEED = {seed_json};
+    function post(payload) {{
+      if (window.ipc && window.ipc.postMessage) {{
+        window.ipc.postMessage(JSON.stringify(payload));
+      }}
+    }}
+    function initial(title) {{
+      const t = String(title || "?").trim();
+      const m = t.match(/[A-Za-z0-9]/);
+      return (m ? m[0] : "?").toUpperCase();
+    }}
+    function paintShortcuts(items) {{
+      const el = document.getElementById("shortcuts");
+      el.innerHTML = "";
+      (items || []).forEach((item) => {{
+        const li = document.createElement("li");
+        const a = document.createElement("a");
+        a.href = item.url;
+        a.title = item.url;
+        a.innerHTML = '<span class="mark"></span><span class="label"></span>';
+        a.querySelector(".mark").textContent = initial(item.title);
+        a.querySelector(".label").textContent = item.title;
+        a.addEventListener("click", (e) => {{
+          e.preventDefault();
+          post({{ action: "navigate", href: item.url }});
+        }});
+        li.appendChild(a);
+        el.appendChild(li);
+      }});
+    }}
+    function applyNtp(state) {{
+      if (!state || typeof state !== "object") return;
+      if (state.dark === true) document.documentElement.setAttribute("data-theme", "dark");
+      else if (state.dark === false) document.documentElement.setAttribute("data-theme", "light");
+      if (Array.isArray(state.shortcuts)) paintShortcuts(state.shortcuts);
+      const q = document.getElementById("q");
+      if (q && state.focus) q.focus();
+    }}
+    document.getElementById("search").addEventListener("submit", (e) => {{
+      e.preventDefault();
+      const q = document.getElementById("q").value.trim();
+      if (!q) return;
+      post({{ action: "navigate", q }});
+    }});
+    paintShortcuts(SEED);
+    function boot() {{
+      if (window.tkwry && window.tkwry.on) {{
+        if (!window._tkwryNtp) {{
+          window._tkwryNtp = true;
+          window.tkwry.on("ntp", applyNtp);
+        }}
+        post({{ action: "ntp_ready" }});
+        return;
+      }}
+      setTimeout(boot, 40);
+    }}
+    boot();
+  </script>
+</body>
+</html>
+"""
+
+
 LINK_HELPER_JS = """
 (function () {
   function absHref(href) {
@@ -1820,6 +2253,242 @@ LINK_HELPER_JS = """
   document.addEventListener("DOMContentLoaded", bootNotice);
 })();
 """
+
+# WKWebView often cannot reach the system pasteboard in this embed; bridge via Tk.
+# Also maps Cmd/Ctrl browser shortcuts into Python (RPC or IPC).
+SHORTCUT_BRIDGE_JS = """
+(function () {
+  if (window._tkwryBrowserShortcuts) return;
+  window._tkwryBrowserShortcuts = true;
+
+  function typingTarget(el) {
+    if (!el || el === document.documentElement || el === document.body) return false;
+    var tag = String(el.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return true;
+    if (el.isContentEditable) return true;
+    return false;
+  }
+
+  function isTextField(el) {
+    if (!el) return false;
+    var tag = String(el.tagName || "").toLowerCase();
+    if (tag === "textarea") return true;
+    if (tag !== "input") return false;
+    var type = String(el.type || "text").toLowerCase();
+    return (
+      type === "text" ||
+      type === "search" ||
+      type === "url" ||
+      type === "password" ||
+      type === ""
+    );
+  }
+
+  function pageSelection() {
+    try {
+      return String(window.getSelection() || "");
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function fieldSelected(el) {
+    try {
+      var start = el.selectionStart ?? 0;
+      var end = el.selectionEnd ?? 0;
+      if (end > start) return el.value.slice(start, end);
+      return el.value;
+    } catch (e) {
+      return pageSelection();
+    }
+  }
+
+  function insertFieldText(el, text) {
+    text = String(text ?? "");
+    if (isTextField(el)) {
+      var start = el.selectionStart ?? el.value.length;
+      var end = el.selectionEnd ?? start;
+      el.value = el.value.slice(0, start) + text + el.value.slice(end);
+      var caret = start + text.length;
+      try { el.setSelectionRange(caret, caret); } catch (e) {}
+      return;
+    }
+    try {
+      document.execCommand("insertText", false, text);
+    } catch (e) {}
+  }
+
+  function postIpc(payload) {
+    if (window.ipc && window.ipc.postMessage) {
+      window.ipc.postMessage(JSON.stringify(payload));
+    }
+  }
+
+  function clipboardSet(text) {
+    text = String(text ?? "");
+    if (window.tkwry && typeof window.tkwry.invoke === "function") {
+      return window.tkwry.invoke("clipboard_set", { text: text });
+    }
+    postIpc({ action: "clipboard_set", text: text });
+    return Promise.resolve();
+  }
+
+  function clipboardGet() {
+    if (window.tkwry && typeof window.tkwry.invoke === "function") {
+      return window.tkwry.invoke("clipboard_get", {});
+    }
+    return new Promise(function (resolve) {
+      var id = "c" + String(Date.now()) + Math.random().toString(16).slice(2);
+      window._tkwryClipWait = window._tkwryClipWait || {};
+      window._tkwryClipWait[id] = resolve;
+      if (window.tkwry && window.tkwry.on && !window._tkwryClipListen) {
+        window._tkwryClipListen = true;
+        window.tkwry.on("clipboard", function (payload) {
+          if (!payload || typeof payload !== "object") return;
+          var rid = payload.id;
+          var fn = window._tkwryClipWait && window._tkwryClipWait[rid];
+          if (!fn) return;
+          delete window._tkwryClipWait[rid];
+          fn(payload.text || "");
+        });
+      }
+      postIpc({ action: "clipboard_get", id: id });
+      setTimeout(function () {
+        if (window._tkwryClipWait && window._tkwryClipWait[id]) {
+          delete window._tkwryClipWait[id];
+          resolve("");
+        }
+      }, 1500);
+    });
+  }
+
+  function handleClipboardKey(e) {
+    var key = String(e.key || "").toLowerCase();
+    var mod = e.metaKey || e.ctrlKey;
+    if (!mod) return false;
+    if (key !== "c" && key !== "x" && key !== "v" && key !== "a") return false;
+
+    var el = e.target;
+    var typing = typingTarget(el);
+
+    if (key === "a" && typing) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (isTextField(el)) {
+        try { el.select(); } catch (err) {}
+      } else {
+        try { document.execCommand("selectAll"); } catch (err) {}
+      }
+      return true;
+    }
+
+    if (key === "c") {
+      var copyText = typing && isTextField(el) ? fieldSelected(el) : pageSelection();
+      if (!copyText && typing) copyText = fieldSelected(el);
+      if (!copyText) return false;
+      e.preventDefault();
+      e.stopPropagation();
+      clipboardSet(copyText).catch(function () {});
+      return true;
+    }
+
+    if (key === "x") {
+      if (!typing) return false;
+      var cutText = isTextField(el) ? fieldSelected(el) : pageSelection();
+      if (!cutText) return false;
+      e.preventDefault();
+      e.stopPropagation();
+      clipboardSet(cutText)
+        .then(function () {
+          if (isTextField(el)) {
+            var start = el.selectionStart ?? 0;
+            var end = el.selectionEnd ?? 0;
+            if (end > start) {
+              el.value = el.value.slice(0, start) + el.value.slice(end);
+              try { el.setSelectionRange(start, start); } catch (err) {}
+            }
+          } else {
+            try { document.execCommand("delete"); } catch (err) {}
+          }
+        })
+        .catch(function () {});
+      return true;
+    }
+
+    if (key === "v") {
+      if (!typing) return false;
+      e.preventDefault();
+      e.stopPropagation();
+      clipboardGet()
+        .then(function (text) {
+          insertFieldText(el, text);
+        })
+        .catch(function () {});
+      return true;
+    }
+    return false;
+  }
+
+  function shortcutName(e) {
+    var key = String(e.key || "").toLowerCase();
+    var mod = e.metaKey || e.ctrlKey;
+    if (e.key === "F5") return "reload";
+    if (e.key === "F12") return "devtools";
+    if (e.altKey && (e.key === "ArrowLeft" || e.key === "Left")) return "back";
+    if (e.altKey && (e.key === "ArrowRight" || e.key === "Right")) return "forward";
+    if (e.altKey && e.key === "Home") return "home";
+    // Match Tk Control-Tab (do not steal macOS Cmd+Tab app switcher).
+    if (key === "tab" && e.ctrlKey && !e.metaKey && !e.shiftKey) return "next_tab";
+    if (key === "tab" && e.ctrlKey && !e.metaKey && e.shiftKey) return "prev_tab";
+    if (!mod) return null;
+    if (key === "c" || key === "x" || key === "v" || key === "a") return null;
+    if (key === "[") return "back";
+    if (key === "]") return "forward";
+    if (key === "t" && e.shiftKey) return "restore_tab";
+    if (key === "t") return "new_tab";
+    if (key === "n" && e.shiftKey) return "private";
+    if (key === "n") return "new_window";
+    if (key === "w") return "close_tab";
+    if (key === "l") return "focus_url";
+    if (key === "r") return "reload";
+    if (key === "d") return "bookmark";
+    if (key === "b") return "side_pane";
+    if (key === "h") return "history";
+    if (key === "p") return "print";
+    if (key === "i" && e.shiftKey) return "devtools";
+    if (key === "," || e.code === "Comma") return "settings";
+    if (key === "=" || key === "+") return "zoom_in";
+    if (key === "-") return "zoom_out";
+    if (key === "0") return "zoom_reset";
+    if (key >= "1" && key <= "8") return "tab_" + key;
+    if (key === "9") return "tab_last";
+    return null;
+  }
+
+  function postShortcut(name) {
+    if (window.tkwry && typeof window.tkwry.invoke === "function") {
+      window.tkwry.invoke("run_shortcut", { name: name }).catch(function () {});
+      return;
+    }
+    postIpc({ action: "shortcut", name: name });
+  }
+
+  document.addEventListener(
+    "keydown",
+    function (e) {
+      if (handleClipboardKey(e)) return;
+      var name = shortcutName(e);
+      if (!name) return;
+      e.preventDefault();
+      e.stopPropagation();
+      postShortcut(name);
+    },
+    true
+  );
+})();
+"""
+
+LINK_HELPER_JS = LINK_HELPER_JS + SHORTCUT_BRIDGE_JS
 
 _LOOKS_LIKE_HOST = re.compile(
     r"^(?:localhost|(?:[\w-]+\.)+[a-zA-Z]{2,})(?::\d+)?(?:[/?#].*)?$"
@@ -2415,14 +3084,16 @@ def delete_profile_data(name: str) -> None:
 def tab_icon(tab_id: str, tab: Tab) -> str | None:
     if tab_id == SETTINGS_TAB_ID or tab.kind == "settings":
         return "settings"
+    if tab.kind == "ntp":
+        return WRY_TAB_ICON
     if tab.web is None or tab.web.destroyed:
         return None
     try:
         url = tab.web.url or ""
     except Exception:
         url = ""
-    if not url or url in (BLANK_TAB_URL, "about:blank"):
-        return None
+    if not url or _is_ntp_url(url):
+        return WRY_TAB_ICON
     icon = _favicon_url(url)
     return icon or None
 
@@ -2440,14 +3111,21 @@ class Tab:
 
 
 class BrowserShortcutBindings:
-    """Global browser shortcuts (same pattern as ``markdown_demo``).
+    """Browser shortcuts via bind_class (ahead of macOS web key-guard) + WebView JS.
 
-    When a content WKWebView is first responder, some keys may be consumed by
-    WebKit and never reach Tk — same trade-off as other tkwry demos.
+    Content / chrome WebViews often eat Cmd/Ctrl keys before Tcl; those paths
+    also post ``shortcut`` IPC / RPC into :meth:`BrowserApp.run_shortcut`.
     """
 
+    TAG = "TkwryBrowserShortcuts"
     NEW_TAB = ("<Command-t>", "<Command-T>", "<Control-t>", "<Control-T>")
     CLOSE_TAB = ("<Command-w>", "<Command-W>", "<Control-w>", "<Control-W>")
+    RESTORE_TAB = (
+        "<Command-Shift-t>",
+        "<Command-Shift-T>",
+        "<Control-Shift-t>",
+        "<Control-Shift-T>",
+    )
     FOCUS_URL = ("<Command-l>", "<Command-L>", "<Control-l>", "<Control-L>")
     RELOAD = (
         "<F5>",
@@ -2511,6 +3189,12 @@ class BrowserShortcutBindings:
         "<Control-Shift-n>",
         "<Control-Shift-N>",
     )
+    NEW_WINDOW = (
+        "<Command-n>",
+        "<Command-N>",
+        "<Control-n>",
+        "<Control-N>",
+    )
     TAB_1 = ("<Command-1>", "<Control-1>", "<Command-KP_1>", "<Control-KP_1>")
     TAB_2 = ("<Command-2>", "<Control-2>", "<Command-KP_2>", "<Control-KP_2>")
     TAB_3 = ("<Command-3>", "<Control-3>", "<Command-KP_3>", "<Control-KP_3>")
@@ -2548,9 +3232,16 @@ class BrowserShortcutBindings:
         root: tk.Misc,
         bindings: list[tuple[tuple[str, ...], Callable[[tk.Event], str | None]]],
     ) -> None:
+        # bind_class + prepend so macOS web key-guard does not swallow these first.
         for sequences, handler in bindings:
             for sequence in sequences:
+                root.bind_class(cls.TAG, sequence, handler)
                 root.bind_all(sequence, handler, add="+")
+        cls.refresh_bindtags(root)
+
+    @classmethod
+    def refresh_bindtags(cls, root: tk.Misc) -> None:
+        cls._prepend_tag_tree(root, cls.TAG)
 
     @staticmethod
     def wrap(action: Callable[[], None]) -> Callable[[tk.Event], str]:
@@ -2571,6 +3262,18 @@ class BrowserShortcutBindings:
             return "break"
 
         return handler
+
+    @staticmethod
+    def _prepend_tag_tree(widget: tk.Misc, tag: str) -> None:
+        tags = widget.bindtags()
+        if not tags or tags[0] != tag:
+            widget.bindtags((tag, *tuple(t for t in tags if t != tag)))
+        try:
+            children = widget.winfo_children()
+        except tk.TclError:
+            return
+        for child in children:
+            BrowserShortcutBindings._prepend_tag_tree(child, tag)
 
 
 @dataclass
@@ -2595,6 +3298,7 @@ class BrowserApp:
     _ui_epoch: int = 0
     _after_ids: list[str] = field(default_factory=list)
     _url_editing: bool = False
+    _closed_tabs: list[dict[str, str]] = field(default_factory=list)
 
     chrome: WebView = field(init=False)
     side: WebView = field(init=False)
@@ -2664,6 +3368,16 @@ class BrowserApp:
             label="New Tab",
             accelerator=f"{mod}+T",
             command=self.new_blank_tab,
+        )
+        file_m.add_command(
+            label="Reopen Closed Tab",
+            accelerator=f"{mod}+Shift+T",
+            command=self.restore_closed_tab,
+        )
+        file_m.add_command(
+            label="New Window",
+            accelerator=f"{mod}+N",
+            command=self.open_new_window,
         )
         file_m.add_command(
             label="New Private Window",
@@ -2789,6 +3503,7 @@ class BrowserApp:
             background_color=ui_bg,
             csp=CHROME_CSP,
             clipboard=True,
+            initialization_script=SHORTCUT_BRIDGE_JS,
             user_agent="tkwry-browser-chrome/1.0",
             on_creation_failed=lambda exc: messagebox.showerror(
                 "Chrome WebView failed", str(exc), parent=self.root
@@ -2801,6 +3516,8 @@ class BrowserApp:
             focused=False,
             background_color=ui_bg,
             csp=SIDE_CSP,
+            clipboard=True,
+            initialization_script=SHORTCUT_BRIDGE_JS,
             user_agent="tkwry-browser-side/1.0",
             on_creation_failed=lambda exc: messagebox.showerror(
                 "Side WebView failed", str(exc), parent=self.root
@@ -2812,11 +3529,14 @@ class BrowserApp:
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_quit)
 
+        self._closed_tabs = []
         self.add_tab(self.store.settings.home)
         self._safe_when_ready(self.chrome, self.push_chrome_state)
         self._safe_when_ready(self.side, self.push_side_state)
         self._schedule_chrome_refresh()
         self._schedule_after(50, lambda: self.content_split.sashpos(0, SIDE_PANE_WIDTH))
+        self._schedule_after(80, self._sync_side_webview)
+        self._schedule_after(120, self.push_side_state)
 
     def _install_shortcuts(self) -> None:
         wrap = BrowserShortcutBindings.wrap
@@ -2825,6 +3545,7 @@ class BrowserApp:
             self.root,
             [
                 (B.NEW_TAB, wrap(self.new_blank_tab)),
+                (B.RESTORE_TAB, wrap(self.restore_closed_tab)),
                 (B.CLOSE_TAB, wrap(self.close_selected)),
                 (B.FOCUS_URL, wrap(self.focus_url)),
                 (B.RELOAD, wrap(self.reload_or_stop)),
@@ -2843,6 +3564,7 @@ class BrowserApp:
                 (B.DEVTOOLS, wrap(self.open_devtools)),
                 (B.SETTINGS, wrap(self.open_settings)),
                 (B.PRIVATE, wrap(self.open_private_window)),
+                (B.NEW_WINDOW, wrap(self.open_new_window)),
                 (B.TAB_1, wrap(lambda: self.select_tab_at(0))),
                 (B.TAB_2, wrap(lambda: self.select_tab_at(1))),
                 (B.TAB_3, wrap(lambda: self.select_tab_at(2))),
@@ -2857,6 +3579,49 @@ class BrowserApp:
                 (B.PASTE, B.wrap_if(lambda: self._url_editing, self._paste_url_bar)),
             ],
         )
+
+    def run_shortcut(self, name: str) -> None:
+        """Dispatch a named shortcut from Tk binds or WebView JS bridges."""
+        key = (name or "").strip().lower()
+
+        def bookmark() -> None:
+            self.toggle_favorite()
+
+        actions: dict[str, Callable[[], None]] = {
+            "new_tab": self.new_blank_tab,
+            "restore_tab": self.restore_closed_tab,
+            "close_tab": self.close_selected,
+            "focus_url": self.focus_url,
+            "reload": self.reload_or_stop,
+            "bookmark": bookmark,
+            "side_pane": self.toggle_side_pane,
+            "history": self.show_history_section,
+            "back": self.go_back,
+            "forward": self.go_forward,
+            "home": self.go_home,
+            "next_tab": lambda: self.cycle_tab(1),
+            "prev_tab": lambda: self.cycle_tab(-1),
+            "zoom_in": lambda: self.nudge_zoom(0.1),
+            "zoom_out": lambda: self.nudge_zoom(-0.1),
+            "zoom_reset": self.reset_zoom,
+            "print": self.print_current,
+            "devtools": self.open_devtools,
+            "settings": self.open_settings,
+            "private": self.open_private_window,
+            "new_window": self.open_new_window,
+            "tab_1": lambda: self.select_tab_at(0),
+            "tab_2": lambda: self.select_tab_at(1),
+            "tab_3": lambda: self.select_tab_at(2),
+            "tab_4": lambda: self.select_tab_at(3),
+            "tab_5": lambda: self.select_tab_at(4),
+            "tab_6": lambda: self.select_tab_at(5),
+            "tab_7": lambda: self.select_tab_at(6),
+            "tab_8": lambda: self.select_tab_at(7),
+            "tab_last": self.select_last_tab,
+        }
+        fn = actions.get(key)
+        if fn is not None:
+            fn()
 
     def _paste_url_bar(self) -> None:
         if self.chrome.destroyed or not self.chrome.ready:
@@ -2917,8 +3682,34 @@ class BrowserApp:
             on_text,
         )
 
+    def _clipboard_get_text(self) -> str:
+        try:
+            return str(self.root.clipboard_get())
+        except tk.TclError:
+            return ""
+
+    def _clipboard_set_text(self, text: str) -> None:
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(str(text))
+        except tk.TclError:
+            pass
+
+    def _expose_clipboard(self, web: WebView, *, allow_any_origin: bool = False) -> None:
+        """Expose Tk pasteboard helpers; content tabs need ``allow_any_origin``."""
+        any_origin = allow_any_origin or getattr(web, "bridge_origins", None) == "*"
+
+        @web.expose(allow_any_origin=any_origin)
+        def clipboard_get() -> str:
+            return self._clipboard_get_text()
+
+        @web.expose(allow_any_origin=any_origin)
+        def clipboard_set(text: str = "") -> None:
+            self._clipboard_set_text(text)
+
     def _bind_chrome_rpc(self) -> None:
         chrome = self.chrome
+        self._expose_clipboard(chrome)
 
         @chrome.expose
         def get_state() -> dict[str, Any]:
@@ -2962,6 +3753,10 @@ class BrowserApp:
                 self.select_tab(str(tab_id))
 
         @chrome.expose
+        def reorder_tabs(order: list[str] | None = None) -> None:
+            self.reorder_tabs([str(x) for x in (order or [])])
+
+        @chrome.expose
         def toggle_favorite() -> bool:
             return self.toggle_favorite()
 
@@ -2984,22 +3779,13 @@ class BrowserApp:
             self._url_editing = bool(active)
 
         @chrome.expose
-        def clipboard_get() -> str:
-            try:
-                return str(self.root.clipboard_get())
-            except tk.TclError:
-                return ""
-
-        @chrome.expose
-        def clipboard_set(text: str = "") -> None:
-            try:
-                self.root.clipboard_clear()
-                self.root.clipboard_append(str(text))
-            except tk.TclError:
-                pass
+        def run_shortcut(name: str = "") -> None:
+            if name:
+                self.run_shortcut(str(name))
 
     def _bind_side_rpc(self) -> None:
         side = self.side
+        self._expose_clipboard(side)
 
         @side.expose
         def get_state() -> dict[str, Any]:
@@ -3036,6 +3822,11 @@ class BrowserApp:
         @side.expose
         def set_ui_theme(dark: bool = False) -> None:
             self.apply_ui_theme(bool(dark))
+
+        @side.expose
+        def run_shortcut(name: str = "") -> None:
+            if name:
+                self.run_shortcut(str(name))
 
     # ----- chrome sync -----
 
@@ -3160,6 +3951,34 @@ class BrowserApp:
             self.side.emit("state", self.side_state())
         except Exception:
             pass
+        # Bookmark shortcuts on NTP track the same store as the side tree.
+        self.push_ntp_states()
+
+    def ntp_state(self, *, focus: bool = False) -> dict[str, Any]:
+        shortcuts = _flatten_bookmark_links(self.store.bookmarks, limit=8)
+        if not shortcuts:
+            shortcuts = [
+                {"title": title, "url": url} for title, url in DEFAULT_BOOKMARKS
+            ]
+        return {
+            "dark": self._ui_dark,
+            "shortcuts": shortcuts,
+            "focus": focus,
+        }
+
+    def push_ntp_state(self, web: WebView, *, focus: bool = False) -> None:
+        if web.destroyed or not web.ready:
+            return
+        try:
+            web.emit("ntp", self.ntp_state(focus=focus))
+        except Exception:
+            pass
+
+    def push_ntp_states(self) -> None:
+        for tab in self.tabs.values():
+            if tab.kind != "ntp" or tab.web is None:
+                continue
+            self.push_ntp_state(tab.web, focus=False)
 
     def apply_ui_theme(self, dark: bool) -> None:
         if dark == self._ui_dark:
@@ -3184,6 +4003,16 @@ class BrowserApp:
                 settings_tab.web.set_background_color(*color)
             except Exception:
                 pass
+        for tab in self.tabs.values():
+            if tab.kind != "ntp" or tab.web is None or tab.web.destroyed:
+                continue
+            if not tab.web.ready:
+                continue
+            try:
+                tab.web.set_background_color(*color)
+            except Exception:
+                pass
+        self.push_ntp_states()
 
     def _schedule_chrome_refresh(self) -> None:
         if not self._alive():
@@ -3235,24 +4064,45 @@ class BrowserApp:
     def show_side_pane(self) -> None:
         if self._side_visible and self._side_pane_attached():
             return
-        for pane in list(self.content_split.panes()):
-            self.content_split.forget(pane)
-        self.content_split.add(self.side_frame, weight=0)
-        self.content_split.add(self.content_host, weight=1)
+        # Re-add panes only when truly missing — forget/re-add blanks embedded
+        # WKWebViews on macOS if done after create.
+        panes = []
+        try:
+            panes = list(self.content_split.panes())
+        except tk.TclError:
+            pass
+        if str(self.side_frame) not in panes or str(self.content_host) not in panes:
+            for pane in panes:
+                try:
+                    self.content_split.forget(pane)
+                except tk.TclError:
+                    pass
+            self.content_split.add(self.side_frame, weight=0)
+            self.content_split.add(self.content_host, weight=1)
         self._side_visible = True
         self._schedule_after(20, lambda: self.content_split.sashpos(0, SIDE_PANE_WIDTH))
-        self._schedule_after(30, self.push_side_state)
+        self._schedule_after(40, self._sync_side_webview)
+        self._schedule_after(60, self.push_side_state)
+
+    def _sync_side_webview(self) -> None:
+        if self.side.destroyed or not self.side.ready:
+            return
+        try:
+            self.side.sync_bounds()
+        except Exception:
+            pass
 
     def _repair_side_pane(self) -> None:
         if not self._side_visible:
             return
+        # Only fix sash width. Do not forget/re-add panes here — that destroys
+        # native WebView attachment on startup Configure storms.
         if not self._side_pane_attached():
-            self._side_visible = False
-            self.show_side_pane()
             return
         try:
             if self.side_frame.winfo_width() < SIDE_PANE_WIDTH // 2:
                 self.content_split.sashpos(0, SIDE_PANE_WIDTH)
+                self._schedule_after(0, self._sync_side_webview)
         except tk.TclError:
             pass
 
@@ -3503,6 +4353,9 @@ class BrowserApp:
         self.navigate_current(target)
 
     def navigate_current(self, url: str) -> None:
+        if _is_ntp_url(url):
+            self.show_ntp()
+            return
         tab = self.current_tab()
         if tab is None or tab.web is None:
             self.add_tab(url)
@@ -3515,16 +4368,38 @@ class BrowserApp:
         except ValueError as exc:
             messagebox.showerror("Invalid URL", str(exc), parent=self.root)
             return
+        tab.kind = "content"
         self.status_var.set(f"Loading {_short_status_url(url)}…")
         self.push_chrome_state()
+
+    def show_ntp(self) -> None:
+        """Show the New Tab start page in the current content tab (or a new one)."""
+        tab = self.current_tab()
+        if tab is None or tab.web is None or tab.kind == "settings":
+            self.add_tab(BLANK_TAB_URL)
+            return
+        html = _blank_tab_html(dark=self._ui_dark)
+        try:
+            tab.web.load_html(html)
+        except Exception:
+            self.add_tab(BLANK_TAB_URL)
+            return
+        tab.kind = "ntp"
+        tab.title = "New Tab"
+        tab.loading = True
+        self.status_var.set("New Tab")
+        self.push_chrome_state()
+        self.push_side_state()
 
     def add_tab(self, url: str) -> Tab:
         frame = tk.Frame(self.content_host)
         tab_id = str(frame)
+        blank = _is_ntp_url(url)
         web = self._create_content_webview(frame, url, tab_id)
-        tab = Tab(frame=frame, web=web)
+        tab = Tab(frame=frame, web=web, kind="ntp" if blank else "content")
         self.tabs[tab_id] = tab
         self.select_tab(tab_id)
+        BrowserShortcutBindings.refresh_bindtags(self.root)
         return tab
 
     def select_tab(self, tab_id: str) -> None:
@@ -3551,6 +4426,13 @@ class BrowserApp:
                     tab.web,
                     lambda: self.scroll_settings_section(self._settings_active_section),
                 )
+        elif tab.kind == "ntp" and tab.web is not None:
+            if tab.web.ready:
+                self.push_ntp_state(tab.web, focus=True)
+            else:
+                self._safe_when_ready(
+                    tab.web, lambda: self.push_ntp_state(tab.web, focus=True)
+                )
         self._refresh_status()
         self.push_chrome_state()
         self.push_side_state()
@@ -3564,6 +4446,24 @@ class BrowserApp:
         ids = list(self.tabs)
         if ids:
             self.select_tab(ids[-1])
+
+    def reorder_tabs(self, order: list[str]) -> None:
+        """Reorder ``self.tabs`` to match chrome drag-and-drop order."""
+        if not order:
+            return
+        seen: set[str] = set()
+        ordered: dict[str, Tab] = {}
+        for tid in order:
+            if tid in self.tabs and tid not in seen:
+                ordered[tid] = self.tabs[tid]
+                seen.add(tid)
+        for tid, tab in self.tabs.items():
+            if tid not in seen:
+                ordered[tid] = tab
+        if list(ordered) == list(self.tabs):
+            return
+        self.tabs = ordered
+        self.push_chrome_state()
 
     def cycle_tab(self, delta: int) -> None:
         ids = list(self.tabs)
@@ -3579,6 +4479,7 @@ class BrowserApp:
         tab = self.tabs.get(tab_id)
         if tab is None:
             return
+        snap = self._snapshot_tab(tab_id, tab)
         ids = list(self.tabs)
         idx = ids.index(tab_id)
         was_selected = self.selected_id == tab_id
@@ -3588,6 +4489,9 @@ class BrowserApp:
         del self.tabs[tab_id]
         if self._last_content_id == tab_id:
             self._last_content_id = None
+        if snap is not None:
+            self._closed_tabs.insert(0, snap)
+            self._closed_tabs = self._closed_tabs[:MAX_CLOSED_TABS]
         if not self.tabs:
             self.new_blank_tab()
             return
@@ -3604,6 +4508,51 @@ class BrowserApp:
     def close_selected(self) -> None:
         if self.selected_id:
             self.close_tab(self.selected_id)
+
+    def _snapshot_tab(self, tab_id: str, tab: Tab) -> dict[str, str] | None:
+        if tab.kind == "settings" or tab_id == SETTINGS_TAB_ID:
+            return {"kind": "settings", "title": "Settings", "url": ""}
+        url = ""
+        if tab.web is not None and not tab.web.destroyed:
+            try:
+                url = str(tab.web.url or "")
+            except Exception:
+                url = ""
+        if tab.kind == "ntp" or _is_ntp_url(url):
+            return {
+                "kind": "ntp",
+                "title": tab.title or "New Tab",
+                "url": BLANK_TAB_URL,
+            }
+        if not url:
+            return None
+        return {
+            "kind": "content",
+            "title": tab.title or url,
+            "url": url,
+        }
+
+    def _open_session_entry(self, entry: dict[str, str]) -> None:
+        kind = str(entry.get("kind") or "content")
+        url = str(entry.get("url") or "").strip()
+        if kind == "settings":
+            self.open_settings()
+            return
+        if kind == "ntp" or _is_ntp_url(url):
+            self.add_tab(BLANK_TAB_URL)
+            return
+        if url:
+            self.add_tab(url)
+        else:
+            self.add_tab(BLANK_TAB_URL)
+
+    def restore_closed_tab(self) -> None:
+        if not self._closed_tabs:
+            self.status_var.set("No recently closed tabs")
+            return
+        entry = self._closed_tabs.pop(0)
+        self._open_session_entry(entry)
+        self.status_var.set(f"Reopened {entry.get('title') or 'tab'}")
 
     def _create_content_webview(
         self, frame: tk.Frame, url: str, tab_id: str
@@ -3629,9 +4578,12 @@ class BrowserApp:
                 tab.loading = True
             elif event is PageLoadEvent.Finished:
                 tab.loading = False
-                if page_url and page_url not in (BLANK_TAB_URL, "about:blank"):
+                if page_url and not _is_ntp_url(page_url):
+                    tab.kind = "content"
                     self.store.record_history(page_url, tab.title)
                     self.push_side_state()
+                elif tab.kind == "ntp" and tab.web is not None:
+                    self.push_ntp_state(tab.web, focus=True)
             if self.selected_id == tab_id:
                 self._refresh_status(page_url=page_url or None)
             self.push_chrome_state()
@@ -3675,17 +4627,59 @@ class BrowserApp:
                 return
             if not isinstance(payload, dict) or payload.get("__tkwry"):
                 return
-            if payload.get("action") == "newtab":
+            action = payload.get("action")
+            tab = self.tabs.get(tab_id)
+            if action == "newtab":
                 href = str(payload.get("href") or "").strip()
                 if href:
                     self.add_tab(href)
+            elif action == "shortcut":
+                name = str(payload.get("name") or "").strip()
+                if name:
+                    self.run_shortcut(name)
+            elif action == "ntp_ready":
+                if tab is not None and tab.web is not None:
+                    self.push_ntp_state(tab.web, focus=True)
+            elif action == "navigate":
+                raw = str(payload.get("q") or payload.get("href") or "").strip()
+                if not raw:
+                    return
+                target = normalize_input(
+                    raw,
+                    home=self.store.settings.home,
+                    search_url=self.store.settings.search_url,
+                )
+                if tab is None or tab.web is None or tab.web.destroyed:
+                    self.add_tab(target)
+                    return
+                try:
+                    tab.web.load_url(target)
+                except ValueError as exc:
+                    messagebox.showerror("Invalid URL", str(exc), parent=self.root)
+                    return
+                tab.kind = "content"
+                self.status_var.set(f"Loading {_short_status_url(target)}…")
+                self.push_chrome_state()
+            elif action == "clipboard_set":
+                self._clipboard_set_text(str(payload.get("text") or ""))
+            elif action == "clipboard_get":
+                req_id = str(payload.get("id") or "")
+                text = self._clipboard_get_text()
+                if tab is not None and tab.web is not None and not tab.web.destroyed:
+                    try:
+                        tab.web.emit(
+                            "clipboard", {"id": req_id, "text": text}
+                        )
+                    except Exception:
+                        pass
 
         def permission_handler(kind: PermissionKind) -> PermissionResponse:
             if kind is PermissionKind.ClipboardRead:
                 return PermissionResponse.Allow
             return PermissionResponse.Default
 
-        blank = (url or "").strip() in (BLANK_TAB_URL, "about:blank")
+        blank = _is_ntp_url(url)
+        bg = UI_BG_DARK if self._ui_dark else UI_BG_LIGHT
         web_kwargs: dict[str, Any] = {
             "session": self.content_session,
             "focused": False,
@@ -3714,13 +4708,16 @@ class BrowserApp:
             "hotkeys_zoom": True,
             "back_forward_gestures": True,
             "clipboard": True,
+            "background_color": bg,
             "user_agent": "tkwry-browser-demo/1.0",
         }
         if blank:
-            web_kwargs["html"] = BLANK_TAB_HTML
+            web_kwargs["html"] = _blank_tab_html(dark=self._ui_dark)
         else:
             web_kwargs["url"] = url
-        return WebView(frame, **web_kwargs)
+        web = WebView(frame, **web_kwargs)
+        self._expose_clipboard(web)
+        return web
 
     # ----- navigation actions -----
 
@@ -3744,10 +4741,18 @@ class BrowserApp:
             self.status_var.set("Stopped")
             self.push_chrome_state()
             return
+        # NTP is html= content (no real URL); native reload() clears to empty.
+        if tab.kind == "ntp" or _is_ntp_url(getattr(tab.web, "url", None)):
+            self.show_ntp()
+            return
         tab.web.reload()
 
     def go_home(self) -> None:
-        self.navigate_current(self.store.settings.home)
+        home = (self.store.settings.home or "").strip() or DEFAULT_HOME
+        if _is_ntp_url(home):
+            self.show_ntp()
+        else:
+            self.navigate_current(home)
 
     def nudge_zoom(self, delta: float) -> None:
         web = self.content_web()
@@ -3927,6 +4932,8 @@ class BrowserApp:
             focused=False,
             background_color=UI_BG_DARK if self._ui_dark else UI_BG_LIGHT,
             csp=SETTINGS_CSP,
+            clipboard=True,
+            initialization_script=SHORTCUT_BRIDGE_JS,
             user_agent="tkwry-browser-settings/1.0",
         )
         self._bind_settings_rpc(web)
@@ -3938,12 +4945,15 @@ class BrowserApp:
             frame=frame, web=web, title="Settings", kind="settings"
         )
         self.select_tab(SETTINGS_TAB_ID)
+        BrowserShortcutBindings.refresh_bindtags(self.root)
         if focus_profiles:
             self._schedule_after(
                 100, lambda: self.scroll_settings_section("profiles-section")
             )
 
     def _bind_settings_rpc(self, web: WebView) -> None:
+        self._expose_clipboard(web)
+
         @web.expose
         def get_state() -> dict[str, Any]:
             return self.settings_state()
@@ -3986,6 +4996,11 @@ class BrowserApp:
         @web.expose
         def set_ui_theme(dark: bool = False) -> None:
             self.apply_ui_theme(bool(dark))
+
+        @web.expose
+        def run_shortcut(name: str = "") -> None:
+            if name:
+                self.run_shortcut(str(name))
 
     def settings_state(self) -> dict[str, Any]:
         cookies: list[dict[str, Any]] = []
@@ -4123,7 +5138,29 @@ class BrowserApp:
 
     def open_app_menu(self, x: int = 0, y: int = 0) -> None:
         """Native Tk popup — HTML menus clip inside the chrome WebView."""
+        mod = "Command" if sys.platform == "darwin" else "Ctrl"
         menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(
+            label="New Tab",
+            accelerator=f"{mod}+T",
+            command=self.new_blank_tab,
+        )
+        menu.add_command(
+            label="Reopen Closed Tab",
+            accelerator=f"{mod}+Shift+T",
+            command=self.restore_closed_tab,
+        )
+        menu.add_command(
+            label="New Window",
+            accelerator=f"{mod}+N",
+            command=self.open_new_window,
+        )
+        menu.add_command(
+            label="New Private Window",
+            accelerator=f"{mod}+Shift+N",
+            command=self.open_private_window,
+        )
+        menu.add_separator()
         side_label = "Hide Side Pane" if self._side_visible else "Show Side Pane"
         menu.add_command(label=side_label, command=self.toggle_side_pane)
         menu.add_separator()
@@ -4242,6 +5279,29 @@ class BrowserApp:
             self.status_var.set(_short_status_url(url))
             return
         self.status_var.set("")
+
+    def open_new_window(self) -> None:
+        """Open another non-private window on the current (or default) profile."""
+        if self.ephemeral:
+            profile = PROFILES_DIR / DEFAULT_PROFILE
+        else:
+            profile = self.store.root
+        profile.mkdir(parents=True, exist_ok=True)
+        win = tk.Toplevel(self.root)
+        chrome_session = WebSession(data_directory=profile / "chrome")
+        side_session = WebSession(data_directory=profile / "side")
+        settings_session = WebSession(data_directory=profile / "settings")
+        content_session = WebSession(data_directory=profile / "webview")
+        store = BrowserStore(profile)
+        BrowserApp(
+            root=win,
+            chrome_session=chrome_session,
+            side_session=side_session,
+            settings_session=settings_session,
+            content_session=content_session,
+            store=store,
+            ephemeral=False,
+        ).build()
 
     def open_private_window(self) -> None:
         win = tk.Toplevel(self.root)

@@ -99,6 +99,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   assets (``browser_chrome/``, ``browser_side/``, ``browser_settings/``) are
   now embedded as Python string constants and extracted to a temp directory at
   startup — the demo is a single file
+- ``examples/tkwry_browser.py`` browser shortcuts (new tab/window, zoom, tab
+  cycling, …) use ``bind_class`` ahead of the macOS web key-guard plus a
+  WebView JS bridge so Cmd/Ctrl keys work while a WKWebView is focused
+- ``examples/tkwry_browser.py`` New Tab / default Home is a start page (brand,
+  search, bookmark shortcuts); Home URL remains configurable (``about:blank``
+  selects the start page); New Tab uses the wry emblem as its favicon;
+  reload on New Tab reloads the start page (``html=``) instead of native
+  ``reload()``, which cleared the document
+- ``examples/tkwry_browser.py`` uses a Tk clipboard bridge for Cmd/Ctrl+C/X/V
+  across chrome, settings, New Tab, and content pages (selection + fields)
+- ``examples/tkwry_browser.py`` tab strip supports drag-and-drop reorder
+- ``examples/tkwry_browser.py`` reopens closed tabs with Cmd/Ctrl+Shift+T
+- ``examples/tkwry_browser.py`` avoids re-adding the side-pane split on startup
+  ``Configure`` (which blanked the side WebView on macOS)
+- ``examples/tkwry_browser.py`` tab strip shrinks tab widths to fit (Chrome-style)
+  instead of horizontal scrolling
 
 ## [0.1.7] - 2026-09-02
 
