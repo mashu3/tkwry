@@ -63,9 +63,7 @@ def test_normalize_input(browser) -> None:
         == "https://home.test"
     )
     assert (
-        browser.normalize_input(
-            "https://a.test/x", home="h", search_url=search
-        )
+        browser.normalize_input("https://a.test/x", home="h", search_url=search)
         == "https://a.test/x"
     )
     assert (
@@ -99,7 +97,7 @@ def test_tab_label_and_favicon(browser) -> None:
 
 def test_sanitize_profile_name(browser) -> None:
     assert browser.sanitize_profile_name("  ok  ") == "ok"
-    assert browser.sanitize_profile_name('a/b:c') == "a_b_c"
+    assert browser.sanitize_profile_name("a/b:c") == "a_b_c"
     assert browser.sanitize_profile_name("   ") == browser.DEFAULT_PROFILE
 
 
@@ -125,9 +123,7 @@ def test_ui_asset_dirs_materialize_bundles(browser) -> None:
 
 def test_tab_icon_settings_and_ntp(browser) -> None:
     settings_tab = browser.Tab(frame=MagicMock(), kind="settings")
-    assert (
-        browser.tab_icon(browser.SETTINGS_TAB_ID, settings_tab) == "settings"
-    )
+    assert browser.tab_icon(browser.SETTINGS_TAB_ID, settings_tab) == "settings"
 
     ntp = browser.Tab(frame=MagicMock(), kind="ntp")
     assert browser.tab_icon("tab-1", ntp) == browser.WRY_TAB_ICON
@@ -162,15 +158,11 @@ def test_shortcut_bind_skips_unsupported_keysym(browser) -> None:
         browser.BrowserShortcutBindings._bind_sequence(
             root, "<Control-NotARealKeysymXYZ>", handler
         )
-        browser.BrowserShortcutBindings._bind_sequence(
-            root, "<Control-t>", handler
-        )
+        browser.BrowserShortcutBindings._bind_sequence(root, "<Control-t>", handler)
         assert "<Control-NotARealKeysymXYZ>" in calls
         assert "<Control-t>" in calls
         # Survived the bad keysym; Control-t should be bound on the tag.
-        assert root.bind_class(
-            browser.BrowserShortcutBindings.TAG, "<Control-t>"
-        )
+        assert root.bind_class(browser.BrowserShortcutBindings.TAG, "<Control-t>")
     finally:
         root.destroy()
 
@@ -186,8 +178,7 @@ def test_history_day_label(browser) -> None:
     )
     # Within the last week → weekday name.
     assert (
-        browser._history_day_label(today - timedelta(days=4), today=today)
-        == "Tuesday"
+        browser._history_day_label(today - timedelta(days=4), today=today) == "Tuesday"
     )
     older = browser._history_day_label(today - timedelta(days=10), today=today)
     assert "2026" in older

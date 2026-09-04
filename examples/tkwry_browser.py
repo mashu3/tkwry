@@ -78,9 +78,11 @@ from tkwry import (  # noqa: E402
     TkwrySecurityWarning,
     WebSession,
     WebView,
-    __version__ as TKWRY_VERSION,
     configure_window,
     open_in_browser,
+)
+from tkwry import (  # noqa: E402
+    __version__ as TKWRY_VERSION,
 )
 
 # Content tabs only — chrome uses a separate session + app= (no "*").
@@ -1937,7 +1939,9 @@ DEFAULT_BOOKMARKS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _flatten_bookmark_links(nodes: list[Any], *, limit: int = 8) -> list[dict[str, str]]:
+def _flatten_bookmark_links(
+    nodes: list[Any], *, limit: int = 8
+) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
 
     def walk(items: list[Any]) -> None:
@@ -1960,9 +1964,7 @@ def _flatten_bookmark_links(nodes: list[Any], *, limit: int = 8) -> list[dict[st
 def _blank_tab_html(*, dark: bool = False) -> str:
     """Self-contained new-tab page (search + shortcuts); state via IPC/emit."""
     theme = "dark" if dark else "light"
-    seeds = [
-        {"title": title, "url": url} for title, url in DEFAULT_BOOKMARKS
-    ]
+    seeds = [{"title": title, "url": url} for title, url in DEFAULT_BOOKMARKS]
     seed_json = json.dumps(seeds, ensure_ascii=False)
     return f"""<!DOCTYPE html>
 <html lang="en" data-theme="{theme}">
@@ -3742,7 +3744,9 @@ class BrowserApp:
         except tk.TclError:
             pass
 
-    def _expose_clipboard(self, web: WebView, *, allow_any_origin: bool = False) -> None:
+    def _expose_clipboard(
+        self, web: WebView, *, allow_any_origin: bool = False
+    ) -> None:
         """Expose Tk pasteboard helpers; content tabs need ``allow_any_origin``."""
         any_origin = allow_any_origin or getattr(web, "bridge_origins", None) == "*"
 
@@ -4714,9 +4718,7 @@ class BrowserApp:
                 text = self._clipboard_get_text()
                 if tab is not None and tab.web is not None and not tab.web.destroyed:
                     try:
-                        tab.web.emit(
-                            "clipboard", {"id": req_id, "text": text}
-                        )
+                        tab.web.emit("clipboard", {"id": req_id, "text": text})
                     except Exception:
                         pass
 
@@ -5270,8 +5272,7 @@ class BrowserApp:
     def show_help(self) -> None:
         if messagebox.askyesno(
             "Help",
-            f"tkwry {TKWRY_VERSION}\n\n"
-            f"Open the repository?\n{TKWRY_REPO_URL}",
+            f"tkwry {TKWRY_VERSION}\n\nOpen the repository?\n{TKWRY_REPO_URL}",
             parent=self.root,
         ):
             self.open_tkwry_repo()
