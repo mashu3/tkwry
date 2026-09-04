@@ -127,6 +127,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   hamburger menu only)
 - ``examples/tkwry_browser.py`` Help menu (toolbar + macOS/Linux menubar) shows
   the installed tkwry version and can open the GitHub repository
+- ``tests/unit/test_tkwry_browser.py`` covers New Tab / version gate / toolbar
+  helpers and shortcut bind resilience (no live WebView)
 
 ## [0.1.7] - 2026-09-02
 
