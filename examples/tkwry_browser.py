@@ -1,10 +1,12 @@
 """Mini-browser demo for tkwry (single-file; UI assets embedded below).
 
-Chrome (tabs / URL / nav) and the side pane (bookmarks / history) are local
-``app=`` WebViews with RPC. Each uses its own UI ``WebSession`` (shared
+The toolbar (tabs / URL / nav) and the side pane (bookmarks / history) are
+local ``app=`` WebViews with RPC. Each uses its own UI ``WebSession`` (shared
 ``app=`` roots on one session are not allowed). Content tabs use a
 **separate** ``WebSession`` and ``bridge_origins="*"`` for link interception
 plus a small clipboard RPC surface (Tk pasteboard bridge).
+
+Requires tkwry ``>= 0.1.8``. Architecture notes: ``docs/examples-browser.md``.
 
 Run::
 
@@ -32,29 +34,54 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 
-try:
-    from tkwry import (
-        ContextMenuEvent,
-        Download,
-        DragDropEvent,
-        NewWindowResponse,
-        PageLoadEvent,
-        PermissionKind,
-        PermissionResponse,
-        TkwrySecurityWarning,
-        WebSession,
-        WebView,
-        configure_window,
-        open_in_browser,
-    )
-except ImportError as exc:
-    import tkwry as _tkwry
+REQUIRED_TKWRY = "0.1.8"
 
-    raise SystemExit(
-        "This demo needs the current tkwry from this repository.\n"
-        f"  imported: {_tkwry.__file__}\n"
-        "  fix:      pip install -e ."
-    ) from exc
+
+def _version_tuple(text: str) -> tuple[int, int, int]:
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", (text or "").strip())
+    if not match:
+        return (0, 0, 0)
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+def _require_tkwry() -> None:
+    """Exit unless an installed/built tkwry meets REQUIRED_TKWRY."""
+    try:
+        import tkwry as _tkwry
+    except ImportError as exc:
+        raise SystemExit(
+            f"This demo needs tkwry >= {REQUIRED_TKWRY} "
+            "(rebuild the native extension from this repository).\n"
+            "  fix:    pip install -e .\n"
+            f"  detail: {exc}"
+        ) from exc
+
+    found = getattr(_tkwry, "__version__", "0.0.0")
+    if _version_tuple(found) < _version_tuple(REQUIRED_TKWRY):
+        raise SystemExit(
+            f"This demo needs tkwry >= {REQUIRED_TKWRY} (found {found}).\n"
+            f"  imported: {_tkwry.__file__}\n"
+            "  fix:      pip install -e .   # bump + rebuild native _core"
+        )
+
+
+_require_tkwry()
+
+from tkwry import (  # noqa: E402
+    ContextMenuEvent,
+    Download,
+    DragDropEvent,
+    NewWindowResponse,
+    PageLoadEvent,
+    PermissionKind,
+    PermissionResponse,
+    TkwrySecurityWarning,
+    WebSession,
+    WebView,
+    __version__ as TKWRY_VERSION,
+    configure_window,
+    open_in_browser,
+)
 
 # Content tabs only — chrome uses a separate session + app= (no "*").
 warnings.filterwarnings("ignore", category=TkwrySecurityWarning)
@@ -64,6 +91,7 @@ DEFAULT_SEARCH = "https://www.bing.com/search?q={query}"
 DEFAULT_PROFILE = "default"
 PROFILES_DIR = Path.home() / ".tkwry"
 BLANK_TAB_URL = "about:blank"
+TKWRY_REPO_URL = "https://github.com/mashu3/tkwry"
 # Icon-only crop of wry-logo.svg (tauri-apps/wry, MIT OR Apache-2.0).
 WRY_TAB_ICON = (
     "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg"
@@ -1093,7 +1121,7 @@ html, body {
   font-size: 11px;
 }
 
-/* ----- Settings navigation (Chrome-like TOC) ----- */
+/* ----- Settings navigation (TOC) ----- */
 
 .settings-nav {
   padding: 8px 0;
@@ -3113,7 +3141,7 @@ class Tab:
 class BrowserShortcutBindings:
     """Browser shortcuts via bind_class (ahead of macOS web key-guard) + WebView JS.
 
-    Content / chrome WebViews often eat Cmd/Ctrl keys before Tcl; those paths
+    Content / toolbar WebViews often eat Cmd/Ctrl keys before Tcl; those paths
     also post ``shortcut`` IPC / RPC into :meth:`BrowserApp.run_shortcut`.
     """
 
@@ -3227,6 +3255,21 @@ class BrowserShortcutBindings:
     )
 
     @classmethod
+    def _bind_sequence(
+        cls,
+        root: tk.Misc,
+        sequence: str,
+        handler: Callable[[tk.Event], str | None],
+    ) -> None:
+        """Bind one sequence; skip keysyms the local Tcl build rejects (e.g. Windows)."""
+        try:
+            root.bind_class(cls.TAG, sequence, handler)
+            root.bind_all(sequence, handler, add="+")
+        except tk.TclError:
+            # X11-only names (ISO_Left_Tab) and some KP_*/Command forms fail on Win.
+            return
+
+    @classmethod
     def install(
         cls,
         root: tk.Misc,
@@ -3235,8 +3278,7 @@ class BrowserShortcutBindings:
         # bind_class + prepend so macOS web key-guard does not swallow these first.
         for sequences, handler in bindings:
             for sequence in sequences:
-                root.bind_class(cls.TAG, sequence, handler)
-                root.bind_all(sequence, handler, add="+")
+                cls._bind_sequence(root, sequence, handler)
         cls.refresh_bindtags(root)
 
     @classmethod
@@ -3361,6 +3403,79 @@ class BrowserApp:
             self.root, title=title, geometry="1100x720", minsize=(720, 480)
         )
 
+        # Native menubar on macOS/Linux; Windows relies on the in-app toolbar menu.
+        if sys.platform != "win32":
+            self._install_menubar()
+
+        self.outer = ttk.Frame(self.root)
+        self.outer.pack(fill="both", expand=True, padx=6, pady=6)
+
+        self.chrome_frame = tk.Frame(self.outer, height=CHROME_HEIGHT)
+        self.chrome_frame.pack(fill="x")
+        self.chrome_frame.pack_propagate(False)
+
+        self.content_split = ttk.Panedwindow(self.outer, orient="horizontal")
+        self.content_split.pack(fill="both", expand=True, pady=(6, 0))
+        self.content_split.bind(
+            "<Configure>", self._on_content_split_configure, add="+"
+        )
+
+        self.side_frame = tk.Frame(self.content_split, width=SIDE_PANE_WIDTH)
+        self.side_frame.pack_propagate(False)
+        self.content_host = tk.Frame(self.content_split)
+        self.content_split.add(self.side_frame, weight=0)
+        self.content_split.add(self.content_host, weight=1)
+
+        self.status_var = tk.StringVar(value="")
+        status = ttk.Frame(self.root)
+        status.pack(fill="x", padx=6, pady=(0, 6))
+        ttk.Label(status, textvariable=self.status_var, anchor="w").pack(fill="x")
+
+        ui_bg = UI_BG_LIGHT
+        self.chrome = WebView(
+            self.chrome_frame,
+            app=self._chrome_dir,
+            session=self.chrome_session,
+            focused=False,
+            background_color=ui_bg,
+            csp=CHROME_CSP,
+            clipboard=True,
+            initialization_script=SHORTCUT_BRIDGE_JS,
+            user_agent="tkwry-browser-chrome/1.0",
+            on_creation_failed=lambda exc: messagebox.showerror(
+                "Chrome WebView failed", str(exc), parent=self.root
+            ),
+        )
+        self.side = WebView(
+            self.side_frame,
+            app=self._side_dir,
+            session=self.side_session,
+            focused=False,
+            background_color=ui_bg,
+            csp=SIDE_CSP,
+            clipboard=True,
+            initialization_script=SHORTCUT_BRIDGE_JS,
+            user_agent="tkwry-browser-side/1.0",
+            on_creation_failed=lambda exc: messagebox.showerror(
+                "Side WebView failed", str(exc), parent=self.root
+            ),
+        )
+        self._bind_chrome_rpc()
+        self._bind_side_rpc()
+        self._install_shortcuts()
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_quit)
+
+        self._closed_tabs = []
+        self.add_tab(self.store.settings.home)
+        self._safe_when_ready(self.chrome, self.push_chrome_state)
+        self._safe_when_ready(self.side, self.push_side_state)
+        self._schedule_chrome_refresh()
+        self._schedule_after(50, lambda: self.content_split.sashpos(0, SIDE_PANE_WIDTH))
+        self._schedule_after(80, self._sync_side_webview)
+        self._schedule_after(120, self.push_side_state)
+
+    def _install_menubar(self) -> None:
         mod = "Command" if sys.platform == "darwin" else "Ctrl"
         menubar = tk.Menu(self.root, tearoff=0)
         file_m = tk.Menu(menubar, tearoff=0)
@@ -3466,77 +3581,9 @@ class BrowserApp:
         menubar.add_cascade(label="View", menu=view_m)
 
         help_m = tk.Menu(menubar, tearoff=0)
-        help_m.add_command(label="About", command=self.show_about)
+        help_m.add_command(label="Help…", command=self.show_help)
         menubar.add_cascade(label="Help", menu=help_m)
         self.root.config(menu=menubar)
-
-        self.outer = ttk.Frame(self.root)
-        self.outer.pack(fill="both", expand=True, padx=6, pady=6)
-
-        self.chrome_frame = tk.Frame(self.outer, height=CHROME_HEIGHT)
-        self.chrome_frame.pack(fill="x")
-        self.chrome_frame.pack_propagate(False)
-
-        self.content_split = ttk.Panedwindow(self.outer, orient="horizontal")
-        self.content_split.pack(fill="both", expand=True, pady=(6, 0))
-        self.content_split.bind(
-            "<Configure>", self._on_content_split_configure, add="+"
-        )
-
-        self.side_frame = tk.Frame(self.content_split, width=SIDE_PANE_WIDTH)
-        self.side_frame.pack_propagate(False)
-        self.content_host = tk.Frame(self.content_split)
-        self.content_split.add(self.side_frame, weight=0)
-        self.content_split.add(self.content_host, weight=1)
-
-        self.status_var = tk.StringVar(value="")
-        status = ttk.Frame(self.root)
-        status.pack(fill="x", padx=6, pady=(0, 6))
-        ttk.Label(status, textvariable=self.status_var, anchor="w").pack(fill="x")
-
-        ui_bg = UI_BG_LIGHT
-        self.chrome = WebView(
-            self.chrome_frame,
-            app=self._chrome_dir,
-            session=self.chrome_session,
-            focused=False,
-            background_color=ui_bg,
-            csp=CHROME_CSP,
-            clipboard=True,
-            initialization_script=SHORTCUT_BRIDGE_JS,
-            user_agent="tkwry-browser-chrome/1.0",
-            on_creation_failed=lambda exc: messagebox.showerror(
-                "Chrome WebView failed", str(exc), parent=self.root
-            ),
-        )
-        self.side = WebView(
-            self.side_frame,
-            app=self._side_dir,
-            session=self.side_session,
-            focused=False,
-            background_color=ui_bg,
-            csp=SIDE_CSP,
-            clipboard=True,
-            initialization_script=SHORTCUT_BRIDGE_JS,
-            user_agent="tkwry-browser-side/1.0",
-            on_creation_failed=lambda exc: messagebox.showerror(
-                "Side WebView failed", str(exc), parent=self.root
-            ),
-        )
-        self._bind_chrome_rpc()
-        self._bind_side_rpc()
-        self._install_shortcuts()
-
-        self.root.protocol("WM_DELETE_WINDOW", self.on_quit)
-
-        self._closed_tabs = []
-        self.add_tab(self.store.settings.home)
-        self._safe_when_ready(self.chrome, self.push_chrome_state)
-        self._safe_when_ready(self.side, self.push_side_state)
-        self._schedule_chrome_refresh()
-        self._schedule_after(50, lambda: self.content_split.sashpos(0, SIDE_PANE_WIDTH))
-        self._schedule_after(80, self._sync_side_webview)
-        self._schedule_after(120, self.push_side_state)
 
     def _install_shortcuts(self) -> None:
         wrap = BrowserShortcutBindings.wrap
@@ -5172,6 +5219,7 @@ class BrowserApp:
         menu.add_command(label="Open in System Browser", command=self.open_external)
         menu.add_separator()
         menu.add_command(label="Settings", command=self.open_settings)
+        menu.add_command(label="Help…", command=self.show_help)
 
         try:
             ox = self.chrome_frame.winfo_rootx()
@@ -5213,16 +5261,20 @@ class BrowserApp:
         if open_in_browser(url):
             self.status_var.set("Opened in system browser")
 
-    def show_about(self) -> None:
-        messagebox.showinfo(
-            "About tkwry browser",
-            "Chrome + side pane are local app= WebViews (RPC),\n"
-            "each with its own UI session.\n"
-            "Content tabs use a separate WebSession.\n\n"
-            "UI follows prefers-color-scheme (dark / light).\n"
-            "Default bookmarks live under Links/.",
+    def open_tkwry_repo(self) -> None:
+        if open_in_browser(TKWRY_REPO_URL):
+            self.status_var.set(f"Opened tkwry {TKWRY_VERSION}")
+        else:
+            self.status_var.set(TKWRY_REPO_URL)
+
+    def show_help(self) -> None:
+        if messagebox.askyesno(
+            "Help",
+            f"tkwry {TKWRY_VERSION}\n\n"
+            f"Open the repository?\n{TKWRY_REPO_URL}",
             parent=self.root,
-        )
+        ):
+            self.open_tkwry_repo()
 
     def _popup_context_menu(self, event: ContextMenuEvent) -> None:
         menu = tk.Menu(self.root, tearoff=0)

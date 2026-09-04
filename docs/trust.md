@@ -157,8 +157,9 @@ have a bridge — XSS in a CDN script is the page origin.
 
 [`examples/tkwry_browser.py`](../examples/tkwry_browser.py) sets
 `bridge_origins="*"` on purpose (link interception only; expect the
-security warning). Copy that only if every page is trusted, and do not
-`expose()` desktop APIs without `allow_any_origin=True`.
+security warning). See [Mini-browser example](examples-browser.md). Copy
+that only if every page is trusted, and do not `expose()` desktop APIs
+without `allow_any_origin=True`.
 
 ## tkwry serving
 
@@ -186,5 +187,6 @@ for SPA fallback, cache headers, and `watch_app()`.
 ## Related
 
 - [Usage](usage.md) — `app=`, eval, layout, navigation, API table
+- [Mini-browser example](examples-browser.md) — content `bridge_origins="*"` recipe
 - [IPC / RPC / emit](rpc.md) — what the bridge can actually do
 - [Platform notes](platforms.md) — engine-specific `url()` / session caveats

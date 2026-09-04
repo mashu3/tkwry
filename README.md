@@ -170,7 +170,9 @@ Trust (`untrusted`, `bridge_origins`): [docs/trust.md](https://github.com/mashu3
 - Lifecycle callbacks deferred onto Tk (avoids native-thread deadlocks)
 - `tkwry.testing` wait helpers for integration tests
 
-Plotly / Folium / Markdown demos live under [Examples](#-examples).
+Plotly / Folium / Markdown demos live under [Examples](#-examples). Prefer
+[`tkwry_browser.py`](#start-here-mini-browser) as the full-layout sample
+([docs/examples-browser.md](https://github.com/mashu3/tkwry/blob/main/docs/examples-browser.md)).
 
 ---
 
@@ -182,14 +184,30 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
 ```
 
+### Start here: mini-browser
+
+The easiest way to see tkwry in a full layout: toolbar + side pane + content
+tabs, all as child WebViews.
+
+| macOS · dark | Windows · light |
+|:---:|:---:|
+| <img src="docs/images/browser-macos-dark.png" alt="tkwry browser on macOS (dark)" width="480" /> | <img src="docs/images/browser-windows-light.png" alt="tkwry browser on Windows (light)" width="480" /> |
+
 | Script | Description |
 |--------|-------------|
-| [`examples/tkwry_browser.py`](https://github.com/mashu3/tkwry/blob/main/examples/tkwry_browser.py) | Mini-browser (single file): WebView chrome + side library tree; Settings tab; Tk ☰; separate content session |
+| [`examples/tkwry_browser.py`](https://github.com/mashu3/tkwry/blob/main/examples/tkwry_browser.py) | Flagship mini-browser (single file): `app=` toolbar / side / Settings, separate content `WebSession`, New Tab start page, profiles, shortcuts |
 
+```bash
+python examples/tkwry_browser.py
+python examples/tkwry_browser.py --private
+```
 
+Architecture, trust split, and what to copy: [docs/examples-browser.md](https://github.com/mashu3/tkwry/blob/main/docs/examples-browser.md).
 
+### Focused demos
 
-
+| Script | Description |
+|--------|-------------|
 | [`examples/ipc_demo.py`](https://github.com/mashu3/tkwry/blob/main/examples/ipc_demo.py) | IPC events, RPC (`call` / kwargs / worker), stream (`ticks` + cancel), and `emit` |
 | [`examples/multi_demo.py`](https://github.com/mashu3/tkwry/blob/main/examples/multi_demo.py) | Multiple WebViews, tabs, panes; `emit_all` flash |
 | [`examples/plotly_demo.py`](https://github.com/mashu3/tkwry/blob/main/examples/plotly_demo.py) | Plotly charts — CDN or local `app=` (`pip install plotly`) |
@@ -198,7 +216,6 @@ pip install -e .
 | [`examples/dnd_demo.py`](https://github.com/mashu3/tkwry/blob/main/examples/dnd_demo.py) | Native file drag & drop into WebView |
 
 ```bash
-python examples/tkwry_browser.py
 python examples/ipc_demo.py
 python examples/multi_demo.py
 python examples/plotly_demo.py
@@ -261,6 +278,7 @@ See [CHANGELOG.md](https://github.com/mashu3/tkwry/blob/main/CHANGELOG.md) for r
 | Topic | Doc |
 |-------|-----|
 | Usage (minimal app, `app=`, hidden hosts, UA, API) | [docs/usage.md](https://github.com/mashu3/tkwry/blob/main/docs/usage.md) |
+| Mini-browser example (flagship layout / sessions / trust) | [docs/examples-browser.md](https://github.com/mashu3/tkwry/blob/main/docs/examples-browser.md) |
 | Trust boundaries (`untrusted`, `bridge_origins`, recipes) | [docs/trust.md](https://github.com/mashu3/tkwry/blob/main/docs/trust.md) |
 | IPC / RPC / emit (`expose`, `call` / `stream`, cancel, limits) | [docs/rpc.md](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md) |
 | Platform notes (Windows / macOS / Linux, print, window chrome) | [docs/platforms.md](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md) |

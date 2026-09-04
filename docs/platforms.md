@@ -366,6 +366,7 @@ When wry ships a cross-platform find API, wrap it in the next open cut.
 
 - [wry embedding and API map](wry-embedding.md) — ownership vs Tk bridge
 - [Usage](usage.md)
+- [Mini-browser example](examples-browser.md)
 - [Trust boundaries](trust.md)
 - [IPC / RPC / emit](rpc.md)
 - [README — Known limitations](../README.md#-known-limitations)

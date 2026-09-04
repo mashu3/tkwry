@@ -96,9 +96,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - Renamed ``examples/browser_demo.py`` → ``examples/tkwry_browser.py``; UI
-  assets (``browser_chrome/``, ``browser_side/``, ``browser_settings/``) are
-  now embedded as Python string constants and extracted to a temp directory at
-  startup — the demo is a single file
+  assets (toolbar / side / Settings bundles) are now embedded as Python string
+  constants and extracted to a temp directory at startup — the demo is a
+  single file
 - ``examples/tkwry_browser.py`` browser shortcuts (new tab/window, zoom, tab
   cycling, …) use ``bind_class`` ahead of the macOS web key-guard plus a
   WebView JS bridge so Cmd/Ctrl keys work while a WKWebView is focused
@@ -108,13 +108,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   reload on New Tab reloads the start page (``html=``) instead of native
   ``reload()``, which cleared the document
 - ``examples/tkwry_browser.py`` uses a Tk clipboard bridge for Cmd/Ctrl+C/X/V
-  across chrome, settings, New Tab, and content pages (selection + fields)
+  across toolbar, settings, New Tab, and content pages (selection + fields)
 - ``examples/tkwry_browser.py`` tab strip supports drag-and-drop reorder
 - ``examples/tkwry_browser.py`` reopens closed tabs with Cmd/Ctrl+Shift+T
 - ``examples/tkwry_browser.py`` avoids re-adding the side-pane split on startup
   ``Configure`` (which blanked the side WebView on macOS)
-- ``examples/tkwry_browser.py`` tab strip shrinks tab widths to fit (Chrome-style)
+- ``examples/tkwry_browser.py`` tab strip shrinks tab widths to fit
   instead of horizontal scrolling
+- README Features / Examples highlight ``tkwry_browser.py`` as the flagship
+  sample; added [docs/examples-browser.md](docs/examples-browser.md);
+  screenshots under [docs/images/](docs/images/) (macOS dark / Windows light)
+- ``examples/tkwry_browser.py`` requires tkwry ``>= 0.1.8`` (clear exit if the
+  installed / built package is older or the native extension fails to import)
+- ``examples/tkwry_browser.py`` skips Tcl key sequences the local build rejects
+  (Windows often lacks ``ISO_Left_Tab`` / some ``KP_*`` names) instead of
+  aborting shortcut install
+- ``examples/tkwry_browser.py`` omits the native Tk menubar on Windows (toolbar
+  hamburger menu only)
+- ``examples/tkwry_browser.py`` Help menu (toolbar + macOS/Linux menubar) shows
+  the installed tkwry version and can open the GitHub repository
 
 ## [0.1.7] - 2026-09-02
 

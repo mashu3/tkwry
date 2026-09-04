@@ -86,8 +86,9 @@ root.mainloop()
 
 Next steps:
 
-- Shared cookies / tabs: [Shared session](#shared-session-websession) and
+- Full-layout sample: [Mini-browser example](examples-browser.md) and
   [`examples/tkwry_browser.py`](../examples/tkwry_browser.py)
+- Shared cookies / tabs: [Shared session](#shared-session-websession)
 - JS↔Python streams / cancel: [IPC / RPC / emit](rpc.md) and
   [`examples/ipc_demo.py`](../examples/ipc_demo.py)
 - Trust for arbitrary URLs: [Trust boundaries](trust.md)
@@ -802,5 +803,6 @@ Type aliases: `IpcHandler`, `BridgeOrigins`, `BridgeAllow`, `NavigationHandler`,
 - [Trust boundaries](trust.md)
 - [IPC / RPC / emit](rpc.md)
 - [Platform notes](platforms.md)
+- [Mini-browser example](examples-browser.md)
 - [Packaging notes](packaging.md)
 - [README — Known limitations](../README.md#-known-limitations)
