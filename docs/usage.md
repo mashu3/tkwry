@@ -566,7 +566,7 @@ Callback exceptions are printed to stderr and do not stop event delivery.
 Optional provisional ``on_callback_error=(exc, kind) -> None`` (or
 :meth:`WebView.set_on_callback_error`) routes those failures to app code;
 ``kind`` names the hook (e.g. ``"on_page_load"``, ``"ipc_handler"``). Not
-in ``tkwry.__all__`` — may change in 0.2.x.
+in ``tkwry.__all__`` — may change without notice while Alpha.
 
 Trust / download policy: [Trust boundaries](trust.md).
 
@@ -736,7 +736,7 @@ Provisional callback exceptions: ``on_callback_error`` (see
 | Class | Rule |
 |-------|------|
 | **Public** | Listed in ``tkwry.__all__`` and the [API summary](#api-summary) below |
-| **Provisional** | Documented but **not** in ``__all__`` — may change in 0.2.x |
+| **Provisional** | Documented but **not** in ``__all__`` — may change without notice while Alpha |
 | **Internal** | Underscore modules / methods — unsupported |
 
 **Provisional today:**
@@ -747,8 +747,7 @@ Provisional callback exceptions: ``on_callback_error`` (see
 
 Constructor vs setter **dual paths** (e.g. ``on_navigation=`` vs
 ``set_on_navigation``) are intended to be equivalent before native create and
-after; prefer one style per app. Beta will publish a full classification and
-Stability policy (0.2.0).
+after; prefer one style per app.
 
 ## API summary
 

@@ -64,6 +64,45 @@ URL bar, Settings.
 Clipboard copy/cut/paste goes through Tk (`clipboard_get` / `clipboard_set`)
 because WKWebView pasteboard access is unreliable for this demo.
 
+## Packaging (best-effort)
+
+UI assets are embedded in the script (no separate `web/` folder). From a
+clone with tkwry installed (`pip install -e .`). Not CI-verified in 0.1.x —
+see [Packaging notes](packaging.md) for general tips and troubleshooting.
+
+### PyInstaller
+
+**Windows** — one-file `.exe`:
+
+```bat
+pyinstaller --noconsole --onefile --collect-submodules tkwry --name tkwry-browser examples/tkwry_browser.py
+```
+
+**macOS** — onedir `.app`:
+
+```bash
+pyinstaller --windowed --onedir --collect-submodules tkwry --name tkwry-browser examples/tkwry_browser.py
+```
+
+### Nuitka
+
+**Windows** — one-file `.exe`:
+
+```bat
+python -m nuitka --standalone --onefile --windows-console-mode=disable --enable-plugin=tk-inter --include-package=tkwry --include-distribution-metadata=tkwry --output-filename=tkwry-browser.exe examples/tkwry_browser.py
+```
+
+**macOS** — `.app` bundle:
+
+```bash
+python -m nuitka --standalone --macos-create-app-bundle --static-libpython=no --enable-plugin=tk-inter --include-package=tkwry --include-distribution-metadata=tkwry --macos-app-name=tkwry-browser --output-filename=tkwry-browser examples/tkwry_browser.py
+```
+
+Expect to iterate on include/data flags. Same WebView2 / WKWebView runtime
+rules as in [Packaging notes](packaging.md).
+
+Profile data still lives under `~/.tkwry/` at runtime (not inside the bundle).
+
 ## Not a product browser
 
 This is an **example**, not a supported browser product. Prefer it as a
@@ -76,5 +115,5 @@ not the whole file, into real apps.
 - [Trust boundaries](trust.md) — why content uses `bridge_origins="*"` carefully
 - [IPC / RPC / emit](rpc.md)
 - [Platform notes](platforms.md) — macOS focus / DevTools / clip containers
-- [Packaging notes](packaging.md) — PyInstaller / Nuitka ``.exe`` / ``.app`` samples
+- [Packaging notes](packaging.md) — general freeze recipes and troubleshooting
 - [README — Examples](../README.md#-examples)

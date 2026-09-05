@@ -2,8 +2,8 @@
 
 How to ship a **tkwry** app as a standalone desktop bundle (Windows `.exe` /
 macOS `.app`). These are **maintainer notes** for v0.1.x — not a confirmed
-matrix (PyInstaller / Nuitka smoke is a **0.2.0** Beta gate). Treat every
-recipe as **best-effort** until your target OS is verified.
+matrix. Treat every recipe as **best-effort** until your target OS is
+verified.
 
 Recipes here cover **Windows and macOS** (PyPI wheels). Linux is source-only
 and out of scope for these freeze samples — see [Platform notes](platforms.md).
@@ -115,22 +115,8 @@ One-file macOS builds are possible (`--onefile --windowed`) but onedir
 
 ### Flagship demo (`tkwry_browser.py`)
 
-UI assets are embedded in the script (no separate `web/` folder). From a
-clone with tkwry installed (`pip install -e .`):
-
-**Windows** — one-file `.exe`:
-
-```bat
-pyinstaller --noconsole --onefile --collect-submodules tkwry --name tkwry-browser examples/tkwry_browser.py
-```
-
-**macOS** — onedir `.app`:
-
-```bash
-pyinstaller --windowed --onedir --collect-submodules tkwry --name tkwry-browser examples/tkwry_browser.py
-```
-
-Profile data still lives under `~/.tkwry/` at runtime (not inside the bundle).
+Concrete freeze commands live in
+[Mini-browser example — Packaging](examples-browser.md#packaging-best-effort).
 
 ### Static `app=` assets
 
@@ -197,20 +183,8 @@ Sign / notarize the resulting bundle like any other macOS app.
 
 ### Flagship demo (`tkwry_browser.py`)
 
-**Windows** — one-file `.exe`:
-
-```bat
-python -m nuitka --standalone --onefile --windows-console-mode=disable --enable-plugin=tk-inter --include-package=tkwry --include-distribution-metadata=tkwry --output-filename=tkwry-browser.exe examples/tkwry_browser.py
-```
-
-**macOS** — `.app` bundle:
-
-```bash
-python -m nuitka --standalone --macos-create-app-bundle --static-libpython=no --enable-plugin=tk-inter --include-package=tkwry --include-distribution-metadata=tkwry --macos-app-name=tkwry-browser --output-filename=tkwry-browser examples/tkwry_browser.py
-```
-
-Expect to iterate on include/data flags. Same WebView2 / WKWebView runtime
-rules as PyInstaller.
+Concrete freeze commands live in
+[Mini-browser example — Packaging](examples-browser.md#packaging-best-effort).
 
 ### Troubleshooting (macOS freeze)
 
@@ -232,14 +206,6 @@ rules as PyInstaller.
    `Successfully created`, the build is fine. To reduce retries: exclude the
    project / `*.dist` / `*.build` / `*.onefile-build` folders from
    real-time scanning.
-
-
-
-## What 0.2.0 will add
-
-Beta 0.2.0 targets automated PyInstaller / Nuitka smoke on Windows and
-macOS CI (minimal create/load/destroy). Until then, report packaging gaps as
-GitHub issues with OS, freezer version, and traceback.
 
 ## Related
 

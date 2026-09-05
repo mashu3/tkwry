@@ -309,7 +309,9 @@ python -m nuitka --standalone --macos-create-app-bundle --static-libpython=no --
 
 Always collect / include the ``tkwry`` package (native ``_core``). Windows
 users still need [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/).
-Samples for ``examples/tkwry_browser.py`` and ``app=`` data dirs:
+Samples for ``examples/tkwry_browser.py``:
+[docs/examples-browser.md — Packaging](https://github.com/mashu3/tkwry/blob/main/docs/examples-browser.md#packaging-best-effort).
+``app=`` data dirs:
 [docs/packaging.md](https://github.com/mashu3/tkwry/blob/main/docs/packaging.md).
 
 ---

@@ -510,7 +510,7 @@ class WebView(WebViewRpcMixin):
     ``on_callback_error=(exc, kind) -> None`` (and :meth:`set_on_callback_error`)
     routes those failures to app code instead; ``kind`` names the hook
     (e.g. ``"on_page_load"``, ``"ipc_handler"``). Not in ``__all__`` — may
-    change in 0.2.x.
+    change without notice while Alpha.
 
     **JavaScript** (``eval_js`` / ``eval_js_with_callback``): ``eval_js`` is
     fire-and-forget (Tk idle, no return value). ``eval_js_with_callback`` is
@@ -2754,7 +2754,7 @@ class WebView(WebViewRpcMixin):
         *handler* receives ``(exc, kind)`` where ``kind`` names the failing
         hook (e.g. ``"on_page_load"``, ``"ipc_handler"``). When unset,
         failures are logged to stderr (default). Not part of the stable
-        public contract — may change in 0.2.x.
+        public contract — may change without notice while Alpha.
         """
         self._require_not_destroyed("set_on_callback_error")
         self._on_callback_error = handler
