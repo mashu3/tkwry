@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-09-06
+
+Post-0.1.7 defect sweep (lifecycle, RPC/IPC, session, macOS embed) plus the
+flagship ``tkwry_browser`` demo and freeze docs.
+
 ### Fixed
 
 - Deep JSON on the IPC path no longer overflows the Rust stack when classifying
@@ -132,9 +137,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the installed tkwry version and can open the GitHub repository
 - ``tests/unit/test_tkwry_browser.py`` covers New Tab / version gate / toolbar
   helpers and shortcut bind resilience (no live WebView)
-- [docs/packaging.md](docs/packaging.md) and README add concrete PyInstaller /
-  Nuitka command samples for Windows ``.exe`` and macOS ``.app`` (still
-  best-effort / not CI-verified in 0.1.x)
+- Concrete PyInstaller / Nuitka freeze samples for ``tkwry_browser`` live in
+  [docs/examples-browser.md](docs/examples-browser.md); generic recipes remain
+  in [docs/packaging.md](docs/packaging.md) (still best-effort / not CI-verified
+  in 0.1.x)
 - ``examples/tkwry_browser.py`` defaults downloads to the OS Downloads folder
   (Windows Known Folder / ``~/Downloads``), not ``~/.tkwry/<profile>/downloads``
 
@@ -945,6 +951,7 @@ eval, macOS IME / import-order / DevTools private APIs, Notebook `ready`≠map.
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.1.8]: https://github.com/mashu3/tkwry/releases/tag/v0.1.8
 [0.1.7]: https://github.com/mashu3/tkwry/releases/tag/v0.1.7
 [0.1.6]: https://github.com/mashu3/tkwry/releases/tag/v0.1.6
 [0.1.5]: https://github.com/mashu3/tkwry/releases/tag/v0.1.5
