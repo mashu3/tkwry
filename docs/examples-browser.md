@@ -51,7 +51,8 @@ the GitHub repository.
   Home `about:blank` selects that page; reload re-loads HTML (native
   `reload()` would clear `html=` documents)
 - **Profiles** — named dirs under `~/.tkwry/`; switch / create / delete from
-  Settings; `--private` uses an ephemeral content session
+  Settings; `--private` uses an ephemeral content session. Default download
+  folder is the OS **Downloads** directory (not under the profile tree)
 
 ## Shortcuts (demo)
 

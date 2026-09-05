@@ -126,6 +126,8 @@ DEFAULT_PROFILE = "default"
 PROFILES_DIR = Path.home() / ".tkwry"
 BLANK_TAB_URL = "about:blank"
 TKWRY_REPO_URL = "https://github.com/mashu3/tkwry"
+# FOLDERID_Downloads — used when resolving the Windows Known Folder.
+_WIN_DOWNLOADS_GUID = "{374DE290-123F-4565-9164-39C4925E467B}"
 # Icon-only crop of wry-logo.svg (tauri-apps/wry, MIT OR Apache-2.0).
 WRY_TAB_ICON = (
     "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg"
@@ -2672,9 +2674,24 @@ class BrowserStore:
             self.save_bookmarks()
             self._bookmarks_seeded = False
         if not self.settings.download_dir:
-            self.settings.download_dir = str(root / "downloads")
-            Path(self.settings.download_dir).mkdir(parents=True, exist_ok=True)
+            dest = _default_download_dir()
+            dest.mkdir(parents=True, exist_ok=True)
+            self.settings.download_dir = str(dest)
             self.save_settings()
+        else:
+            # Older demos stored downloads under the profile tree; move the
+            # default pointer to the OS Downloads folder (files are left alone).
+            try:
+                legacy = (root / "downloads").resolve()
+                current = Path(self.settings.download_dir).expanduser().resolve()
+            except OSError:
+                pass
+            else:
+                if current == legacy:
+                    dest = _default_download_dir()
+                    dest.mkdir(parents=True, exist_ok=True)
+                    self.settings.download_dir = str(dest)
+                    self.save_settings()
 
     def _read_json(self, path: Path, default: Any) -> Any:
         if not path.is_file():
@@ -3118,6 +3135,34 @@ SETTINGS_SECTIONS: tuple[tuple[str, str], ...] = (
     ("profiles-section", "Profiles"),
     ("cookies-section", "Cookies"),
 )
+
+
+def _default_download_dir() -> Path:
+    """User Downloads folder (OS default), not under ``~/.tkwry``."""
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
+            ) as key:
+                return Path(winreg.QueryValueEx(key, _WIN_DOWNLOADS_GUID)[0])
+        except OSError:
+            pass
+    elif sys.platform != "darwin":
+        try:
+            cfg = Path.home() / ".config" / "user-dirs.dirs"
+            for line in cfg.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if not stripped.startswith("XDG_DOWNLOAD_DIR="):
+                    continue
+                raw = stripped.split("=", 1)[1].strip().strip('"')
+                raw = raw.replace("$HOME", str(Path.home())).replace("${HOME}", str(Path.home()))
+                return Path(raw).expanduser()
+        except OSError:
+            pass
+    return Path.home() / "Downloads"
 
 
 def sanitize_profile_name(name: str) -> str:
@@ -5164,8 +5209,9 @@ class BrowserApp:
         if not messagebox.askyesno(
             "Delete profile",
             f"Delete profile “{name}”?\n\n"
-            f"This removes bookmarks, history, cookies, cache, and downloads "
-            f"stored under:\n{path}",
+            f"This removes bookmarks, history, cookies, and cache "
+            f"stored under:\n{path}\n\n"
+            f"(Download files in your Downloads folder are not deleted.)",
             parent=self.root,
             icon="warning",
         ):
@@ -5203,7 +5249,8 @@ class BrowserApp:
             return
         self.store.settings.home = home
         self.store.settings.search_template = search
-        self.store.settings.download_dir = (download_dir or "").strip()
+        dest = (download_dir or "").strip() or str(_default_download_dir())
+        self.store.settings.download_dir = dest
         self.store.save_settings()
         self.status_var.set("Settings saved")
         self.push_settings_state()

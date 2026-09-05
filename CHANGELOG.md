@@ -132,6 +132,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - [docs/packaging.md](docs/packaging.md) and README add concrete PyInstaller /
   Nuitka command samples for Windows ``.exe`` and macOS ``.app`` (still
   best-effort / not CI-verified in 0.1.x)
+- ``examples/tkwry_browser.py`` defaults downloads to the OS Downloads folder
+  (Windows Known Folder / ``~/Downloads``), not ``~/.tkwry/<profile>/downloads``
 
 ## [0.1.7] - 2026-09-02
 

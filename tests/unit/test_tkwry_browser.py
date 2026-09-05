@@ -59,6 +59,12 @@ def test_require_tkwry_skips_gate_when_frozen(browser, monkeypatch) -> None:
     browser._require_tkwry()  # bundled older metadata must not abort the exe
 
 
+def test_default_download_dir_not_under_profiles(browser) -> None:
+    path = browser._default_download_dir()
+    assert path.is_absolute()
+    assert "tkwry" not in {p.lower() for p in path.parts}
+
+
 def test_is_ntp_url(browser) -> None:
     assert browser._is_ntp_url(None)
     assert browser._is_ntp_url("")
