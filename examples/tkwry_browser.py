@@ -3257,7 +3257,9 @@ def _default_download_dir() -> Path:
                 if not stripped.startswith("XDG_DOWNLOAD_DIR="):
                     continue
                 raw = stripped.split("=", 1)[1].strip().strip('"')
-                raw = raw.replace("$HOME", str(Path.home())).replace("${HOME}", str(Path.home()))
+                raw = raw.replace("$HOME", str(Path.home())).replace(
+                    "${HOME}", str(Path.home())
+                )
                 return Path(raw).expanduser()
         except OSError:
             pass
