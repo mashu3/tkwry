@@ -75,4 +75,5 @@ not the whole file, into real apps.
 - [Trust boundaries](trust.md) — why content uses `bridge_origins="*"` carefully
 - [IPC / RPC / emit](rpc.md)
 - [Platform notes](platforms.md) — macOS focus / DevTools / clip containers
+- [Packaging notes](packaging.md) — PyInstaller / Nuitka ``.exe`` / ``.app`` samples
 - [README — Examples](../README.md#-examples)

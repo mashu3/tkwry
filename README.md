@@ -273,6 +273,47 @@ See [CHANGELOG.md](https://github.com/mashu3/tkwry/blob/main/CHANGELOG.md) for r
 
 ---
 
+## 📤 Packaging (best-effort)
+
+Freeze a tkwry app to a Windows ``.exe`` or macOS ``.app`` with PyInstaller or
+Nuitka. **Not CI-verified in 0.1.x** — verify on your target OS. Full notes:
+[docs/packaging.md](https://github.com/mashu3/tkwry/blob/main/docs/packaging.md).
+
+```bash
+pip install pyinstaller tkwry   # or: pip install nuitka tkwry
+```
+
+**PyInstaller — Windows ``.exe``**
+
+```bat
+pyinstaller --noconsole --onefile --collect-submodules tkwry --name MyApp main.py
+```
+
+**PyInstaller — macOS ``.app``**
+
+```bash
+pyinstaller --windowed --onedir --collect-submodules tkwry --name MyApp main.py
+```
+
+**Nuitka — Windows one-file ``.exe``**
+
+```bat
+python -m nuitka --standalone --onefile --windows-console-mode=disable --enable-plugin=tk-inter --include-package=tkwry --include-distribution-metadata=tkwry --output-filename=MyApp.exe main.py
+```
+
+**Nuitka — macOS ``.app``** (Homebrew: include ``--static-libpython=no``)
+
+```bash
+python -m nuitka --standalone --macos-create-app-bundle --static-libpython=no --enable-plugin=tk-inter --include-package=tkwry --include-distribution-metadata=tkwry --macos-app-name=MyApp main.py
+```
+
+Always collect / include the ``tkwry`` package (native ``_core``). Windows
+users still need [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/).
+Samples for ``examples/tkwry_browser.py`` and ``app=`` data dirs:
+[docs/packaging.md](https://github.com/mashu3/tkwry/blob/main/docs/packaging.md).
+
+---
+
 ## 🗂 Documentation
 
 | Topic | Doc |
@@ -283,7 +324,7 @@ See [CHANGELOG.md](https://github.com/mashu3/tkwry/blob/main/CHANGELOG.md) for r
 | IPC / RPC / emit (`expose`, `call` / `stream`, cancel, limits) | [docs/rpc.md](https://github.com/mashu3/tkwry/blob/main/docs/rpc.md) |
 | Platform notes (Windows / macOS / Linux, print, window chrome) | [docs/platforms.md](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md) |
 | wry embedding / API ownership map | [docs/wry-embedding.md](https://github.com/mashu3/tkwry/blob/main/docs/wry-embedding.md) |
-| Packaging (PyInstaller / Nuitka notes — not CI-verified in 0.1.x) | [docs/packaging.md](https://github.com/mashu3/tkwry/blob/main/docs/packaging.md) |
+| Packaging (PyInstaller / Nuitka → ``.exe`` / ``.app``) | [docs/packaging.md](https://github.com/mashu3/tkwry/blob/main/docs/packaging.md) |
 
 ---
 

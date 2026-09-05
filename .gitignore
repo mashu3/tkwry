@@ -30,6 +30,17 @@ docs/MAINTAINERS.md
 # Demo CDN cache (plotly Local mode)
 examples/.vendor/
 
+# Freezer / PyInstaller / Nuitka local build junk
+nuitka-crash-report.xml
+*.spec
+_MEI*
+*.dist/
+*.build/
+*.onefile-build/
+*.pyinstaller-cache/
+*.exe
+*.app
+
 # Built extension modules
 *.so
 *.pyd

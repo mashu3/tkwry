@@ -44,8 +44,34 @@ def _version_tuple(text: str) -> tuple[int, int, int]:
     return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
 
 
+def _is_frozen_app() -> bool:
+    """True when running under PyInstaller / Nuitka standalone (not a normal venv)."""
+    if getattr(sys, "frozen", False):
+        return True
+    # Nuitka sets ``__compiled__`` on compiled modules.
+    if globals().get("__compiled__"):
+        return True
+    # Nuitka standalone: running the produced .exe / binary, not ``python.exe``.
+    try:
+        exe = Path(sys.executable).resolve()
+        name = exe.stem.lower()
+        if exe.suffix.lower() == ".exe" and not name.startswith("python"):
+            return True
+        if sys.platform != "win32" and "python" not in name and exe.is_file():
+            # macOS/Linux onefile/standalone binary name is usually the app.
+            return "nuitka" in name or exe.parent.name.endswith(".dist")
+    except OSError:
+        pass
+    return False
+
+
 def _require_tkwry() -> None:
-    """Exit unless an installed/built tkwry meets REQUIRED_TKWRY."""
+    """Exit unless an installed/built tkwry meets REQUIRED_TKWRY.
+
+    Frozen builds embed whatever ``tkwry`` was on the build machine; the numeric
+    gate is only for ``python examples/tkwry_browser.py`` against a site-packages
+    install. Unknown ``0.0.0`` (missing distribution metadata) is also skipped.
+    """
     try:
         import tkwry as _tkwry
     except ImportError as exc:
@@ -56,8 +82,14 @@ def _require_tkwry() -> None:
             f"  detail: {exc}"
         ) from exc
 
+    if _is_frozen_app():
+        return
+
     found = getattr(_tkwry, "__version__", "0.0.0")
-    if _version_tuple(found) < _version_tuple(REQUIRED_TKWRY):
+    parsed = _version_tuple(found)
+    if parsed == (0, 0, 0):
+        return
+    if parsed < _version_tuple(REQUIRED_TKWRY):
         raise SystemExit(
             f"This demo needs tkwry >= {REQUIRED_TKWRY} (found {found}).\n"
             f"  imported: {_tkwry.__file__}\n"

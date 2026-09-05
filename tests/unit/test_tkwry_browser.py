@@ -46,6 +46,19 @@ def test_require_tkwry_rejects_older_version(browser, monkeypatch) -> None:
         browser._require_tkwry()
 
 
+def test_require_tkwry_skips_unknown_frozen_version(browser, monkeypatch) -> None:
+    fake = SimpleNamespace(__version__="0.0.0", __file__="/tmp/fake/tkwry")
+    monkeypatch.setitem(sys.modules, "tkwry", fake)
+    browser._require_tkwry()  # must not SystemExit
+
+
+def test_require_tkwry_skips_gate_when_frozen(browser, monkeypatch) -> None:
+    fake = SimpleNamespace(__version__="0.1.7", __file__="/tmp/fake/tkwry")
+    monkeypatch.setitem(sys.modules, "tkwry", fake)
+    monkeypatch.setattr(browser.sys, "frozen", True, raising=False)
+    browser._require_tkwry()  # bundled older metadata must not abort the exe
+
+
 def test_is_ntp_url(browser) -> None:
     assert browser._is_ntp_url(None)
     assert browser._is_ntp_url("")

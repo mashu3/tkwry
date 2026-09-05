@@ -129,6 +129,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the installed tkwry version and can open the GitHub repository
 - ``tests/unit/test_tkwry_browser.py`` covers New Tab / version gate / toolbar
   helpers and shortcut bind resilience (no live WebView)
+- [docs/packaging.md](docs/packaging.md) and README add concrete PyInstaller /
+  Nuitka command samples for Windows ``.exe`` and macOS ``.app`` (still
+  best-effort / not CI-verified in 0.1.x)
 
 ## [0.1.7] - 2026-09-02
 
