@@ -115,6 +115,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``Configure`` (which blanked the side WebView on macOS)
 - ``examples/tkwry_browser.py`` tab strip shrinks tab widths to fit
   instead of horizontal scrolling
+- ``examples/tkwry_browser.py`` tab close fires on pointerdown and the strip
+  patches in place on chrome ticks (avoids wiping the × mid-click); DnD still
+  skips full rebuild while a drag is active
 - README Features / Examples highlight ``tkwry_browser.py`` as the flagship
   sample; added [docs/examples-browser.md](docs/examples-browser.md);
   screenshots under [docs/images/](docs/images/) (macOS dark / Windows light)

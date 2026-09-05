@@ -311,7 +311,7 @@ html, body {
   flex: 1 1 0;
   min-width: 48px;
   max-width: 180px;
-  padding: 6px 8px 7px;
+  padding: 6px 22px 7px 8px;
   border: 1px solid transparent;
   border-bottom: none;
   border-radius: 8px 8px 0 0;
@@ -321,6 +321,7 @@ html, body {
   white-space: nowrap;
   touch-action: none;
   overflow: hidden;
+  position: relative;
 }
 
 .tab:hover { background: var(--tab-hover); color: var(--text); }
@@ -399,13 +400,19 @@ html, body {
   cursor: pointer;
   line-height: 1;
   padding: 0;
-  flex-shrink: 0;
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
   opacity: 0;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .tab.active .close,
 .tab:hover .close {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .tab .close:hover { background: var(--bg-2); color: var(--text); }
@@ -700,13 +707,36 @@ html, body {
   let dragMoved = false;
   let dragPointerId = null;
   let dragStartX = 0;
+  let tabPointerBound = false;
 
   function tabEls() {
     return [...tabsEl.querySelectorAll(".tab")];
   }
 
+  function tabIdsKey(tabs) {
+    return (tabs || []).map((t) => t.id).join("\0");
+  }
+
   function clearDragTarget() {
     for (const t of tabEls()) t.classList.remove("drag-target");
+  }
+
+  function clearTabDragListeners() {
+    window.removeEventListener("pointermove", onTabPointerMove, true);
+    window.removeEventListener("pointerup", onTabPointerUp, true);
+    window.removeEventListener("pointercancel", onTabPointerUp, true);
+  }
+
+  function abortTabDrag() {
+    clearTabDragListeners();
+    const dragging = draggingId
+      ? tabEls().find((t) => t.dataset.id === draggingId)
+      : null;
+    if (dragging) dragging.classList.remove("dragging");
+    clearDragTarget();
+    draggingId = null;
+    dragPointerId = null;
+    dragMoved = false;
   }
 
   function dragAfterTab(x) {
@@ -740,25 +770,23 @@ html, body {
 
   function commitTabOrder() {
     const order = tabEls().map((t) => t.dataset.id).filter(Boolean);
-    const dragging = tabEls().find((t) => t.dataset.id === draggingId);
-    if (dragging) dragging.classList.remove("dragging");
-    clearDragTarget();
     const moved = dragMoved;
-    draggingId = null;
-    dragPointerId = null;
+    abortTabDrag();
     if (!moved || !order.length) return;
+    // Keep dragMoved true through the synthetic click that follows pointerup.
+    dragMoved = true;
     call("reorder_tabs", { order }).catch(console.error);
+    setTimeout(() => {
+      dragMoved = false;
+    }, 0);
   }
 
   function endTabDrag() {
     if (!draggingId) {
-      dragPointerId = null;
+      abortTabDrag();
       return;
     }
     commitTabOrder();
-    setTimeout(() => {
-      dragMoved = false;
-    }, 0);
   }
 
   function onTabPointerMove(e) {
@@ -773,95 +801,162 @@ html, body {
 
   function onTabPointerUp(e) {
     if (dragPointerId == null || e.pointerId !== dragPointerId) return;
-    window.removeEventListener("pointermove", onTabPointerMove, true);
-    window.removeEventListener("pointerup", onTabPointerUp, true);
-    window.removeEventListener("pointercancel", onTabPointerUp, true);
     endTabDrag();
+  }
+
+  function fillTabIcon(iconWrap, tab) {
+    if (tab.icon === "settings") {
+      if (iconWrap.querySelector(".glyph.g-settings")) return;
+      iconWrap.replaceChildren();
+      const glyph = document.createElement("span");
+      glyph.className = "glyph g-settings";
+      glyph.setAttribute("aria-hidden", "true");
+      iconWrap.appendChild(glyph);
+      return;
+    }
+    if (tab.icon) {
+      const img = iconWrap.querySelector("img.tab-icon-img");
+      if (img && img.getAttribute("src") === tab.icon) return;
+      iconWrap.replaceChildren();
+      const next = document.createElement("img");
+      next.src = tab.icon;
+      next.alt = "";
+      next.className = "tab-icon-img";
+      next.draggable = false;
+      next.addEventListener("error", () => {
+        next.remove();
+      });
+      iconWrap.appendChild(next);
+      return;
+    }
+    if (iconWrap.childNodes.length) iconWrap.replaceChildren();
+  }
+
+  function paintTabElement(el, tab) {
+    const keepDragging = el.classList.contains("dragging");
+    el.className =
+      "tab" +
+      (tab.id === state.active ? " active" : "") +
+      (tab.loading ? " loading" : "") +
+      (keepDragging ? " dragging" : "");
+    el.dataset.id = tab.id;
+    el.title = tab.title || "New Tab";
+    el.style.touchAction = "none";
+    const title = el.querySelector(".title");
+    if (title) title.textContent = tab.title || "New Tab";
+    const iconWrap = el.querySelector(".tab-icon");
+    if (iconWrap) fillTabIcon(iconWrap, tab);
+  }
+
+  function buildTabElement(tab) {
+    const el = document.createElement("div");
+    const iconWrap = document.createElement("span");
+    iconWrap.className = "tab-icon";
+    el.appendChild(iconWrap);
+    const title = document.createElement("span");
+    title.className = "title";
+    el.appendChild(title);
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "close";
+    close.title = "Close";
+    close.setAttribute("aria-label", "Close tab");
+    close.textContent = "×";
+    el.appendChild(close);
+    paintTabElement(el, tab);
+    return el;
   }
 
   function renderTabs() {
     tabsEl.innerHTML = "";
     for (const tab of state.tabs) {
-      const el = document.createElement("div");
-      el.className =
-        "tab" +
-        (tab.id === state.active ? " active" : "") +
-        (tab.loading ? " loading" : "");
-      el.dataset.id = tab.id;
-      el.title = tab.title || "New Tab";
-      el.style.touchAction = "none";
-
-      const iconWrap = document.createElement("span");
-      iconWrap.className = "tab-icon";
-      if (tab.icon === "settings") {
-        const glyph = document.createElement("span");
-        glyph.className = "glyph g-settings";
-        glyph.setAttribute("aria-hidden", "true");
-        iconWrap.appendChild(glyph);
-      } else if (tab.icon) {
-        const img = document.createElement("img");
-        img.src = tab.icon;
-        img.alt = "";
-        img.className = "tab-icon-img";
-        img.draggable = false;
-        img.addEventListener("error", () => {
-          img.remove();
-        });
-        iconWrap.appendChild(img);
-      }
-      el.appendChild(iconWrap);
-
-      const title = document.createElement("span");
-      title.className = "title";
-      title.textContent = tab.title || "New Tab";
-      el.appendChild(title);
-
-      const close = document.createElement("button");
-      close.type = "button";
-      close.className = "close";
-      close.title = "Close";
-      close.textContent = "×";
-      close.addEventListener("click", (e) => {
-        e.stopPropagation();
-        call("close_tab", { tab_id: tab.id }).catch(console.error);
-      });
-      el.appendChild(close);
-
-      el.addEventListener("click", (e) => {
-        if (dragMoved) {
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
-        call("select_tab", { tab_id: tab.id }).catch(console.error);
-      });
-      el.addEventListener("auxclick", (e) => {
-        if (e.button === 1) {
-          e.preventDefault();
-          call("close_tab", { tab_id: tab.id }).catch(console.error);
-        }
-      });
-      el.addEventListener("pointerdown", (e) => {
-        if (e.button !== 0) return;
-        if (e.target.closest(".close")) return;
-        draggingId = tab.id;
-        dragMoved = false;
-        dragPointerId = e.pointerId;
-        dragStartX = e.clientX;
-        window.addEventListener("pointermove", onTabPointerMove, true);
-        window.addEventListener("pointerup", onTabPointerUp, true);
-        window.addEventListener("pointercancel", onTabPointerUp, true);
-      });
-      tabsEl.appendChild(el);
+      tabsEl.appendChild(buildTabElement(tab));
     }
-
     const neu = document.createElement("button");
     neu.type = "button";
     neu.id = "btn-new-tab";
     neu.title = "New Tab";
     neu.textContent = "+";
-    neu.addEventListener("click", () => call("new_tab", {}).catch(console.error));
     tabsEl.appendChild(neu);
+  }
+
+  function syncTabs() {
+    const nextKey = tabIdsKey(state.tabs);
+    const existing = tabEls();
+    const domKey = existing.map((t) => t.dataset.id).join("\0");
+    // Full rebuild only when the set/order changes — chrome state ticks every
+    // ~350ms and must not wipe the strip mid click / drag.
+    if (nextKey !== domKey) {
+      if (draggingId) abortTabDrag();
+      renderTabs();
+      return;
+    }
+    for (const tab of state.tabs) {
+      const el = existing.find((t) => t.dataset.id === tab.id);
+      if (!el) {
+        renderTabs();
+        return;
+      }
+      paintTabElement(el, tab);
+    }
+  }
+
+  function bindTabStripOnce() {
+    if (tabPointerBound) return;
+    tabPointerBound = true;
+
+    tabsEl.addEventListener("pointerdown", (e) => {
+      const closeBtn = e.target.closest(".close");
+      if (closeBtn) {
+        // Close on press, not click — periodic state paints used to destroy
+        // the button between pointerdown and click.
+        e.preventDefault();
+        e.stopPropagation();
+        const tab = closeBtn.closest(".tab");
+        if (!tab || !tab.dataset.id) return;
+        abortTabDrag();
+        call("close_tab", { tab_id: tab.dataset.id }).catch(console.error);
+        return;
+      }
+      const tab = e.target.closest(".tab");
+      if (!tab || e.button !== 0) return;
+      draggingId = tab.dataset.id;
+      dragMoved = false;
+      dragPointerId = e.pointerId;
+      dragStartX = e.clientX;
+      window.addEventListener("pointermove", onTabPointerMove, true);
+      window.addEventListener("pointerup", onTabPointerUp, true);
+      window.addEventListener("pointercancel", onTabPointerUp, true);
+    });
+
+    tabsEl.addEventListener("click", (e) => {
+      if (e.target.closest(".close")) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (e.target.closest("#btn-new-tab")) {
+        call("new_tab", {}).catch(console.error);
+        return;
+      }
+      const tab = e.target.closest(".tab");
+      if (!tab) return;
+      if (dragMoved) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      call("select_tab", { tab_id: tab.dataset.id }).catch(console.error);
+    });
+
+    tabsEl.addEventListener("auxclick", (e) => {
+      if (e.button !== 1) return;
+      const tab = e.target.closest(".tab");
+      if (!tab) return;
+      e.preventDefault();
+      abortTabDrag();
+      call("close_tab", { tab_id: tab.dataset.id }).catch(console.error);
+    });
   }
 
   function applyState(next) {
@@ -878,8 +973,12 @@ html, body {
     }
     btnFav.classList.toggle("on", !!state.isFavorite);
     btnFav.title = state.isFavorite ? "Remove bookmark" : "Add bookmark";
-    // Avoid wiping an in-progress tab drag (chrome state ticks ~350ms).
-    if (!draggingId) renderTabs();
+    bindTabStripOnce();
+    const nextKey = tabIdsKey(state.tabs);
+    const domKey = tabEls().map((t) => t.dataset.id).join("\0");
+    // While dragging, leave the live DOM alone unless the tab set changed.
+    if (draggingId && nextKey === domKey) return;
+    syncTabs();
   }
 
   function menuAnchor(el) {
