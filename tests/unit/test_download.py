@@ -112,6 +112,23 @@ def test_relative_download_dest_is_denied(tk_root) -> None:
         web.destroy()
 
 
+def test_on_download_expands_user_home_dest(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expanded = "/Users/fake/Downloads/a.zip"
+    monkeypatch.setattr(
+        "tkwry.webview.os.path.expanduser",
+        lambda path: expanded if str(path).startswith("~") else str(path),
+    )
+    web = _make_web(tk_root, on_download=lambda _url, _suggested: "~/Downloads/a.zip")
+    try:
+        assert web._invoke_download_handler(
+            "https://example.com/a.zip", "/tmp/a.zip"
+        ) == (True, expanded)
+    finally:
+        web.destroy()
+
+
 def test_dangerous_download_schemes_denied(tk_root) -> None:
     web = _make_web(tk_root)
     try:

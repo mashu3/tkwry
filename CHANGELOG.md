@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- ``on_download`` expands ``~`` before the absolute-path check (same honesty as
+  ``Download.save`` / ``save_as``)
 - Shared ephemeral ``WebSession`` + ``app=`` uses the same protocol attach /
   commit rules as persistent sessions (Linux no longer re-registers
   ``tkwry://`` on a second view)

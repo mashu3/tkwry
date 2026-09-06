@@ -122,7 +122,8 @@ See [Usage — Shared session](usage.md#shared-session-websession).
 - **`untrusted=True`** — viewer mode: no IPC handler, no `expose` /
   `emit`, ephemeral session, http(s) only, no `tkwry://` / `file:`, new
   windows denied, **downloads denied**. `download_allow` and/or
-  `on_download` can permit specific URLs (handler may set an absolute dest
+  `on_download` can permit specific URLs (handler may set an absolute dest;
+  ``~`` is expanded first, same as ``Download.save``)
   or return `False` to cancel). Cannot be combined with `bridge_origins` /
   `bridge_allow`. Use this for arbitrary websites. Sites that need a
   real login (YouTube comments, Google account) will not keep cookies

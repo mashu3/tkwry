@@ -437,7 +437,8 @@ class WebView(WebViewRpcMixin):
     off-list http(s) in the system browser and **never** creates a WebView
     from ``on_new_window``. ``download_allow`` / ``on_download`` gate file
     downloads (``untrusted=True`` denies unless a handler or allowlist
-    permits); ``on_download`` may return an **absolute** save path or ``False``
+    permits); ``on_download`` may return an **absolute** save path (``~`` is
+    expanded first, same as :meth:`~tkwry.Download.save`) or ``False``
     to cancel (relative dests are denied). Use
     :func:`~tkwry.unique_download_path` to avoid overwriting an existing file.
     ``on_download_complete`` is notify-only. Finished downloads also set
@@ -3313,7 +3314,8 @@ class WebView(WebViewRpcMixin):
         if result is True:
             return True, None
         if isinstance(result, (str, Path)):
-            path = os.fspath(result)
+            # Match Download.save / save_as: expand ``~`` before the abs check.
+            path = os.path.expanduser(os.fspath(result))
             if not os.path.isabs(path):
                 print(
                     "tkwry: on_download dest must be an absolute path",
