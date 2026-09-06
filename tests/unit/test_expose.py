@@ -562,6 +562,64 @@ def test_rpc_cancel_envelope_sets_flag_and_rejects(tk_root) -> None:
     frame.destroy()
 
 
+def test_rpc_cancel_from_other_document_is_ignored(tk_root) -> None:
+    """Same-origin (or ``*``) sibling documents must not cancel another call."""
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>rpc</p>", bridge_origins="*")
+    started = threading.Event()
+    saw_cancel = threading.Event()
+
+    @web.expose(thread=True, allow_any_origin=True)
+    def slow() -> str:
+        started.set()
+        deadline = time.monotonic() + 1.5
+        while time.monotonic() < deadline:
+            if rpc_cancelled():
+                saw_cancel.set()
+                return "cancelled"
+            time.sleep(0.02)
+        return "done"
+
+    web._cancel_deferred_callbacks()
+    native = MagicMock()
+    native.drain_window_ipc_messages.return_value = [
+        (
+            "https://app.example/parent",
+            json.dumps({"__tkwry": "rpc", "id": "r9", "method": "slow", "params": []}),
+        )
+    ]
+    web._webview = native
+    web._deliver_ipc_messages()
+    assert started.wait(timeout=2.0)
+
+    native.drain_window_ipc_messages.return_value = [
+        (
+            "https://app.example/iframe",
+            json.dumps({"__tkwry": "rpc", "id": "r9", "cancel": True}),
+        )
+    ]
+    web._deliver_ipc_messages()
+    deadline = time.monotonic() + 0.4
+    while time.monotonic() < deadline:
+        tk_root.update()
+        time.sleep(0.02)
+    assert not saw_cancel.is_set()
+    assert "r9" in web._rpc_inflight
+
+    # Speculative cancel for an unknown id must not poison future calls.
+    native.drain_window_ipc_messages.return_value = [
+        (
+            "https://app.example/iframe",
+            json.dumps({"__tkwry": "rpc", "id": "guessed", "cancel": True}),
+        )
+    ]
+    web._deliver_ipc_messages()
+    assert "guessed" not in web._rpc_user_cancelled
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_rpc_worker_done_after_destroy_skips_tk(tk_root) -> None:
     """Late worker completion must not hop to Tk (queue only; poll drains)."""
     frame = tk.Frame(tk_root)

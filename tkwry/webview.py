@@ -2064,9 +2064,13 @@ class WebView(WebViewRpcMixin):
     def cookies_for_url(self, url: str) -> list[Cookie]:
         """Return cookies the engine would send for *url*.
 
+        *url* is normalized / validated like :meth:`load_url` (scheme-less
+        hosts become ``https://…``; dangerous schemes raise ``ValueError``).
         Tk-thread only. Do not log returned ``Cookie.value``.
         """
-        return list(self._require_ready("cookies_for_url").cookies_for_url(url))
+        normalized = _normalize_url(url)
+        _validate_url(normalized)
+        return list(self._require_ready("cookies_for_url").cookies_for_url(normalized))
 
     def set_cookie(self, cookie: Cookie) -> None:
         """Store *cookie* in this WebView's engine cookie jar.

@@ -90,6 +90,7 @@ class WebViewRpcMixin:
         self._rpc_stream_open: set[str] = set()
         self._rpc_timeout_after: dict[str, str] = {}
         self._rpc_cancel_events: dict[str, threading.Event] = {}
+        self._rpc_owners: dict[str, str] = {}
         self._rpc_user_cancelled: set[str] = set()
         self._rpc_epoch = 0
         self._rpc_page_started_once = False
@@ -594,6 +595,7 @@ class WebViewRpcMixin:
         for event in self._rpc_cancel_events.values():
             event.set()
         self._rpc_cancel_events.clear()
+        self._rpc_owners.clear()
         self._rpc_user_cancelled.clear()
         for _req_id, fut in pending:
             fut.cancel()
@@ -630,6 +632,7 @@ class WebViewRpcMixin:
         for event in self._rpc_cancel_events.values():
             event.set()
         self._rpc_cancel_events.clear()
+        self._rpc_owners.clear()
         self._rpc_user_cancelled.clear()
         for _req_id, fut in pending:
             fut.cancel()
@@ -638,11 +641,20 @@ class WebViewRpcMixin:
 
     def _signal_rpc_cancel(self, req_id: str) -> None:
         event = self._rpc_cancel_events.pop(req_id, None)
+        self._rpc_owners.pop(req_id, None)
         if event is not None:
             event.set()
 
     def _drop_rpc_cancel(self, req_id: str) -> None:
         self._rpc_cancel_events.pop(req_id, None)
+        self._rpc_owners.pop(req_id, None)
+
+    def _rpc_request_is_active(self, req_id: str) -> bool:
+        return (
+            req_id in self._rpc_cancel_events
+            or req_id in self._rpc_inflight
+            or req_id in self._rpc_stream_open
+        )
 
     def _scan_app_mtime(self) -> float:
         root = self._app_root or ""
@@ -712,7 +724,7 @@ class WebViewRpcMixin:
             if request is not None:
                 if not self._bridge_origin_allowed(bridge_url):
                     continue
-                self._handle_rpc_request(request)
+                self._handle_rpc_request(request, bridge_url)
                 continue
             context_event = parse_context_menu_event(message)
             if context_event is not None:
@@ -732,7 +744,15 @@ class WebViewRpcMixin:
             if handler is not None:
                 self._invoke_callback(handler, message, kind="ipc_handler")
 
-    def _handle_rpc_cancel(self, req_id: str) -> None:
+    def _handle_rpc_cancel(self, req_id: str, bridge_url: str) -> None:
+        # Same-document only: ignore foreign / speculative cancels so a
+        # same-origin iframe (or guessed id) cannot kill a parent in-flight
+        # call or poison ``_rpc_user_cancelled``.
+        owner = self._rpc_owners.get(req_id)
+        if owner is None or owner != bridge_url:
+            return
+        if not self._rpc_request_is_active(req_id):
+            return
         self._rpc_user_cancelled.add(req_id)
         self._signal_rpc_cancel(req_id)
         after_id = self._rpc_timeout_after.pop(req_id, None)
@@ -753,9 +773,9 @@ class WebViewRpcMixin:
             value=rpc_error("RpcCancelledError", "rpc cancelled"),
         )
 
-    def _handle_rpc_request(self, request: RpcRequest) -> None:
+    def _handle_rpc_request(self, request: RpcRequest, bridge_url: str) -> None:
         if request.cancel:
-            self._handle_rpc_cancel(request.id)
+            self._handle_rpc_cancel(request.id, bridge_url)
             return
         if request.reject is not None:
             self._settle_rpc(request.id, ok=False, value=request.reject)
@@ -772,6 +792,7 @@ class WebViewRpcMixin:
         reg = self._rpc_methods.get(request.method)
         cancel_event = threading.Event()
         self._rpc_cancel_events[request.id] = cancel_event
+        self._rpc_owners[request.id] = bridge_url
 
         def submit_worker(fn: Callable[[], Any]) -> Future[Any]:
             def wrapped() -> Any:

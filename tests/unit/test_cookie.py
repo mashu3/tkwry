@@ -81,6 +81,9 @@ def test_cookie_methods_delegate_to_native(
         assert web.cookies() == [sample]
         assert web.cookies_for_url("https://example.com/") == [sample]
         native.cookies_for_url.assert_called_once_with("https://example.com/")
+        native.cookies_for_url.reset_mock()
+        assert web.cookies_for_url("example.com") == [sample]
+        native.cookies_for_url.assert_called_once_with("https://example.com")
         web.set_cookie(sample)
         native.set_cookie.assert_called_once_with(sample)
         web.delete_cookie(sample)
@@ -94,6 +97,27 @@ def test_cookie_methods_delegate_to_native(
         assert built.path == "/"
         web.clear_all_browsing_data()
         native.clear_all_browsing_data.assert_called_once_with()
+    finally:
+        web._webview = None
+        web.destroy()
+
+
+def test_cookies_for_url_rejects_invalid_url(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame)
+    native = MagicMock()
+    web._webview = native
+    monkeypatch.setattr(web, "_layout_ready", lambda: True)
+    try:
+        with pytest.raises(ValueError, match="javascript"):
+            web.cookies_for_url("javascript:alert(1)")
+        with pytest.raises(ValueError):
+            web.cookies_for_url("https://")
+        native.cookies_for_url.assert_not_called()
     finally:
         web._webview = None
         web.destroy()

@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- RPC ``cancel`` only applies to the same document that started the call (and
+  an active id); speculative / cross-frame cancels are ignored
+- ``cookies_for_url`` normalizes and validates the URL like ``load_url``
+  (scheme-less hosts become ``https://…``; dangerous schemes raise
+  ``ValueError``)
 - Persistent native load failures stop after the flush-load retry budget and
   signal ``<<WebViewNavigationFailed>>`` / ``last_navigation_error`` instead of
   retrying forever
