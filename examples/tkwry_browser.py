@@ -24,6 +24,7 @@ import shutil
 import sys
 import tempfile
 import tkinter as tk
+import traceback
 import uuid
 import warnings
 from collections.abc import Callable
@@ -35,6 +36,16 @@ from typing import Any
 from urllib.parse import quote_plus, urlparse
 
 REQUIRED_TKWRY = "0.1.8"
+
+
+
+def _ignore_best_effort_error() -> None:
+    """Log a best-effort UI/teardown failure without raising.
+
+    Used when chrome/side emit, focus, theme, or quit-time destroy/close must
+    not abort the demo. Silent ``except Exception: pass`` hid real failures.
+    """
+    traceback.print_exc()
 
 
 def _version_tuple(text: str) -> tuple[int, int, int]:
@@ -3861,7 +3872,7 @@ class BrowserApp:
         try:
             self.chrome.focus()
         except Exception:
-            pass
+            _ignore_best_effort_error()
         self.chrome.eval_js(
             f"window.chromePasteUrl && window.chromePasteUrl({json.dumps(text)});"
         )
@@ -4116,7 +4127,7 @@ class BrowserApp:
         try:
             self.chrome.emit("state", self.chrome_state())
         except Exception:
-            pass
+            _ignore_best_effort_error()
 
     def side_state(self) -> dict[str, Any]:
         tab = self.current_tab()
@@ -4171,7 +4182,7 @@ class BrowserApp:
                     + ");if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}"
                 )
             except Exception:
-                pass
+                _ignore_best_effort_error()
         self.push_side_state()
 
     def push_side_state(self) -> None:
@@ -4180,7 +4191,7 @@ class BrowserApp:
         try:
             self.side.emit("state", self.side_state())
         except Exception:
-            pass
+            _ignore_best_effort_error()
         # Bookmark shortcuts on NTP track the same store as the side tree.
         self.push_ntp_states()
 
@@ -4202,7 +4213,7 @@ class BrowserApp:
         try:
             web.emit("ntp", self.ntp_state(focus=focus))
         except Exception:
-            pass
+            _ignore_best_effort_error()
 
     def push_ntp_states(self) -> None:
         for tab in self.tabs.values():
@@ -4221,7 +4232,7 @@ class BrowserApp:
             try:
                 web.set_background_color(*color)
             except Exception:
-                pass
+                _ignore_best_effort_error()
         settings_tab = self.tabs.get(SETTINGS_TAB_ID)
         if (
             settings_tab is not None
@@ -4232,7 +4243,7 @@ class BrowserApp:
             try:
                 settings_tab.web.set_background_color(*color)
             except Exception:
-                pass
+                _ignore_best_effort_error()
         for tab in self.tabs.values():
             if tab.kind != "ntp" or tab.web is None or tab.web.destroyed:
                 continue
@@ -4241,7 +4252,7 @@ class BrowserApp:
             try:
                 tab.web.set_background_color(*color)
             except Exception:
-                pass
+                _ignore_best_effort_error()
         self.push_ntp_states()
 
     def _schedule_chrome_refresh(self) -> None:
@@ -4270,11 +4281,11 @@ class BrowserApp:
             try:
                 web.focus_parent()
             except Exception:
-                pass
+                _ignore_best_effort_error()
         try:
             self.chrome.focus()
         except Exception:
-            pass
+            _ignore_best_effort_error()
         self.chrome.eval_js(
             "var i=document.getElementById('url');if(i){i.focus();i.select();}"
         )
@@ -4334,7 +4345,7 @@ class BrowserApp:
         try:
             self.side.sync_bounds()
         except Exception:
-            pass
+            _ignore_best_effort_error()
 
     def _repair_side_pane(self) -> None:
         if not self._side_visible:
@@ -4363,7 +4374,7 @@ class BrowserApp:
                 sync_mac_webview_layout(self.root, devtools_web=self.content_web())
                 return
             except Exception:
-                pass
+                _ignore_best_effort_error()
         for web in (self.chrome, self.side):
             if web.ready and not web.destroyed:
                 web.sync_bounds()
@@ -4380,7 +4391,7 @@ class BrowserApp:
             payload["focusOpen"] = ["__history__", "hist-day:today"]
             self.side.emit("state", payload)
         except Exception:
-            pass
+            _ignore_best_effort_error()
 
     def _side_menu_point(self, x: int, y: int) -> tuple[int, int]:
         try:
@@ -4913,7 +4924,7 @@ class BrowserApp:
                     try:
                         tab.web.emit("clipboard", {"id": req_id, "text": text})
                     except Exception:
-                        pass
+                        _ignore_best_effort_error()
 
         def permission_handler(kind: PermissionKind) -> PermissionResponse:
             if kind is PermissionKind.ClipboardRead:
@@ -5095,7 +5106,7 @@ class BrowserApp:
                 try:
                     tab.web.destroy()
                 except Exception:
-                    pass
+                    _ignore_best_effort_error()
             try:
                 tab.frame.destroy()
             except tk.TclError:
@@ -5108,7 +5119,7 @@ class BrowserApp:
                 try:
                     web.destroy()
                 except Exception:
-                    pass
+                    _ignore_best_effort_error()
         for session in (
             getattr(self, "content_session", None),
             getattr(self, "settings_session", None),
@@ -5119,7 +5130,7 @@ class BrowserApp:
                 try:
                     session.close()
                 except Exception:
-                    pass
+                    _ignore_best_effort_error()
         self.root.config(menu="")
         for child in list(self.root.winfo_children()):
             try:
@@ -5286,7 +5297,7 @@ class BrowserApp:
         try:
             tab.web.emit("state", self.settings_state())
         except Exception:
-            pass
+            _ignore_best_effort_error()
 
     def _settings_create_profile(self, name: str = "") -> None:
         raw = name or ""
@@ -5582,19 +5593,19 @@ class BrowserApp:
         try:
             self.content_session.close()
         except Exception:
-            pass
+            _ignore_best_effort_error()
         try:
             self.side_session.close()
         except Exception:
-            pass
+            _ignore_best_effort_error()
         try:
             self.settings_session.close()
         except Exception:
-            pass
+            _ignore_best_effort_error()
         try:
             self.chrome_session.close()
         except Exception:
-            pass
+            _ignore_best_effort_error()
         self.root.destroy()
 
 

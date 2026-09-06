@@ -34,6 +34,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Flagship ``tkwry_browser`` best-effort UI/teardown paths log via traceback
+  instead of silent ``except Exception: pass``
 - ``WebView`` teardown / snapshot paths no longer use silent
   ``except Exception: pass`` — cleanup failures log via traceback; ``get_state``
   and poll probes set explicit defaults
