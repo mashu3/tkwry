@@ -7,7 +7,6 @@
 [![Downloads](https://static.pepy.tech/badge/tkwry)](https://pepy.tech/project/tkwry)
 [![Status: Alpha](https://img.shields.io/badge/status-alpha-red)](https://github.com/mashu3/tkwry)
 [![CI](https://github.com/mashu3/tkwry/actions/workflows/ci.yml/badge.svg)](https://github.com/mashu3/tkwry/actions/workflows/ci.yml)
-[![Coverage](https://github.com/mashu3/tkwry/actions/workflows/codecov.yml/badge.svg)](https://github.com/mashu3/tkwry/actions/workflows/codecov.yml)
 [![codecov](https://codecov.io/gh/mashu3/tkwry/branch/main/graph/badge.svg)](https://codecov.io/gh/mashu3/tkwry)
 
 **Keep Tkinter — give it the WebView it never had.**

@@ -1,5 +1,6 @@
 # Optional coverage helpers for ``run-*-ci-tests.sh``.
-# Enable with ``TKWRY_COVERAGE=1`` (Codecov workflow). Default CI stays unchanged.
+# Enable with ``TKWRY_COVERAGE=1`` (ci.yml macOS/Windows coverage matrix).
+# Default / Linux / windows-11-arm CI stays wheel-only without coverage.
 #
 # Multi-process suites need ``--cov-append`` + a shared ``COVERAGE_FILE``.
 

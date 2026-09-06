@@ -8,10 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### CI
 
-- Codecov uploads for **macOS** and **Windows** (separate Codecov flags; one README badge); ``TKWRY_COVERAGE=1`` enables append coverage in the existing
-  split CI test scripts
-- Coverage job uses ``maturin develop`` in a ``.venv`` (editable) so Codecov
-  maps to repo paths — wheel installs under site-packages were reporting ~0%
+- Codecov uploads folded into the existing **macOS** / **Windows** CI test jobs
+  (flags ``macos`` / ``windows``; one Codecov badge) — no second full test
+  workflow. Those jobs use ``maturin develop`` in a ``.venv`` so coverage paths
+  map to the checkout (wheel installs under site-packages report ~0%). Linux and
+  ``windows-11-arm`` stay wheel-only. ``TKWRY_COVERAGE=1`` still enables append
+  coverage in the split CI test scripts
 
 ### Deprecated
 
