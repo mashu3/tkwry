@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Clarify Internal ``tkwry._core`` / ``WebView.native`` / ``WebSession.native``
   (no SemVer) and the production IPC drain contract
   (``drain_window_ipc_messages`` only) in ``docs/usage.md`` and the README
+- Document canonical call shapes, error observation, and intentional API
+  asymmetries in ``docs/usage.md`` (link from ``docs/rpc.md``)
 
 ### Tests
 

@@ -196,6 +196,7 @@ See [`examples/ipc_demo.py`](../examples/ipc_demo.py).
 ## Related
 
 - [Usage](usage.md) — `app=`, eval, layout, navigation
+- [Usage — Canonical paths](usage.md#canonical-paths) — preferred call / error shapes
 - [Trust boundaries](trust.md) — who may call the bridge
 - [Mini-browser example](examples-browser.md) — multi-session toolbar + content
 - [Usage — Navigation / lifecycle callbacks](usage.md#navigation--lifecycle-callbacks)

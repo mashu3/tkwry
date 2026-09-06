@@ -13,6 +13,7 @@ Contracts live elsewhere: [Trust boundaries](trust.md),
 | [User-Agent](#user-agent) | App identity — not a Chrome spoof |
 | [Observability](#observability) | ``WebViewPhase`` + ``take_queue_drop_stats()`` |
 | [Cleanup](#cleanup) | `destroy` / Frame / `WebSession.close` order |
+| [Canonical paths](#canonical-paths) | Recommended calls, errors, intentional exceptions |
 | [API stability](#api-stability) | Public / Provisional / Internal (Alpha) |
 | [API summary](#api-summary) | Public surface table |
 
@@ -729,6 +730,53 @@ Sync-hook timeouts (navigation / new window / permission) surface via
 
 Provisional callback exceptions: ``on_callback_error`` (see
 [API stability](#api-stability)).
+
+## Canonical paths
+
+Short map of **preferred** call shapes, how to **observe** failures, and
+**intentional** asymmetries (not bugs). Prefer one style per app. Renames /
+Event unification that would break callers wait for a later cut — this
+section documents what to use **today**.
+
+### Recommended call shapes
+
+| Goal | Prefer | Also OK |
+|------|--------|---------|
+| JS → Python request/response | ``@web.expose`` / ``expose`` + ``window.tkwry.call`` | ``@web.rpc`` (alias); raw ``set_ipc_handler`` only for fire-and-forget strings |
+| Download allow / dest | One-arg ``Download``: ``on_download=lambda d: d.save("./downloads")`` | Legacy ``(url, suggested_dest)`` |
+| Navigation allow/deny | ``set_navigation_policy`` / one-arg ``NavigationEvent`` (``event.url``, …) | Legacy ``on_navigation`` ``str`` URL |
+| Create failure | ``when_failed(cb)`` / ``<<WebViewCreateFailed>>`` | Constructor ``on_creation_failed=`` (same callback list) |
+
+Details: [IPC / RPC](rpc.md), [Navigation / lifecycle](#navigation--lifecycle-callbacks).
+
+### Error observation
+
+Most failures are **not** raised synchronously out of the constructor or
+out of WebKit-blocking hooks. Observe virtual events and ``last_*`` /
+``creation_*`` on the Tk thread:
+
+| Failure | Observe |
+|---------|---------|
+| Native create | ``when_failed`` / ``<<WebViewCreateFailed>>`` / ``creation_failed`` / ``creation_error`` — constructor does **not** raise |
+| ``eval_js`` / ``eval_js_with_callback`` | ``last_eval_error`` / ``<<WebViewEvalFailed>>`` / ``on_error=`` |
+| Sync navigation / new-window hook timeout | ``last_navigation_error`` / ``<<WebViewNavigationFailed>>`` (default deny; not raised on the WebKit thread) |
+| Download start / complete / fail | ``<<WebViewDownload*>>`` + ``last_started_download`` / ``last_download`` / handlers |
+| Callback exceptions in app hooks | stderr, or provisional ``on_callback_error`` |
+
+Queue overflow is separate — [Observability](#observability)
+(``take_queue_drop_stats``).
+
+### Intentional exceptions
+
+| Topic | Behavior (keep as-is in 0.1.x) |
+|-------|--------------------------------|
+| ``permission_handler=`` | Create-only; no ``set_permission_handler`` |
+| Context menu | ``on_context_menu=`` ↔ ``set_context_menu_handler`` (not ``set_on_context_menu``) |
+| DnD / raw IPC | ``drag_drop_handler=`` / ``ipc_handler=`` (no ``on_`` prefix) |
+| Background color | ``background_color=(r,g,b,a)`` at create; ``set_background_color(r, g, b, a=255)`` after ready |
+| Create-failed hook | ``on_creation_failed=`` vs ``when_failed()`` — both register; prefer ``when_failed`` / bind for late listeners |
+| Download cancel | Return ``False`` or ``None`` from ``on_download`` (equivalent start-deny) |
+| ``on_new_window`` | Still ``str`` URL only (no ``NavigationEvent`` yet) |
 
 ## API stability
 
