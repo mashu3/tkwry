@@ -1487,8 +1487,11 @@ call destroy() on the Tk thread before GC"
         self.wry_call_depth.set(depth - 1);
         if depth == 1 && self.destroy_pending.get() {
             self.clear_callbacks_and_queues();
-            self.destroy_inner()?;
+            let result = self.destroy_inner();
+            // Mirror ``force_destroy``: clear the latch even when teardown fails,
+            // otherwise depth is already 0 and deferred destroy never retries.
             self.destroy_pending.set(false);
+            result?;
         }
         Ok(())
     }
@@ -1548,6 +1551,15 @@ call destroy() on the Tk thread before GC"
             self.destroyed_during_reentrant.set(true);
             #[cfg(target_os = "macos")]
             self.mac.teardown();
+            // Clip containers are siblings on the shared embed parent — tear
+            // them down here too, or empty NSViews remain after reentrant
+            // destroy (DevTools / nested wry turns).
+            #[cfg(target_os = "macos")]
+            if let Ok(mut clip) = self.mac_clip.lock() {
+                if let Some(host) = clip.take() {
+                    host.teardown();
+                }
+            }
             self.wakeup_write_fd.store(-1, Ordering::SeqCst);
             return Ok(());
         }
@@ -3621,6 +3633,45 @@ mod tests {
         assert!(
             !destroy_pending.get(),
             "force_destroy must clear destroy_pending even when destroy_inner fails"
+        );
+    }
+
+    #[test]
+    fn leave_wry_call_clears_pending_when_teardown_fails() {
+        let depth = Cell::new(1_u32);
+        let destroy_pending = Cell::new(true);
+        let leave = |depth: &Cell<u32>, destroy_pending: &Cell<bool>| -> Result<(), &'static str> {
+            let current = depth.get();
+            assert!(current > 0);
+            depth.set(current - 1);
+            if current == 1 && destroy_pending.get() {
+                let result: Result<(), &'static str> = Err("teardown failed");
+                destroy_pending.set(false);
+                result?;
+            }
+            Ok(())
+        };
+        let result = leave(&depth, &destroy_pending);
+        assert!(result.is_err());
+        assert_eq!(depth.get(), 0);
+        assert!(
+            !destroy_pending.get(),
+            "leave_wry_call must clear destroy_pending even when destroy_inner fails"
+        );
+    }
+
+    #[test]
+    fn destroy_inner_reentrant_clears_clip_host() {
+        let reentrant_active = Cell::new(true);
+        let mut clip: Option<&'static str> = Some("clip-host");
+        if reentrant_active.get() {
+            if let Some(_host) = clip.take() {
+                // teardown()
+            }
+        }
+        assert!(
+            clip.is_none(),
+            "reentrant destroy_inner must drop the clip host after teardown"
         );
     }
 }

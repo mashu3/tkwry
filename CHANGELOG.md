@@ -20,6 +20,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``PageLoadEvent.Started`` so same-poll early ``tkwry.call`` is not dropped;
   bake the epoch into the JS bootstrap and sync on idle / ``Finished`` so a
   premature ``Started`` cannot leave the new document on epoch 0
+- Deferred destroy after nested native calls clears ``destroy_pending`` even
+  when teardown fails (same latch honesty as ``force_destroy``)
+- macOS reentrant destroy (e.g. during DevTools) tears down the per-WebView
+  clip container so empty ``NSView`` hosts do not remain on the shared parent
 
 ## [0.1.8] - 2026-09-06
 
