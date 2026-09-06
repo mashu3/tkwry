@@ -54,6 +54,8 @@ struct FocusEntry {
     web_wants_keyboard: Arc<AtomicBool>,
     mac_tk_unfocus: Arc<AtomicBool>,
     /// Retained embed host — must outlive hit-test callbacks if Tk destroys the frame early.
+    /// Not used for hit matching: sibling WebViews share this toplevel content view.
+    #[allow(dead_code)]
     parent_ns_view: Retained<NSView>,
     wakeup_write_fd: Arc<AtomicI32>,
 }
@@ -563,6 +565,23 @@ fn view_is_descendant_of(view: &NSView, ancestor: &NSView) -> bool {
     false
 }
 
+/// True when *view* is the WKWebView, a descendant of it, or its clip container.
+///
+/// The shared toplevel content ``NSView`` is intentionally **not** a match —
+/// sibling WebViews share that parent, so chrome / gap hits must fall through
+/// to ``release_all_web_focus`` instead of activating ``entries[0]``.
+fn web_surface_owns_hit(view: &NSView, wk_view: &NSView, clip_container: Option<&NSView>) -> bool {
+    if std::ptr::eq(view, wk_view) || view_is_descendant_of(view, wk_view) {
+        return true;
+    }
+    if let Some(container) = clip_container {
+        if std::ptr::eq(view, container) {
+            return true;
+        }
+    }
+    false
+}
+
 fn view_belongs_to_entry(view: &NSView, entry: &FocusEntry) -> bool {
     let Ok(guard) = entry.inner.lock() else {
         return false;
@@ -570,21 +589,11 @@ fn view_belongs_to_entry(view: &NSView, entry: &FocusEntry) -> bool {
     let Some(ref wv) = *guard else {
         return false;
     };
-    if std::ptr::eq(view, Retained::as_ptr(&entry.parent_ns_view)) {
-        return true;
-    }
     let wk = wv.webview();
     let wk_ptr = Retained::as_ptr(&wk).cast::<NSView>();
     let wk_view = unsafe { &*wk_ptr };
-    if std::ptr::eq(view, wk_ptr) || view_is_descendant_of(view, wk_view) {
-        return true;
-    }
-    if let Some(container) = unsafe { wk.superview() } {
-        if std::ptr::eq(view, Retained::as_ptr(&container)) {
-            return true;
-        }
-    }
-    false
+    let clip = unsafe { wk.superview() };
+    web_surface_owns_hit(view, wk_view, clip.as_deref())
 }
 
 /// Hit-test using wry top-left coordinates (same space as ``set_bounds``).
@@ -717,5 +726,26 @@ mod tests {
             width,
             height
         ));
+    }
+
+    #[test]
+    fn web_surface_owns_hit_ignores_shared_parent() {
+        let Some(mtm) = MainThreadMarker::new() else {
+            eprintln!("skipping web_surface_owns_hit assert (not on AppKit main thread)");
+            return;
+        };
+        let parent = NSView::new(mtm);
+        let clip = NSView::new(mtm);
+        let wk = NSView::new(mtm);
+        parent.addSubview(&clip);
+        clip.addSubview(&wk);
+
+        assert!(
+            !web_surface_owns_hit(&parent, &wk, Some(&clip)),
+            "shared toplevel content view must not claim the hit"
+        );
+        assert!(web_surface_owns_hit(&clip, &wk, Some(&clip)));
+        assert!(web_surface_owns_hit(&wk, &wk, Some(&clip)));
+        assert!(!web_surface_owns_hit(&parent, &wk, None));
     }
 }

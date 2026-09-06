@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- macOS focus hit-testing no longer treats the shared toplevel content
+  ``NSView`` as every WebView; chrome / gap clicks release web focus instead of
+  activating the first entry
 - macOS clip ``set_visible`` also forwards to the WKWebView (create-time
   ``visible=False`` / Notebook Map no longer leaves a blank frame)
 - macOS clip containers enable ``wantsLayer`` + ``masksToBounds`` (and
