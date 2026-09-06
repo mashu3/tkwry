@@ -1428,10 +1428,12 @@ def test_try_create_passes_visible_from_frame_should_show(
     assert web._webview is not None
 
 
-def test_flush_load_retries_without_clearing_pending_on_failure(
+def test_flush_load_retries_then_gives_up_after_max_attempts(
     tk_root, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
     from unittest.mock import MagicMock
+
+    from tkwry import WebViewNavigationError
 
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)
@@ -1440,24 +1442,35 @@ def test_flush_load_retries_without_clearing_pending_on_failure(
     web._webview = native
     web._pending_load = ("url", "https://example.com", None)
     scheduled: list[int] = []
+    failed: list[str] = []
     monkeypatch.setattr(
         web, "_schedule_flush_load", lambda **_k: scheduled.append(1), raising=False
     )
     monkeypatch.setattr(web, "_sync_bounds", lambda: None, raising=False)
     monkeypatch.setattr(web, "_service_linux_events", lambda **_k: None, raising=False)
+    monkeypatch.setattr(
+        web._frame,
+        "event_generate",
+        lambda name: failed.append(name),
+        raising=False,
+    )
 
     web._flush_load()
     assert web._pending_load == ("url", "https://example.com", None)
     assert scheduled == [1]
     assert web._flush_load_attempt == 1
+    assert failed == []
 
     web._flush_load_attempt = _FLUSH_LOAD_MAX_ATTEMPTS - 1
     web._flush_load()
-    assert web._pending_load == ("url", "https://example.com", None)
+    assert web._pending_load is None
     assert web._flush_load_attempt == 0
+    assert scheduled == [1]
+    assert failed == ["<<WebViewNavigationFailed>>"]
+    assert isinstance(web.last_navigation_error, WebViewNavigationError)
+    assert "boom" in str(web.last_navigation_error)
     err = capsys.readouterr().err
-    assert "load still failing" in err
-    assert "continuing to retry" in err
+    assert "giving up" in err
 
 
 def test_create_only_setters_reject_after_native_exists(tk_root) -> None:

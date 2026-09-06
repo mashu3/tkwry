@@ -1040,7 +1040,7 @@ class WebView(WebViewRpcMixin):
 
     @property
     def last_navigation_error(self) -> BaseException | None:
-        """Most recent ``on_navigation`` / ``on_new_window`` hook timeout."""
+        """Most recent navigation failure (load give-up, or sync-hook timeout)."""
         self._require_tk_thread()
         return self._last_navigation_error
 
@@ -4459,28 +4459,27 @@ class WebView(WebViewRpcMixin):
             self._sync_bounds()
         try:
             self._apply_load_to_native(load)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as exc:
             traceback.print_exc()
-            self._clear_pending_load()
-            self._flush_load_attempt = 0
+            self._fail_pending_load(exc)
             return
-        except Exception:
+        except Exception as exc:
             traceback.print_exc()
             self._flush_load_attempt += 1
             if self._destroyed or self._pending_load is None:
+                return
+            if self._flush_load_attempt >= _FLUSH_LOAD_MAX_ATTEMPTS:
+                print(
+                    "tkwry: load failed after "
+                    f"{self._flush_load_attempt} attempt(s); giving up",
+                    file=sys.stderr,
+                )
+                self._fail_pending_load(exc)
                 return
             delay_ms = min(
                 _FLUSH_LOAD_RETRY_MAX_MS,
                 _FLUSH_LOAD_RETRY_BASE_MS * (2 ** min(self._flush_load_attempt - 1, 4)),
             )
-            if self._flush_load_attempt >= _FLUSH_LOAD_MAX_ATTEMPTS:
-                print(
-                    "tkwry: load still failing after "
-                    f"{self._flush_load_attempt} attempt(s); continuing to retry "
-                    f"in {delay_ms}ms",
-                    file=sys.stderr,
-                )
-                self._flush_load_attempt = 0
             self._schedule_flush_load(delay_ms=delay_ms)
             return
         self._clear_pending_load()
@@ -4490,6 +4489,22 @@ class WebView(WebViewRpcMixin):
         self._finish_navigation()
         if self._page_load_listening_wanted():
             self._ensure_event_poll()
+
+    def _fail_pending_load(self, exc: BaseException) -> None:
+        """Stop retrying a pending load and surface a navigation failure."""
+        self._clear_pending_load()
+        self._flush_load_attempt = 0
+        self._clear_initial_load()
+        if isinstance(exc, WebViewNavigationError):
+            nav_exc = exc
+        else:
+            nav_exc = WebViewNavigationError(f"load failed: {exc}")
+        self._last_navigation_error = nav_exc
+        if not self._destroyed:
+            try:
+                self._frame.event_generate("<<WebViewNavigationFailed>>")
+            except (tk.TclError, RuntimeError):
+                pass
 
     def _mac_sync_bounds_rect(self) -> tuple[int, int, int, int] | None:
         """Return full ``set_bounds`` rect for macOS root-relative embeds.

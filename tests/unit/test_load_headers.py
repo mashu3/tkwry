@@ -127,6 +127,8 @@ def test_flush_load_skips_retry_on_value_error(
         web._flush_load()
         assert retries == []
         assert web._pending_load is None
+        assert web.last_navigation_error is not None
+        assert "engine rejected load" in str(web.last_navigation_error)
     finally:
         web._webview = None
         web.destroy()

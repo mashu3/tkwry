@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Persistent native load failures stop after the flush-load retry budget and
+  signal ``<<WebViewNavigationFailed>>`` / ``last_navigation_error`` instead of
+  retrying forever
+- Split ``drain_ipc_messages`` / ``drain_rpc_messages`` keep the shared
+  ``ipc_order`` markers in sync with ``drain_window_ipc_messages``
 - Windows CI: run off-thread native WebView GC lifecycle tests in their own
   pytest process (same STATUS_BREAKPOINT class as isolated RPC worker cases)
 - macOS CI: split unit / integration / ``tests/macos`` across pytest processes

@@ -865,7 +865,7 @@ type PyCallback = Arc<Mutex<Option<Py<PyAny>>>>;
 type PageLoadPending = Arc<Mutex<VecDeque<(PageLoadEvent, String)>>>;
 type IpcEnvelope = (String, String); // (source_url, body)
 type IpcPending = Arc<Mutex<VecDeque<IpcEnvelope>>>;
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WindowIpcRoute {
     Ipc,
     Rpc,
@@ -962,6 +962,25 @@ fn drain_window_ipc_in_order(
         if let Some(envelope) = msg {
             out.push(envelope);
         }
+    }
+    Ok(out)
+}
+
+/// Drain one side of the split IPC/RPC queues while removing matching
+/// ``ipc_order`` markers so mixed ``drain_window_ipc_messages`` stays coherent.
+fn drain_split_queue_updating_order(
+    order: &IpcOrderPending,
+    pending: &IpcPending,
+    route: WindowIpcRoute,
+) -> PyResult<Vec<IpcEnvelope>> {
+    let mut routes = order.lock().map_err(|_| queue_lock_poisoned())?;
+    let mut queue = pending.lock().map_err(|_| queue_lock_poisoned())?;
+    let mut out = Vec::with_capacity(queue.len());
+    while let Some(envelope) = queue.pop_front() {
+        if let Some(pos) = routes.iter().position(|entry| *entry == route) {
+            routes.remove(pos);
+        }
+        out.push(envelope);
     }
     Ok(out)
 }
@@ -2586,12 +2605,12 @@ WebViews that share a session must use the same app= root \
 
     fn drain_ipc_messages(&self) -> PyResult<Vec<(String, String)>> {
         self.require_owner_thread()?;
-        drain_queue(&self.ipc_pending)
+        drain_split_queue_updating_order(&self.ipc_order, &self.ipc_pending, WindowIpcRoute::Ipc)
     }
 
     fn drain_rpc_messages(&self) -> PyResult<Vec<(String, String)>> {
         self.require_owner_thread()?;
-        drain_queue(&self.rpc_pending)
+        drain_split_queue_updating_order(&self.ipc_order, &self.rpc_pending, WindowIpcRoute::Rpc)
     }
 
     fn drain_window_ipc_messages(&self) -> PyResult<Vec<(String, String)>> {
@@ -3448,6 +3467,69 @@ mod tests {
         assert_eq!(drained[0].1, "ipc-first");
         assert!(rpc_envelope::is_rpc_envelope(&drained[1].1));
         assert_eq!(drained[2].1, "ipc-second");
+    }
+
+    #[test]
+    fn split_drains_remove_matching_ipc_order_markers() {
+        let listening = AtomicBool::new(true);
+        let ipc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
+        let rpc_pending: IpcPending = Arc::new(Mutex::new(VecDeque::new()));
+        let ipc_dropped = AtomicU64::new(0);
+        let rpc_dropped = AtomicU64::new(0);
+        let ipc_order: IpcOrderPending = Arc::new(Mutex::new(VecDeque::new()));
+        let rpc_msg = r#"{"__tkwry":"rpc","id":"r1","method":"ping","params":[]}"#;
+        assert!(push_window_ipc_body(
+            &listening,
+            &ipc_pending,
+            &ipc_dropped,
+            &rpc_pending,
+            &rpc_dropped,
+            &ipc_order,
+            "ipc-first".into(),
+            String::new(),
+            None,
+        )
+        .is_ok());
+        assert!(push_window_ipc_body(
+            &listening,
+            &ipc_pending,
+            &ipc_dropped,
+            &rpc_pending,
+            &rpc_dropped,
+            &ipc_order,
+            rpc_msg.into(),
+            "about:blank".into(),
+            None,
+        )
+        .is_ok());
+        assert!(push_window_ipc_body(
+            &listening,
+            &ipc_pending,
+            &ipc_dropped,
+            &rpc_pending,
+            &rpc_dropped,
+            &ipc_order,
+            "ipc-second".into(),
+            String::new(),
+            None,
+        )
+        .is_ok());
+
+        let ipc_only =
+            drain_split_queue_updating_order(&ipc_order, &ipc_pending, WindowIpcRoute::Ipc)
+                .expect("drain ipc");
+        assert_eq!(ipc_only.len(), 2);
+        assert_eq!(ipc_only[0].1, "ipc-first");
+        assert_eq!(ipc_only[1].1, "ipc-second");
+        assert_eq!(ipc_order.lock().unwrap().len(), 1);
+        assert_eq!(ipc_order.lock().unwrap()[0], WindowIpcRoute::Rpc);
+
+        let mixed =
+            drain_window_ipc_in_order(&ipc_order, &ipc_pending, &rpc_pending).expect("drain mixed");
+        assert_eq!(mixed.len(), 1);
+        assert!(rpc_envelope::is_rpc_envelope(&mixed[0].1));
+        assert!(ipc_order.lock().unwrap().is_empty());
+        assert!(rpc_pending.lock().unwrap().is_empty());
     }
 
     #[test]
