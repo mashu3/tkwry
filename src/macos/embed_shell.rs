@@ -23,6 +23,16 @@ fn embed_origin(view: &NSView, x: i32, y: i32, height: f64) -> NSPoint {
     }
 }
 
+fn enable_container_clipping(container: &NSView) {
+    // Layer-backed clipping is what platforms.md describes as masksToBounds.
+    // clipsToBounds covers newer AppKit; both stay in sync with the docs.
+    container.setWantsLayer(true);
+    container.setClipsToBounds(true);
+    if let Some(layer) = container.layer() {
+        layer.setMasksToBounds(true);
+    }
+}
+
 pub struct MacClipHost {
     parent: Retained<NSView>,
     container: Retained<NSView>,
@@ -37,6 +47,7 @@ impl MacClipHost {
         };
         let container = NSView::new(_mtm);
         container.setAutoresizingMask(NSAutoresizingMaskOptions::ViewNotSizable);
+        enable_container_clipping(&container);
         Ok(Self {
             parent,
             container,
@@ -84,9 +95,13 @@ impl MacClipHost {
         Ok(())
     }
 
-    pub fn set_visible(&self, wv: &wry::WebView, visible: bool) {
+    pub fn set_visible(&self, wv: &wry::WebView, visible: bool) -> Result<(), String> {
         self.ensure_attached(wv);
         self.container.setHidden(!visible);
+        // Create-time ``visible=False`` hides the WKWebView itself; unhiding
+        // only the clip container would leave a blank frame after Map.
+        wv.set_visible(visible)
+            .map_err(|e| format!("macOS clip set_visible failed: {e}"))
     }
 
     pub fn raise_to_front(&self) {
@@ -99,5 +114,39 @@ impl MacClipHost {
 
     pub fn teardown(&self) {
         self.container.removeFromSuperview();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clip_container_enables_masks_to_bounds() {
+        let Some(mtm) = MainThreadMarker::new() else {
+            // Default ``cargo test`` workers are not the AppKit main thread.
+            eprintln!("skipping clip masksToBounds assert (not on AppKit main thread)");
+            return;
+        };
+        let parent = NSView::new(mtm);
+        let parent_ptr =
+            NonNull::new(Retained::as_ptr(&parent) as *mut NSView).expect("parent view");
+        let host = MacClipHost::new(parent_ptr).expect("clip host");
+        assert!(host.container.wantsLayer());
+        assert!(host.container.clipsToBounds());
+        let layer = host.container.layer().expect("backing layer");
+        assert!(layer.masksToBounds());
+    }
+
+    #[test]
+    fn clip_host_new_requires_main_thread() {
+        let err = std::thread::spawn(|| {
+            // Dangling NonNull only exercises the main-thread gate before retain.
+            MacClipHost::new(NonNull::<NSView>::dangling()).err()
+        })
+        .join()
+        .expect("thread")
+        .expect("expected Err off the main thread");
+        assert!(err.contains("main thread"));
     }
 }

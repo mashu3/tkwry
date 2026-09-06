@@ -2846,8 +2846,9 @@ WebViews that share a session must use the same app= root \
             #[cfg(target_os = "macos")]
             if let Ok(clip) = self.mac_clip.lock() {
                 if let Some(host) = clip.as_ref() {
-                    host.set_visible(wv, visible);
-                    return Ok(());
+                    return host
+                        .set_visible(wv, visible)
+                        .map_err(pyo3::exceptions::PyRuntimeError::new_err);
                 }
             }
             wv.set_visible(visible)

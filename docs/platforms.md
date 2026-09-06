@@ -110,9 +110,9 @@ Tk child `Frame`s usually **do not** get their own `NSView` (Tk Aqua). tkwry
 attaches to the **toplevel content view**, positions with `set_bounds` on
 `<Configure>`, and hides with `set_visible(False)` on `<Unmap>` (e.g.
 another Notebook tab). Each WKWebView is wrapped in a **fixed-size clip
-container** (`NSView` with `masksToBounds`) so `set_bounds` and DevTools stay
-inside the owning Frame instead of expanding to the full toplevel view.
-Per-frame native views would need upstream Tk changes.
+container** (`NSView` with `wantsLayer` / `masksToBounds` / `clipsToBounds`) so
+`set_bounds` and DevTools stay inside the owning Frame instead of expanding to
+the full toplevel view. Per-frame native views would need upstream Tk changes.
 
 **Keyboard focus:** clicks are hit-tested at the `NSEvent` layer; Python
 drains focus signals on the Tk main thread. Use `web.focus()` /

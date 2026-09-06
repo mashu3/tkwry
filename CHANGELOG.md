@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- macOS clip ``set_visible`` also forwards to the WKWebView (create-time
+  ``visible=False`` / Notebook Map no longer leaves a blank frame)
+- macOS clip containers enable ``wantsLayer`` + ``masksToBounds`` (and
+  ``clipsToBounds``) so DevTools / content stay inside the Tk frame as
+  documented
 - RPC ``cancel`` only applies to the same document that started the call (and
   an active id); speculative / cross-frame cancels are ignored
 - ``cookies_for_url`` normalizes and validates the URL like ``load_url``
