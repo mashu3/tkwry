@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### CI
+
+- Codecov uploads for **macOS** and **Windows** (separate flags + README
+  badges); ``TKWRY_COVERAGE=1`` enables append coverage in the existing
+  split CI test scripts
+
 ### Deprecated
 
 - ``WebView.take_queue_drop_counts()`` emits ``DeprecationWarning``; prefer

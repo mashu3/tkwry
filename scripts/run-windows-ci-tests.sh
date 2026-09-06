@@ -25,6 +25,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=ci-coverage.sh
+source "$(dirname "$0")/ci-coverage.sh"
+
 export TK_SILENCE_DEPRECATION="${TK_SILENCE_DEPRECATION:-1}"
 export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 
@@ -35,7 +38,11 @@ cleanup_webview2() {
 }
 
 run_pytest() {
-  pytest "$@" -v --tb=short
+  local -a cov_args=()
+  if [[ "${TKWRY_COVERAGE:-}" == "1" ]]; then
+    cov_args=(--cov=tkwry --cov-append --cov-report=)
+  fi
+  pytest "$@" -v --tb=short "${cov_args[@]}"
   cleanup_webview2
 }
 
@@ -51,6 +58,7 @@ LIFECYCLE_OFF_THREAD_NATIVE_GC=(
   tests/integration/test_lifecycle.py::test_del_on_worker_thread_tears_down_native
 )
 
+ci_coverage_prepare
 run_pytest tests/unit/test_sync_hooks.py
 run_pytest tests/unit/ --ignore=tests/unit/test_sync_hooks.py
 deselect_args=()
@@ -71,3 +79,4 @@ run_pytest tests/integration/test_multi_webview.py
 run_pytest tests/integration/test_notebook.py
 run_pytest tests/integration/test_viewport.py
 run_pytest tests/integration/test_browser_essentials.py
+ci_coverage_finalize

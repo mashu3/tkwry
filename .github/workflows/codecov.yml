@@ -1,0 +1,79 @@
+name: Coverage
+
+# Dedicated Win + macOS coverage uploads (Codecov flags). Not hung on every
+# matrix cell in ci.yml — same split suites as CI, plus pytest-cov append.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    name: Coverage (${{ matrix.flag }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            flag: macos
+            script: scripts/run-macos-ci-tests.sh
+          - os: windows-latest
+            flag: windows
+            script: scripts/run-windows-ci-tests.sh
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin pytest pytest-cov
+
+      - name: Build and install
+        shell: bash
+        env:
+          PKG_CONFIG_PATH: ""
+        run: |
+          maturin build --profile ci --out dist
+          pip install dist/*.whl
+
+      - name: Configure Tcl/Tk (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "TCL_LIBRARY=${pythonLocation}/tcl/tcl8.6" >> "$GITHUB_ENV"
+          echo "TK_LIBRARY=${pythonLocation}/tcl/tk8.6" >> "$GITHUB_ENV"
+
+      - name: Run tests with coverage
+        shell: bash
+        env:
+          TK_SILENCE_DEPRECATION: "1"
+          PYTHONUNBUFFERED: "1"
+          TKWRY_COVERAGE: "1"
+        run: bash ${{ matrix.script }}
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          flags: ${{ matrix.flag }}
+          name: ${{ matrix.flag }}
+          fail_ci_if_error: true
+          verbose: true

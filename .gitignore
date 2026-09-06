@@ -52,3 +52,4 @@ _MEI*
 *.whl
 tkwry/_core*.so
 tkwry/_core*.pyd
+coverage.xml

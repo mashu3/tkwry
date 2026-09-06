@@ -20,6 +20,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=ci-coverage.sh
+source "$(dirname "$0")/ci-coverage.sh"
+
 export TK_SILENCE_DEPRECATION="${TK_SILENCE_DEPRECATION:-1}"
 export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 
@@ -32,13 +35,20 @@ cleanup_webkit() {
 }
 
 run_pytest() {
-  pytest "$@" -v --tb=short
+  # Prefer array expansion so coverage flags stay intact under ``set -u``.
+  local -a cov_args=()
+  if [[ "${TKWRY_COVERAGE:-}" == "1" ]]; then
+    cov_args=(--cov=tkwry --cov-append --cov-report=)
+  fi
+  pytest "$@" -v --tb=short "${cov_args[@]}"
   cleanup_webkit
 }
 
+ci_coverage_prepare
 run_pytest tests/unit/test_sync_hooks.py
 run_pytest tests/unit/ --ignore=tests/unit/test_sync_hooks.py
 for integration_test in tests/integration/test_*.py; do
   run_pytest "$integration_test"
 done
 run_pytest tests/macos/
+ci_coverage_finalize
