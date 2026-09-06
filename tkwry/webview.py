@@ -1080,7 +1080,11 @@ class WebView(WebViewRpcMixin):
 
     @property
     def native(self) -> NativeWebView | None:
-        """Underlying :class:`tkwry._core.WebView`, or ``None`` if not created."""
+        """Underlying :class:`tkwry._core.WebView`, or ``None`` if not created.
+
+        Internal (no SemVer). Prefer the Python :class:`WebView` API for
+        application code; see docs/usage.md (API stability).
+        """
         self._require_not_destroyed("native")
         return self._webview
 

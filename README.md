@@ -12,7 +12,7 @@
 
 Embed a real system WebView ([wry](https://github.com/tauri-apps/wry)) inside your `Frame`: modern HTML, JS, and IPC in the same layout as your buttons and tabs — one `mainloop`, no floating overlay.
 
-> **Alpha** — Early preview (see PyPI badge for the current version). APIs and behavior may change without notice. Not recommended for production use yet.
+> **Alpha** — Early preview (see PyPI badge for the current version). APIs and behavior may change without notice. Not recommended for production use yet. Prefer the Python `WebView` / `WebSession` API; `tkwry._core` and `.native` are **Internal** (no SemVer) — see [Usage — API stability](https://github.com/mashu3/tkwry/blob/main/docs/usage.md#api-stability).
 
 ---
 

@@ -13,7 +13,7 @@ Contracts live elsewhere: [Trust boundaries](trust.md),
 | [User-Agent](#user-agent) | App identity — not a Chrome spoof |
 | [Observability](#observability) | ``WebViewPhase`` + ``take_queue_drop_stats()`` |
 | [Cleanup](#cleanup) | `destroy` / Frame / `WebSession.close` order |
-| [API stability](#api-stability) | Public vs Provisional (Alpha) |
+| [API stability](#api-stability) | Public / Provisional / Internal (Alpha) |
 | [API summary](#api-summary) | Public surface table |
 
 The constructor **does not raise** if the native view cannot be created
@@ -738,13 +738,26 @@ Provisional callback exceptions: ``on_callback_error`` (see
 |-------|------|
 | **Public** | Listed in ``tkwry.__all__`` and the [API summary](#api-summary) below |
 | **Provisional** | Documented but **not** in ``__all__`` — may change without notice while Alpha |
-| **Internal** | Underscore modules / methods — unsupported |
+| **Internal** | ``tkwry._core``, ``WebView.native`` / ``WebSession.native``, underscore helpers — **no SemVer**; prefer the Python ``WebView`` / ``WebSession`` API |
 
 **Provisional today:**
 
 | Symbol | Notes |
 |--------|-------|
 | ``on_callback_error`` / ``set_on_callback_error`` | Route callback exceptions to app code (`exc`, `kind`); default remains stderr |
+
+**Internal (no SemVer):**
+
+``tkwry._core`` is the PyO3 extension. ``WebView.native`` /
+``WebSession.native`` expose that surface for tests and host internals. App
+code should use the Python ``WebView`` API (URL normalize, IPC/RPC routing,
+Tk-thread contracts).
+
+Production IPC/RPC drain uses ``drain_window_ipc_messages()`` only — it
+preserves enqueue order across IPC and RPC. Split ``drain_ipc_messages`` /
+``drain_rpc_messages`` and ``_enqueue_*`` helpers exist for tests / host
+plumbing; do not build app logic on them. Symbols may change without a
+deprecation cycle (they are not removed in 0.1.x solely for that reason).
 
 Constructor vs setter **dual paths** (e.g. ``on_navigation=`` vs
 ``set_on_navigation``) are intended to be equivalent before native create and

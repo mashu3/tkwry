@@ -178,7 +178,12 @@ class WebSession:
 
     @property
     def native(self) -> NativeWebSession:
-        """Underlying ``tkwry._core.WebSession`` (for WebView create)."""
+        """Underlying ``tkwry._core.WebSession`` (for WebView create).
+
+        Internal (no SemVer). Prefer the Python :class:`WebSession` /
+        :class:`~tkwry.webview.WebView` API for application code; see
+        docs/usage.md (API stability).
+        """
         self._require_open("access native")
         assert self._native is not None
         return self._native

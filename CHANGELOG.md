@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Docs
+
+- Clarify Internal ``tkwry._core`` / ``WebView.native`` / ``WebSession.native``
+  (no SemVer) and the production IPC drain contract
+  (``drain_window_ipc_messages`` only) in ``docs/usage.md`` and the README
+
 ### Fixed
 
 - Clearing ``set_context_menu(None)`` / ``set_context_menu_handler(None)`` also
