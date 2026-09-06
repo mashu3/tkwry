@@ -160,6 +160,16 @@ _QUEUE_DROP_RPC = 5
 _T = TypeVar("_T")
 
 
+def _ignore_cleanup_error() -> None:
+    """Log a best-effort cleanup failure without raising.
+
+    Used when undoing partial construction or releasing host/native resources
+    while another error is already in flight (or the native view is already
+    gone). Silent ``except Exception: pass`` hid these from apps and maintainers.
+    """
+    traceback.print_exc()
+
+
 def _validate_color_component(value: int, name: str) -> None:
     if type(value) is not int:
         raise TypeError(f"{name} must be an int, got {type(value).__name__}")
@@ -916,18 +926,18 @@ class WebView(WebViewRpcMixin):
                 try:
                     self._session._unregister_webview(self)
                 except Exception:
-                    pass
+                    _ignore_cleanup_error()
             try:
                 self._unbind_frame_events()
             except Exception:
-                pass
+                _ignore_cleanup_error()
             self._cancel_deferred_callbacks()
             self._disarm_event_poll()
             if sys.platform == "darwin":
                 try:
                     _unregister_macos_webview(self)
                 except Exception:
-                    pass
+                    _ignore_cleanup_error()
             _release_frame_host(frame, self)
             raise
 
@@ -1527,7 +1537,7 @@ class WebView(WebViewRpcMixin):
         try:
             _release_frame_host(self._frame, self)
         except Exception:
-            pass
+            _ignore_cleanup_error()
         if unbind_events:
             self._unbind_frame_events()
         _unregister_sync_hook_webview(self)
@@ -1537,7 +1547,7 @@ class WebView(WebViewRpcMixin):
             try:
                 _unregister_macos_webview(self)
             except Exception:
-                pass
+                _ignore_cleanup_error()
 
     def _teardown_native_if_alive(self) -> None:
         """Release the native WebView when Tk teardown is impossible."""
@@ -1657,7 +1667,7 @@ class WebView(WebViewRpcMixin):
         try:
             native.set_visible(False)
         except Exception:
-            pass
+            _ignore_cleanup_error()
 
     def _show_native_view(self, native: NativeWebView) -> bool:
         """Map-axis show counterpart to ``_hide_native_view``."""
@@ -2043,11 +2053,12 @@ class WebView(WebViewRpcMixin):
                 can_back = bool(self._webview.can_go_back())
                 can_forward = bool(self._webview.can_go_forward())
             except Exception:
-                pass
+                can_back = False
+                can_forward = False
             try:
                 devtools_open = bool(self._webview.is_devtools_open())
             except Exception:
-                pass
+                devtools_open = False
         return WebViewState(
             url=url,
             title=self._document_title,
@@ -4135,10 +4146,11 @@ class WebView(WebViewRpcMixin):
         if self._rpc_inflight:
             return True
         try:
-            if not self._navigation_error_queue.empty():
-                return True
+            nav_errors_pending = not self._navigation_error_queue.empty()
         except Exception:
-            pass
+            nav_errors_pending = False
+        if nav_errors_pending:
+            return True
         return self._pending_eval_callbacks > 0 or bool(self._native_eval_wait)
 
     def _try_create(self) -> None:

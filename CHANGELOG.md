@@ -34,6 +34,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- ``WebView`` teardown / snapshot paths no longer use silent
+  ``except Exception: pass`` — cleanup failures log via traceback; ``get_state``
+  and poll probes set explicit defaults
 - Clearing ``set_context_menu(None)`` / ``set_context_menu_handler(None)`` also
   drops the page-load Started latch so listening does not stay on forever
 - Flagship ``tkwry_browser``: Cmd/Ctrl+L takes chrome focus (and releases
