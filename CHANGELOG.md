@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows CI: run off-thread native WebView GC lifecycle tests in their own
+  pytest process (same STATUS_BREAKPOINT class as isolated RPC worker cases)
+
 ## [0.1.8] - 2026-09-06
 
 Post-0.1.7 defect sweep (lifecycle, RPC/IPC, session, macOS embed) plus the

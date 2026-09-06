@@ -454,8 +454,6 @@ def test_native_rejects_other_thread(tk_root) -> None:
 )
 def test_native_drop_off_owner_thread_leaks_without_crash(tk_root) -> None:
     """Native WebView collected off the Tk thread must not crash."""
-    import gc
-
     frame = bare_frame(tk_root)
     web = WebView(frame, width=400, height=300, html="<p>drop</p>")
     layout_bare_frame(frame, width=400, height=300)
@@ -473,7 +471,9 @@ def test_native_drop_off_owner_thread_leaks_without_crash(tk_root) -> None:
             web._webview = None  # type: ignore[assignment]
             n = native_holder.pop()
             del n
-            gc.collect()
+            # Avoid gc.collect() on this worker: after many create/destroy
+            # cycles in one process, a full GC off the Tk thread can abort
+            # on Windows (STATUS_BREAKPOINT). Refcount drop is enough here.
         except BaseException as exc:
             errors.append(str(exc))
         finally:

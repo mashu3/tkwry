@@ -14,6 +14,9 @@
 # Off-thread sync-hook unit tests similarly abort under GC after a long
 # ``tests/unit/`` streak (Linux Aborted / Windows 0x80000003). Isolate them.
 #
+# Lifecycle tests that drop / finalize the native WebView on a worker thread
+# hit the same abort after earlier create/destroy cases in that module.
+#
 # Leftover ``msedgewebview2.exe`` survives pytest process exit and can wedge
 # the next suite's Tk ``update()`` on windows-11-arm (Linux reaps WebKit
 # between suites for the same reason). Kill helpers after each pytest.
@@ -43,6 +46,11 @@ CONTENT_RPC_WORKER_STRESS=(
   tests/integration/test_content.py::test_rpc_js_cancel_rejects_worker
 )
 
+LIFECYCLE_OFF_THREAD_NATIVE_GC=(
+  tests/integration/test_lifecycle.py::test_native_drop_off_owner_thread_leaks_without_crash
+  tests/integration/test_lifecycle.py::test_del_on_worker_thread_tears_down_native
+)
+
 run_pytest tests/unit/test_sync_hooks.py
 run_pytest tests/unit/ --ignore=tests/unit/test_sync_hooks.py
 deselect_args=()
@@ -53,7 +61,12 @@ run_pytest tests/integration/test_content.py "${deselect_args[@]}"
 run_pytest "${CONTENT_RPC_WORKER_STRESS[@]}"
 run_pytest tests/integration/test_create_options.py
 run_pytest tests/integration/test_layout.py
-run_pytest tests/integration/test_lifecycle.py
+lifecycle_deselect=()
+for node in "${LIFECYCLE_OFF_THREAD_NATIVE_GC[@]}"; do
+  lifecycle_deselect+=(--deselect "$node")
+done
+run_pytest tests/integration/test_lifecycle.py "${lifecycle_deselect[@]}"
+run_pytest "${LIFECYCLE_OFF_THREAD_NATIVE_GC[@]}"
 run_pytest tests/integration/test_multi_webview.py
 run_pytest tests/integration/test_notebook.py
 run_pytest tests/integration/test_viewport.py
