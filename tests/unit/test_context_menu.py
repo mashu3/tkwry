@@ -201,7 +201,8 @@ def test_clearing_context_menu_removes_bridge(tk_root) -> None:
 
     assert evals == [CONTEXT_MENU_DISABLE_JS]
     assert web._context_menu_bridge_injected is False
-    assert web._page_load_listening_wanted() is True
+    assert web._context_menu_started_hook is False
+    assert web._page_load_listening_wanted() is False
     assert web._context_menu_active() is False
     web.destroy()
     frame.destroy()
@@ -236,6 +237,8 @@ def test_clearing_context_menu_handler_removes_bridge_when_no_items(
 
     assert evals == [CONTEXT_MENU_DISABLE_JS]
     assert web._context_menu_bridge_injected is False
+    assert web._context_menu_started_hook is False
+    assert web._page_load_listening_wanted() is False
     web.destroy()
     frame.destroy()
 
@@ -265,8 +268,13 @@ def test_context_menu_disabled_on_started_when_inactive(
 
     monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
     web._webview = _Native()  # type: ignore[assignment]
+    # Keep page-load listening for another reason so Started can still inject
+    # disable after the menu latch is cleared.
+    web.set_on_page_load(lambda *_args: None)
     web.set_context_menu([("Copy", lambda: None)])
     web.set_context_menu(None)
+    assert web._context_menu_started_hook is False
+    assert web._page_load_listening_wanted() is True
     evals.clear()
 
     web._deliver_page_load_events()

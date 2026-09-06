@@ -1580,6 +1580,7 @@ class WebView(WebViewRpcMixin):
         self._dispose_context_menu_tk()
         self._context_menu_items = None
         self._context_menu_handler = None
+        self._context_menu_started_hook = False
         self._inject_scripts.clear()
         if self._session is not None:
             self._session._unregister_webview(self)
@@ -2651,6 +2652,10 @@ class WebView(WebViewRpcMixin):
         self._dispose_context_menu_tk()
         if items is not None:
             self._context_menu_started_hook = True
+        elif not self._context_menu_active():
+            # Drop the Started latch when no menu remains so page-load listening
+            # / native queue pressure do not stay on forever.
+            self._context_menu_started_hook = False
         if self._context_menu_active():
             self._require_windows_context_menu_ready("set_context_menu")
             self._enable_context_menu_bridge()
@@ -2679,6 +2684,8 @@ class WebView(WebViewRpcMixin):
         self._dispose_context_menu_tk()
         if handler is not None:
             self._context_menu_started_hook = True
+        elif not self._context_menu_active():
+            self._context_menu_started_hook = False
         if self._context_menu_active():
             self._require_windows_context_menu_ready("set_context_menu_handler")
             self._enable_context_menu_bridge()
@@ -3075,8 +3082,8 @@ class WebView(WebViewRpcMixin):
                 bool(self._inject_scripts),
                 self._state_wanted,
                 # emit() / expose keep page-load listening for bridge reinject;
-                # do not use full ``_page_load_listening_wanted`` here — the
-                # context-menu Started latch would keep the poll forever.
+                # do not use full ``_page_load_listening_wanted`` here — a stale
+                # context-menu Started latch must not keep the poll forever.
                 self._rpc_bridge_wanted,
                 bool(self._rpc_methods),
                 self._on_title_changed is not None,

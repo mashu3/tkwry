@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Clearing ``set_context_menu(None)`` / ``set_context_menu_handler(None)`` also
+  drops the page-load Started latch so listening does not stay on forever
 - Flagship ``tkwry_browser``: Cmd/Ctrl+L takes chrome focus (and releases
   content) before focusing the URL field; URL-bar cut requires a selection so
   caret-only Cmd/Ctrl+X no longer copies without cutting
