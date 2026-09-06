@@ -1052,12 +1052,13 @@ html, body {
     if (document.activeElement !== urlInput && !editing) return "";
     const start = urlInput.selectionStart ?? 0;
     const end = urlInput.selectionEnd ?? 0;
-    const text = selectedUrlText();
-    if (end > start) {
-      urlInput.value = urlInput.value.slice(0, start) + urlInput.value.slice(end);
-      urlInput.setSelectionRange(start, start);
-      editing = true;
-    }
+    // Require a selection: caret-only cut must not copy the whole URL without
+    // removing it from the field.
+    if (end <= start) return "";
+    const text = urlInput.value.slice(start, end);
+    urlInput.value = urlInput.value.slice(0, start) + urlInput.value.slice(end);
+    urlInput.setSelectionRange(start, start);
+    editing = true;
     return text;
   };
 
@@ -4258,11 +4259,25 @@ class BrowserApp:
         self._chrome_after = self.root.after(350, _tick)
 
     def focus_url(self) -> None:
-        if self.chrome.ready:
-            self._url_editing = True
-            self.chrome.eval_js(
-                "var i=document.getElementById('url');if(i){i.focus();i.select();}"
-            )
+        if not self.chrome.ready:
+            return
+        self._url_editing = True
+        # Release content WKWebView keyboard ownership before focusing chrome
+        # (otherwise typed URL keys can stay on the page on macOS).
+        tab = self.current_tab()
+        web = tab.web if tab is not None else None
+        if web is not None and not web.destroyed:
+            try:
+                web.focus_parent()
+            except Exception:
+                pass
+        try:
+            self.chrome.focus()
+        except Exception:
+            pass
+        self.chrome.eval_js(
+            "var i=document.getElementById('url');if(i){i.focus();i.select();}"
+        )
 
     # ----- side pane -----
 

@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Flagship ``tkwry_browser``: Cmd/Ctrl+L takes chrome focus (and releases
+  content) before focusing the URL field; URL-bar cut requires a selection so
+  caret-only Cmd/Ctrl+X no longer copies without cutting
 - ``on_download`` expands ``~`` before the absolute-path check (same honesty as
   ``Download.save`` / ``save_as``)
 - Shared ephemeral ``WebSession`` + ``app=`` uses the same protocol attach /
