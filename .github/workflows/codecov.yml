@@ -41,16 +41,26 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install Python tooling
-        run: |
-          python -m pip install --upgrade pip
-          pip install maturin pytest pytest-cov
-
-      - name: Editable install (coverage paths = checkout)
+      # maturin develop requires a real venv (VIRTUAL_ENV / .venv). setup-python
+      # alone is not enough on GHA.
+      - name: Editable install in .venv (coverage paths = checkout)
         shell: bash
         env:
           PKG_CONFIG_PATH: ""
-        run: maturin develop --profile ci
+        run: |
+          python -m venv .venv
+          if [[ -f .venv/Scripts/activate ]]; then
+            # Windows (bash)
+            source .venv/Scripts/activate
+            echo "$GITHUB_WORKSPACE/.venv/Scripts" >> "$GITHUB_PATH"
+          else
+            source .venv/bin/activate
+            echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+          fi
+          python -m pip install --upgrade pip
+          pip install maturin pytest pytest-cov
+          maturin develop --profile ci
+          python -c "import tkwry, pathlib; print(pathlib.Path(tkwry.__file__).resolve())"
 
       - name: Configure Tcl/Tk (Windows)
         if: runner.os == 'Windows'
