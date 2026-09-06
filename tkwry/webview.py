@@ -3818,24 +3818,28 @@ class WebView(WebViewRpcMixin):
             if event == PageLoadEvent.Started:
                 self._loading = True
                 if self._rpc_bridge_wanted or self._rpc_methods:
-                    self._bump_rpc_epoch_for_navigation(sync_js=False)
+                    # Create-time first Started must not bump/cancel — IPC may
+                    # already be in-flight on the same poll tick before this
+                    # page-load drain. Later Started (incl. re-nav before
+                    # Finished) still bumps.
+                    if self._rpc_page_started_once:
+                        self._bump_rpc_epoch_for_navigation(sync_js=False)
+                    else:
+                        self._rpc_page_started_once = True
+                    self._schedule_rpc_bridge_navigation_sync()
             elif event == PageLoadEvent.Finished:
                 self._loading = False
                 self._document_loaded_once = True
+                if self._rpc_bridge_wanted or self._rpc_methods:
+                    # New document is runnable; correct epoch if Started sync
+                    # landed on the previous document.
+                    self._sync_rpc_bridge_after_finished()
             if event == PageLoadEvent.Started and self._inject_scripts:
                 for script in list(self._inject_scripts):
                     try:
                         self._run_eval_js(script)
                     except Exception:
                         traceback.print_exc()
-            if event == PageLoadEvent.Started and (
-                self._rpc_bridge_wanted or self._rpc_methods
-            ):
-                try:
-                    self._inject_rpc_bootstrap()
-                    self._sync_rpc_epoch_to_js()
-                except Exception:
-                    traceback.print_exc()
             if event == PageLoadEvent.Started:
                 try:
                     if self._context_menu_active():

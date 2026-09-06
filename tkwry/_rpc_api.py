@@ -49,15 +49,13 @@ from tkwry.ipc import (
     format_rpc_error,
     merge_initialization_script,
     parse_rpc_request,
+    rpc_bootstrap_js,
     rpc_bump_epoch_script,
     rpc_error,
     rpc_id_epoch,
     settle_script,
     stream_chunk_script,
     validate_rpc_timeout,
-)
-from tkwry.ipc import (
-    RPC_BOOTSTRAP_JS as _RPC_BOOTSTRAP_JS,
 )
 
 _RPC_EXECUTOR_JOIN_SECONDS = 2.0
@@ -94,6 +92,8 @@ class WebViewRpcMixin:
         self._rpc_cancel_events: dict[str, threading.Event] = {}
         self._rpc_user_cancelled: set[str] = set()
         self._rpc_epoch = 0
+        self._rpc_page_started_once = False
+        self._rpc_nav_sync_after_id: str | None = None
         self._app_watch_after_id: str | None = None
         self._app_watch_mtime: float | None = None
         self._app_watch_suffixes: frozenset[str] | None = WATCH_DEFAULT_SUFFIXES
@@ -390,8 +390,50 @@ class WebViewRpcMixin:
         # or native IPC/RPC queues fill while Python never drains them.
         native.set_ipc_listening(self._ipc_listening_wanted())
         try:
-            native.eval_js(_RPC_BOOTSTRAP_JS)
+            native.eval_js(rpc_bootstrap_js(self._rpc_epoch))
             self._rpc_bootstrap_injected = True
+        except Exception:
+            traceback.print_exc()
+
+    def _schedule_rpc_bridge_navigation_sync(self) -> None:
+        """Re-inject the bridge after navigation when the new document can run JS.
+
+        ``Started`` can reach Python before the new document's initialization
+        script; syncing immediately would bump the previous document while the
+        new one keeps create-time epoch 0. Coalesce to one idle callback.
+        """
+        if self._destroyed or self._webview is None:
+            return
+        if not (self._rpc_bridge_wanted or self._rpc_methods):
+            return
+        if self._rpc_nav_sync_after_id is not None:
+            return
+
+        def _run() -> None:
+            self._rpc_nav_sync_after_id = None
+            if self._destroyed or self._webview is None:
+                return
+            if not (self._rpc_bridge_wanted or self._rpc_methods):
+                return
+            try:
+                self._inject_rpc_bootstrap()
+            except Exception:
+                traceback.print_exc()
+
+        try:
+            self._rpc_nav_sync_after_id = self._frame.after_idle(_run)
+            self._track_after(self._rpc_nav_sync_after_id)
+        except (tk.TclError, RuntimeError, AttributeError):
+            _run()
+
+    def _sync_rpc_bridge_after_finished(self) -> None:
+        """Apply the current epoch on ``Finished`` (new document is runnable)."""
+        if self._destroyed or self._webview is None:
+            return
+        if not (self._rpc_bridge_wanted or self._rpc_methods):
+            return
+        try:
+            self._inject_rpc_bootstrap()
         except Exception:
             traceback.print_exc()
 

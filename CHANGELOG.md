@@ -16,6 +16,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ``emit()`` keeps the event poll / wakeup draining page-load so navigation
   re-injects the JS bridge; emit-only bootstrap no longer forces IPC listening
   (queues no longer fill with nothing to drain)
+- RPC navigation epoch: skip bump/cancel on the create-time first
+  ``PageLoadEvent.Started`` so same-poll early ``tkwry.call`` is not dropped;
+  bake the epoch into the JS bootstrap and sync on idle / ``Finished`` so a
+  premature ``Started`` cannot leave the new document on epoch 0
 
 ## [0.1.8] - 2026-09-06
 

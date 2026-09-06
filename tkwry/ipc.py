@@ -56,11 +56,19 @@ _rpc_tls = threading.local()
 RPC_STREAM_DONE = object()
 
 # Injected before user initialization_script / via eval_js after create.
-RPC_BOOTSTRAP_JS = """\
+# ``rpc_bootstrap_js(epoch)`` substitutes the navigation epoch so a reinjected
+# bridge matches Python after ``Started`` / ``Finished`` (not a separate bump
+# that can land on the previous document).
+_RPC_BOOTSTRAP_EPOCH_TOKEN = "__TKWRY_RPC_EPOCH__"
+_RPC_BOOTSTRAP_JS_TEMPLATE = """\
 (function () {
+  var initialEpoch = __TKWRY_RPC_EPOCH__;
   if (window.tkwry && window.tkwry.call && window.tkwry.invoke
-      && window.tkwry.stream && window.tkwry.on) return;
-  var epoch = 0;
+      && window.tkwry.stream && window.tkwry.on) {
+    if (window.tkwry._bumpEpoch) window.tkwry._bumpEpoch(initialEpoch);
+    return;
+  }
+  var epoch = initialEpoch;
   var seq = 0;
   var pending = Object.create(null);
   var listeners = Object.create(null);
@@ -440,6 +448,18 @@ RPC_BOOTSTRAP_JS = """\
   };
 })();
 """
+
+
+def rpc_bootstrap_js(epoch: int = 0) -> str:
+    """Return the RPC bridge bootstrap with *epoch* baked into the script."""
+    return _RPC_BOOTSTRAP_JS_TEMPLATE.replace(
+        _RPC_BOOTSTRAP_EPOCH_TOKEN, str(int(epoch))
+    )
+
+
+# Default create-time bootstrap (epoch 0). Prefer :func:`rpc_bootstrap_js` when
+# reinjecting after navigation so the in-page epoch matches Python.
+RPC_BOOTSTRAP_JS = rpc_bootstrap_js(0)
 
 
 def rpc_cancelled() -> bool:
