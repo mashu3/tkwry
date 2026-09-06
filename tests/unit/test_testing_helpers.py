@@ -11,13 +11,9 @@ from tkwry import testing
 
 def test_pump_drives_update_and_after(tk_root, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
-    monkeypatch.setattr(
-        tk_root, "update_idletasks", lambda: calls.append("idle")
-    )
+    monkeypatch.setattr(tk_root, "update_idletasks", lambda: calls.append("idle"))
     monkeypatch.setattr(tk_root, "update", lambda: calls.append("update"))
-    monkeypatch.setattr(
-        tk_root, "after", lambda delay: calls.append(f"after:{delay}")
-    )
+    monkeypatch.setattr(tk_root, "after", lambda delay: calls.append(f"after:{delay}"))
     monkeypatch.setattr(testing.sys, "platform", "darwin")
 
     testing.pump(tk_root, steps=2, delay_ms=7)
@@ -39,9 +35,7 @@ def test_pump_on_linux_calls_gtk_helpers(
         gtk_calls.append("pump")
 
     monkeypatch.setattr(testing.sys, "platform", "linux")
-    monkeypatch.setattr(
-        "tkwry._core.ensure_gtk_init", ensure, raising=False
-    )
+    monkeypatch.setattr("tkwry._core.ensure_gtk_init", ensure, raising=False)
     monkeypatch.setattr("tkwry._core.pump_events", pump_events, raising=False)
     monkeypatch.setattr(tk_root, "update_idletasks", lambda: None)
     monkeypatch.setattr(tk_root, "update", lambda: None)
@@ -66,9 +60,7 @@ def test_wait_until_true_and_false(tk_root, monkeypatch: pytest.MonkeyPatch) -> 
     assert testing.wait_until(tk_root, lambda: False, steps=2) is False
 
 
-def test_wait_ready_asserts_and_pumps(
-    tk_root, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_wait_ready_asserts_and_pumps(tk_root, monkeypatch: pytest.MonkeyPatch) -> None:
     web = MagicMock()
     web.wait_until_ready.return_value = True
     pumped: list[tuple] = []
@@ -103,9 +95,7 @@ def test_wait_eval_returns_result_or_none(
     assert testing.wait_eval(tk_root, web, "missing") is None
 
 
-def test_wait_title_polls_until_match(
-    tk_root, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_wait_title_polls_until_match(tk_root, monkeypatch: pytest.MonkeyPatch) -> None:
     web = MagicMock()
     titles = iter(["other", "Hello World"])
 

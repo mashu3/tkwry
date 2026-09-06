@@ -160,8 +160,8 @@ def test_gtk_pump_stale_tick_does_not_drive_reattached_pump(
 
 
 def test_gtk_pump_attach_detach_stops_when_last_webview_gone(
-    tk_root, monkeypatch: pytest.MonkeyPatch,
-    force_linux) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch, force_linux
+) -> None:
     import tkinter as tk
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
@@ -187,8 +187,8 @@ def test_gtk_pump_attach_detach_stops_when_last_webview_gone(
 
 
 def test_gtk_pump_detach_after_frame_destroy_stops_pump(
-    tk_root, monkeypatch: pytest.MonkeyPatch,
-    force_linux) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch, force_linux
+) -> None:
     import tkinter as tk
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
@@ -301,8 +301,8 @@ def test_gtk_pump_tick_keeps_pumping_after_repeated_pump_errors(
 
 
 def test_purge_stale_pump_drops_destroyed_root(
-    tk_root, monkeypatch: pytest.MonkeyPatch,
-    force_linux) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch, force_linux
+) -> None:
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
     pump = GtkPump(tk_root)
     GtkPump._by_root_key[pump._root_key] = pump
@@ -315,8 +315,8 @@ def test_purge_stale_pump_drops_destroyed_root(
 
 
 def test_attach_schedules_retry_when_attach_raises_tcl_error(
-    tk_root, monkeypatch: pytest.MonkeyPatch,
-    force_linux) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch, force_linux
+) -> None:
     import tkinter as tk
 
     frame = tk.Frame(tk_root)
@@ -353,8 +353,8 @@ def test_attach_schedules_retry_when_attach_raises_tcl_error(
 
 
 def test_attach_schedules_retry_when_root_key_unavailable(
-    tk_root, monkeypatch: pytest.MonkeyPatch,
-    force_linux) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch, force_linux
+) -> None:
     import tkinter as tk
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
@@ -390,8 +390,8 @@ def test_attach_schedules_retry_when_root_key_unavailable(
 
 
 def test_attach_migrates_widget_when_reparented(
-    tk_root, monkeypatch: pytest.MonkeyPatch,
-    force_linux) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch, force_linux
+) -> None:
     import tkinter as tk
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
@@ -422,8 +422,8 @@ def test_attach_migrates_widget_when_reparented(
 
 
 def test_reparent_keeps_pump_alive_for_remaining_widgets(
-    tk_root, monkeypatch: pytest.MonkeyPatch,
-    force_linux) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch, force_linux
+) -> None:
     import tkinter as tk
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
@@ -457,8 +457,8 @@ def test_reparent_keeps_pump_alive_for_remaining_widgets(
 
 
 def test_ensure_attached_is_idempotent(
-    tk_root, monkeypatch: pytest.MonkeyPatch,
-    force_linux) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch, force_linux
+) -> None:
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
     monkeypatch.setattr(tk_root, "after", lambda *_a, **_k: "after-id")
 
@@ -692,9 +692,8 @@ def test_gtk_pump_marks_recovery_pending_when_all_schedulers_fail(
 
 
 def test_attach_resumes_recovery_pending_pump(
-    tk_root,
-    monkeypatch: pytest.MonkeyPatch,
-    force_linux) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch, force_linux
+) -> None:
     import tkinter as tk
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
@@ -718,8 +717,9 @@ def test_attach_resumes_recovery_pending_pump(
     GtkPump.detach(frame)
 
 
-def test_attach_restarts_paused_pump(tk_root, monkeypatch: pytest.MonkeyPatch,
-    force_linux) -> None:
+def test_attach_restarts_paused_pump(
+    tk_root, monkeypatch: pytest.MonkeyPatch, force_linux
+) -> None:
     import tkinter as tk
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)

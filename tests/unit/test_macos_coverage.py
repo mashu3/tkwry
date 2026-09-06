@@ -168,15 +168,11 @@ def test_register_unregister_macos_webview(
     monkeypatch.setattr(
         _macos, "install_automatic_window_tabbing_disable", lambda: None
     )
-    monkeypatch.setattr(
-        _macos, "_ensure_mac_window_tabbing_disabled", lambda _t: None
-    )
+    monkeypatch.setattr(_macos, "_ensure_mac_window_tabbing_disabled", lambda _t: None)
     monkeypatch.setattr(_macos, "_teardown_mac_key_guard", lambda _t: None)
     monkeypatch.setattr(_macos, "_teardown_mac_wakeup_pipe", lambda _t: None)
     _macos._register_macos_webview(web)  # type: ignore[arg-type]
-    assert any(
-        ref() is web for ref in getattr(tk_root, "_tkwry_mac_webviews", [])
-    )
+    assert any(ref() is web for ref in getattr(tk_root, "_tkwry_mac_webviews", []))
     _macos._unregister_macos_webview(web)  # type: ignore[arg-type]
 
 
@@ -215,9 +211,7 @@ def test_prepare_devtools_swallows_tcl_error(
     _macos.prepare_mac_devtools_open(web)  # type: ignore[arg-type]
 
 
-def test_mac_event_widget_edge_cases(
-    tk_root, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_mac_event_widget_edge_cases(tk_root, monkeypatch: pytest.MonkeyPatch) -> None:
     import tkinter as tk
 
     monkeypatch.setattr(tk, "_default_root", None, raising=False)
@@ -312,9 +306,7 @@ def test_mac_pump_tick_idle_and_active_delays(
     assert getattr(tk_root, "_tkwry_mac_pump_active") is False
 
 
-def test_event_handlers_and_key_guard(
-    tk_root, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_event_handlers_and_key_guard(tk_root, monkeypatch: pytest.MonkeyPatch) -> None:
     entry = MagicMock()
     entry.winfo_toplevel.return_value = tk_root
     entry.winfo_exists.return_value = True
@@ -332,9 +324,7 @@ def test_event_handlers_and_key_guard(
     monkeypatch.setattr(_macos, "_widget_accepts_tk_keys", lambda _w: True)
 
     tagged: list[object] = []
-    monkeypatch.setattr(
-        _macos, "_tag_mac_text_widgets", lambda w: tagged.append(w)
-    )
+    monkeypatch.setattr(_macos, "_tag_mac_text_widgets", lambda w: tagged.append(w))
     _macos._mac_widget_mapped(SimpleNamespace(widget=entry))  # type: ignore[arg-type]
     assert tagged == [entry]
 
@@ -351,9 +341,7 @@ def test_event_handlers_and_key_guard(
     assert released
 
     prepended: list[object] = []
-    monkeypatch.setattr(
-        _macos, "_prepend_mac_key_guard", lambda w: prepended.append(w)
-    )
+    monkeypatch.setattr(_macos, "_prepend_mac_key_guard", lambda w: prepended.append(w))
     _macos._mac_focus_in_handler(SimpleNamespace(widget=entry))  # type: ignore[arg-type]
     assert prepended == [entry]
 
@@ -361,16 +349,13 @@ def test_event_handlers_and_key_guard(
     monkeypatch.setattr(_macos, "_mac_unfocus_pending", lambda _t: True)
     monkeypatch.setattr(_macos, "_release_tk_keyboard_focus", lambda _t: None)
     assert (
-        _macos._mac_web_key_guard(SimpleNamespace(widget=entry, keysym="a"))
-        == "break"
+        _macos._mac_web_key_guard(SimpleNamespace(widget=entry, keysym="a")) == "break"
     )
     assert (
         _macos._mac_web_key_guard(SimpleNamespace(widget=entry, keysym="Escape"))
         is None
     )
-    assert (
-        _macos._mac_tab_traversal_handler(SimpleNamespace(widget=entry)) is None
-    )
+    assert _macos._mac_tab_traversal_handler(SimpleNamespace(widget=entry)) is None
 
 
 def test_release_web_input_and_refocus(
@@ -386,9 +371,7 @@ def test_release_web_input_and_refocus(
         focus_parent=MagicMock(side_effect=RuntimeError("x")),
     )
     none_native = SimpleNamespace(destroyed=False, native=None)
-    monkeypatch.setattr(
-        _macos, "_mac_webviews", lambda _t: [web, boom, none_native]
-    )
+    monkeypatch.setattr(_macos, "_mac_webviews", lambda _t: [web, boom, none_native])
     monkeypatch.setattr(_macos, "_mac_service_wakeup", lambda _t: False)
     _macos._release_web_input_for_tk_traversal(tk_root)
     web.focus_parent.assert_called_once()
@@ -473,9 +456,7 @@ def test_mac_toplevel_mapped_and_destroy(
     assert ensured == [tk_root]
 
     torn: list[object] = []
-    monkeypatch.setattr(
-        _macos, "_teardown_macos_toplevel", lambda t: torn.append(t)
-    )
+    monkeypatch.setattr(_macos, "_teardown_macos_toplevel", lambda t: torn.append(t))
     _macos._mac_toplevel_destroy(SimpleNamespace(widget=tk_root))  # type: ignore[arg-type]
     assert torn == [tk_root]
 

@@ -224,9 +224,7 @@ def test_ensure_tk_wakeup_fileevent_uses_after_poll_without_handler(
 
 def test_track_atexit_and_drain(monkeypatch: pytest.MonkeyPatch) -> None:
     registered: list[object] = []
-    monkeypatch.setattr(
-        _host.atexit, "register", lambda fn: registered.append(fn)
-    )
+    monkeypatch.setattr(_host.atexit, "register", lambda fn: registered.append(fn))
     # Avoid real Tk update()/update_idletasks() during atexit drain (can segfault
     # under pytest when nested with other Tk activity).
     toplevel = MagicMock()
@@ -341,6 +339,7 @@ def test_host_edge_branches(tk_root, monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Sync hooks: dead weakrefs + empty survivors clear attr.
     setattr(tk_root, "_tkwry_sync_hook_webviews", [weakref.ref(MagicMock())])
+
     # Force dead refs by not keeping MagicMock alive — use a real gone object.
     class _Tmp:
         pass
