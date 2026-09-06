@@ -38,7 +38,6 @@ from urllib.parse import quote_plus, urlparse
 REQUIRED_TKWRY = "0.1.8"
 
 
-
 def _ignore_best_effort_error() -> None:
     """Log a best-effort UI/teardown failure without raising.
 
