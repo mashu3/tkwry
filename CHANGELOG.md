@@ -12,6 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (no SemVer) and the production IPC drain contract
   (``drain_window_ipc_messages`` only) in ``docs/usage.md`` and the README
 
+### Tests
+
+- Dual ctor/setter equivalence covers ``ipc_handler``, ``on_download_started``,
+  and ``on_download_failed`` (including clear-to-default)
+
 ### Fixed
 
 - Clearing ``set_context_menu(None)`` / ``set_context_menu_handler(None)`` also

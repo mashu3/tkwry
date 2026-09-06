@@ -32,7 +32,10 @@ def _snapshot(web: WebView) -> dict[str, Any]:
         "on_title_changed": web._on_title_changed is not None,
         "on_new_window": web._on_new_window is not None,
         "on_download": web._on_download is not None,
+        "on_download_started": web._on_download_started is not None,
         "on_download_complete": web._on_download_complete is not None,
+        "on_download_failed": web._on_download_failed is not None,
+        "ipc_handler": web._ipc_handler is not None,
         "drag_drop": web._drag_drop_handler is not None,
         "context_menu": web._context_menu_items is not None,
         "on_context_menu": web._context_menu_handler is not None,
@@ -71,10 +74,21 @@ def _equivalence_case(
         ),
         _equivalence_case("on_download", "set_on_download", lambda _url, _dest: True),
         _equivalence_case(
+            "on_download_started",
+            "set_on_download_started",
+            lambda _download: None,
+        ),
+        _equivalence_case(
             "on_download_complete",
             "set_on_download_complete",
             lambda _url, _dest, _ok: None,
         ),
+        _equivalence_case(
+            "on_download_failed",
+            "set_on_download_failed",
+            lambda _url, _dest: None,
+        ),
+        _equivalence_case("ipc_handler", "set_ipc_handler", lambda _msg: None),
         _equivalence_case(
             "drag_drop_handler",
             "set_drag_drop_handler",
@@ -132,9 +146,18 @@ def test_handler_ctor_matches_setter(
         ),
         ("set_on_download", lambda w: w.set_on_download(lambda _u, _d: True)),
         (
+            "set_on_download_started",
+            lambda w: w.set_on_download_started(lambda _d: None),
+        ),
+        (
             "set_on_download_complete",
             lambda w: w.set_on_download_complete(lambda *_a: None),
         ),
+        (
+            "set_on_download_failed",
+            lambda w: w.set_on_download_failed(lambda _u, _d: None),
+        ),
+        ("set_ipc_handler", lambda w: w.set_ipc_handler(lambda _m: None)),
         (
             "set_drag_drop_handler",
             lambda w: w.set_drag_drop_handler(lambda *_a: None),
