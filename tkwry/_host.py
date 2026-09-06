@@ -92,13 +92,16 @@ def _wakeup_read_fd_readable(read_fd: int) -> bool:
         import msvcrt
         from ctypes import wintypes
 
-        handle = msvcrt.get_osfhandle(read_fd)
-        avail = wintypes.DWORD(0)
-        if not ctypes.windll.kernel32.PeekNamedPipe(
-            handle, None, 0, None, ctypes.byref(avail), None
-        ):
+        try:
+            handle = msvcrt.get_osfhandle(read_fd)
+            avail = wintypes.DWORD(0)
+            if not ctypes.windll.kernel32.PeekNamedPipe(
+                handle, None, 0, None, ctypes.byref(avail), None
+            ):
+                return False
+            return avail.value > 0
+        except OSError:
             return False
-        return avail.value > 0
     try:
         import select
 

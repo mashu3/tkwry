@@ -11,7 +11,14 @@ import pytest
 import tkwry._version as version_mod
 
 
-def test_cargo_toml_version_reads_workspace_file() -> None:
+def test_cargo_toml_version_reads_workspace_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Wheel installs put ``_version.py`` under site-packages (no adjacent
+    # Cargo.toml). Point ``__file__`` at the checkout copy so parents[1] works.
+    repo_version = Path(__file__).resolve().parents[2] / "tkwry" / "_version.py"
+    assert repo_version.is_file()
+    monkeypatch.setattr(version_mod, "__file__", str(repo_version))
     assert version_mod._cargo_toml_version() == version_mod.__version__
 
 
