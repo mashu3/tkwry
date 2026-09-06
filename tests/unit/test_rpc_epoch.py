@@ -107,6 +107,95 @@ def test_rpc_bootstrap_reinjected_on_page_load_started(
     frame.destroy()
 
 
+def test_emit_bridge_keeps_event_poll_for_page_load(tk_root) -> None:
+    """emit()-only must keep the poll so Started can reinject the bridge."""
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>emit</p>")
+    assert web._needs_event_poll() is False
+
+    web._rpc_bridge_wanted = True
+
+    assert web._ipc_listening_wanted() is False
+    assert web._page_load_listening_wanted() is True
+    assert web._needs_event_poll() is True
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_emit_only_bootstrap_does_not_force_ipc_listening(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bootstrap inject must not enable IPC listen when nothing will drain it."""
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>emit</p>")
+    ipc_flags: list[bool] = []
+
+    class _Native:
+        def set_ipc_listening(self, enabled: bool) -> None:
+            ipc_flags.append(enabled)
+
+        def eval_js(self, script: str) -> None:
+            pass
+
+        def destroy(self) -> None:
+            pass
+
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+    web._webview = _Native()  # type: ignore[assignment]
+    web._rpc_bridge_wanted = True
+    assert web._ipc_listening_wanted() is False
+
+    web._inject_rpc_bootstrap()
+
+    assert ipc_flags == [False]
+    assert web._rpc_bootstrap_injected is True
+
+    web.destroy()
+    frame.destroy()
+
+
+def test_emit_wakeup_drains_page_load_for_bootstrap_reinject(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Wakeup after emit must drain Started so post-nav emit keeps working."""
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>emit</p>")
+    injected: list[str] = []
+
+    class _Native:
+        def drain_page_load_events(self):
+            return [(PageLoadEvent.Started, "https://example.com/next")]
+
+        def drain_download_complete_events(self):
+            return []
+
+        def set_ipc_listening(self, enabled: bool) -> None:
+            pass
+
+        def set_page_load_listening(self, enabled: bool) -> None:
+            pass
+
+        def eval_js(self, script: str) -> None:
+            injected.append(script)
+
+        def destroy(self) -> None:
+            pass
+
+    monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
+    web._webview = _Native()  # type: ignore[assignment]
+    web._rpc_bridge_wanted = True
+    web._rpc_bootstrap_injected = True
+    injected.clear()
+
+    web._wake_async_events()
+
+    assert injected[0] == RPC_BOOTSTRAP_JS
+
+    web.destroy()
+    frame.destroy()
+
+
 def test_stale_rpc_settle_dropped_after_epoch_bump(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>rpc</p>")

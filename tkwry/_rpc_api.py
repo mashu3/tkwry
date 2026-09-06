@@ -386,7 +386,9 @@ class WebViewRpcMixin:
         native = self._webview
         if native is None or not (self._rpc_bridge_wanted or self._rpc_methods):
             return
-        native.set_ipc_listening(True)
+        # Match ``_ipc_listening_wanted`` — emit-only must not force IPC listen
+        # or native IPC/RPC queues fill while Python never drains them.
+        native.set_ipc_listening(self._ipc_listening_wanted())
         try:
             native.eval_js(_RPC_BOOTSTRAP_JS)
             self._rpc_bootstrap_injected = True
@@ -397,8 +399,7 @@ class WebViewRpcMixin:
         """Turn on IPC listening and ensure the JS bridge bootstrap is present."""
         self._rpc_bridge_wanted = True
         if self._webview is not None:
-            if self._ipc_listening_wanted():
-                self._webview.set_ipc_listening(True)
+            self._webview.set_ipc_listening(self._ipc_listening_wanted())
             if not self._rpc_bootstrap_injected:
                 self._inject_rpc_bootstrap()
         self._sync_page_load_listening()
@@ -409,7 +410,7 @@ class WebViewRpcMixin:
         native = self._webview
         if native is None or not self._context_menu_active():
             return
-        native.set_ipc_listening(True)
+        native.set_ipc_listening(self._ipc_listening_wanted())
         try:
             native.eval_js(CONTEXT_MENU_JS)
             self._context_menu_bridge_injected = True

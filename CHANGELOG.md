@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - macOS CI: split unit / integration / ``tests/macos`` across pytest processes
   (and reap WebKit helpers between suites on GHA) so a long single-process
   streak no longer wedges at ``collected N items``; step timeout 40 minutes
+- ``emit()`` keeps the event poll / wakeup draining page-load so navigation
+  re-injects the JS bridge; emit-only bootstrap no longer forces IPC listening
+  (queues no longer fill with nothing to drain)
 
 ## [0.1.8] - 2026-09-06
 

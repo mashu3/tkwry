@@ -3067,6 +3067,11 @@ class WebView(WebViewRpcMixin):
                 self._on_page_load is not None,
                 bool(self._inject_scripts),
                 self._state_wanted,
+                # emit() / expose keep page-load listening for bridge reinject;
+                # do not use full ``_page_load_listening_wanted`` here — the
+                # context-menu Started latch would keep the poll forever.
+                self._rpc_bridge_wanted,
+                bool(self._rpc_methods),
                 self._on_title_changed is not None,
                 self._drag_drop_handler is not None,
                 self._download_policy_active(),
@@ -3431,10 +3436,16 @@ class WebView(WebViewRpcMixin):
         hooks only, so handler-less completes sat in the queue forever after
         ``76b50aa`` stopped polling on ``_webview is not None``. Deliver here
         (and keep a continuous poll only while ``on_download_complete`` is set).
+
+        Page-load is the same shape when only ``emit()`` / bridge reinjection
+        wants listening: wakeup must drain ``Started`` so the RPC bootstrap can
+        be re-injected after navigation even if the idle poll just stopped.
         """
         if self._destroyed:
             return
         self._deliver_download_complete_events()
+        if self._page_load_listening_wanted():
+            self._deliver_page_load_events()
         if self._should_keep_polling():
             self._ensure_event_poll()
 
