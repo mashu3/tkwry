@@ -20,6 +20,12 @@ def _clear_gtk_pumps() -> None:
     GtkPump._pending_attach.clear()
 
 
+@pytest.fixture
+def force_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run GtkPump attach/detach bodies on non-Linux CI hosts."""
+    monkeypatch.setattr(sys, "platform", "linux")
+
+
 def test_gtk_pump_tick_skips_when_stopped(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -153,10 +159,9 @@ def test_gtk_pump_stale_tick_does_not_drive_reattached_pump(
     pump2.stop()
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
 def test_gtk_pump_attach_detach_stops_when_last_webview_gone(
-    tk_root, monkeypatch: pytest.MonkeyPatch
-) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch,
+    force_linux) -> None:
     import tkinter as tk
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
@@ -181,10 +186,9 @@ def test_gtk_pump_attach_detach_stops_when_last_webview_gone(
     assert not pump._active
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
 def test_gtk_pump_detach_after_frame_destroy_stops_pump(
-    tk_root, monkeypatch: pytest.MonkeyPatch
-) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch,
+    force_linux) -> None:
     import tkinter as tk
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
@@ -296,10 +300,9 @@ def test_gtk_pump_tick_keeps_pumping_after_repeated_pump_errors(
     assert "retrying in" in capsys.readouterr().err
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
 def test_purge_stale_pump_drops_destroyed_root(
-    tk_root, monkeypatch: pytest.MonkeyPatch
-) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch,
+    force_linux) -> None:
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
     pump = GtkPump(tk_root)
     GtkPump._by_root_key[pump._root_key] = pump
@@ -311,10 +314,9 @@ def test_purge_stale_pump_drops_destroyed_root(
     assert not pump._active
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
 def test_attach_schedules_retry_when_attach_raises_tcl_error(
-    tk_root, monkeypatch: pytest.MonkeyPatch
-) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch,
+    force_linux) -> None:
     import tkinter as tk
 
     frame = tk.Frame(tk_root)
@@ -350,10 +352,9 @@ def test_attach_schedules_retry_when_attach_raises_tcl_error(
     GtkPump.detach(frame)
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
 def test_attach_schedules_retry_when_root_key_unavailable(
-    tk_root, monkeypatch: pytest.MonkeyPatch
-) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch,
+    force_linux) -> None:
     import tkinter as tk
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
@@ -388,10 +389,9 @@ def test_attach_schedules_retry_when_root_key_unavailable(
     GtkPump.detach(frame)
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
 def test_attach_migrates_widget_when_reparented(
-    tk_root, monkeypatch: pytest.MonkeyPatch
-) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch,
+    force_linux) -> None:
     import tkinter as tk
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
@@ -421,10 +421,9 @@ def test_attach_migrates_widget_when_reparented(
     GtkPump.detach(frame)
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
 def test_reparent_keeps_pump_alive_for_remaining_widgets(
-    tk_root, monkeypatch: pytest.MonkeyPatch
-) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch,
+    force_linux) -> None:
     import tkinter as tk
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
@@ -457,10 +456,9 @@ def test_reparent_keeps_pump_alive_for_remaining_widgets(
     GtkPump.detach(frame_b)
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
 def test_ensure_attached_is_idempotent(
-    tk_root, monkeypatch: pytest.MonkeyPatch
-) -> None:
+    tk_root, monkeypatch: pytest.MonkeyPatch,
+    force_linux) -> None:
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
     monkeypatch.setattr(tk_root, "after", lambda *_a, **_k: "after-id")
 
@@ -693,11 +691,10 @@ def test_gtk_pump_marks_recovery_pending_when_all_schedulers_fail(
     pump.stop()
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
 def test_attach_resumes_recovery_pending_pump(
     tk_root,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    force_linux) -> None:
     import tkinter as tk
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
@@ -721,8 +718,8 @@ def test_attach_resumes_recovery_pending_pump(
     GtkPump.detach(frame)
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="GtkPump is Linux-only")
-def test_attach_restarts_paused_pump(tk_root, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_attach_restarts_paused_pump(tk_root, monkeypatch: pytest.MonkeyPatch,
+    force_linux) -> None:
     import tkinter as tk
 
     monkeypatch.setattr("tkwry._core.ensure_gtk_init", lambda: None, raising=False)
