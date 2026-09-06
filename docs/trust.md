@@ -75,8 +75,9 @@ it). Isolation rules:
 
 - One profile per trust domain. Local ``app=`` UI and an untrusted site
   must **not** share a persistent session.
-- WebViews that share a **non-ephemeral** session must use the **same**
-  ``app=`` root (``ValueError`` otherwise). Linux can register
+- WebViews that share a session (persistent or ephemeral) must use the
+  **same** ``app=`` root and matching serve options including
+  ``https_scheme`` (``ValueError`` otherwise). Linux can register
   ``tkwry://`` only once per WebContext; tkwry enforces that everywhere.
 - Unrelated local apps → separate ``WebSession`` instances.
 - ``untrusted=True`` creates an ephemeral session when you omit

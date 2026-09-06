@@ -19,13 +19,29 @@ const CROSS_ORIGIN_RESOURCE_POLICY: HeaderName =
     HeaderName::from_static("cross-origin-resource-policy");
 
 /// Options for ``tkwry://`` static serving.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AppServeOptions {
     pub spa_fallback: bool,
     pub cache_control: Option<String>,
     pub csp: Option<String>,
     pub coop: bool,
     pub corp: bool,
+    /// Windows ``with_https_scheme`` / navigate rewrite; must match across
+    /// sibling ``app=`` views on one shared session.
+    pub https_scheme: bool,
+}
+
+impl Default for AppServeOptions {
+    fn default() -> Self {
+        Self {
+            spa_fallback: false,
+            cache_control: None,
+            csp: None,
+            coop: false,
+            corp: false,
+            https_scheme: true,
+        }
+    }
 }
 
 /// Map a ``tkwry://`` URL to the WebView2 navigation form used with
@@ -632,7 +648,7 @@ pub(crate) fn validate_app_serve_options(
         if existing != incoming {
             return Err(
                 "WebSession app= serve options (csp, coop, corp, spa_fallback, \
-cache_control) must match the first WebView on this session"
+cache_control, https_scheme) must match the first WebView on this session"
                     .to_string(),
             );
         }

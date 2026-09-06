@@ -98,8 +98,9 @@ Xvfb). Prefer one eval at a time — wait for each callback (or error) before
 starting the next — when you have several views.
 
 **Shared `app=`:** Linux can register `tkwry://` only once per WebContext.
-WebViews that share a non-ephemeral `WebSession` must use the same `app=`
-root (`ValueError` on all platforms). See [Trust boundaries](trust.md).
+WebViews that share a `WebSession` (persistent or ephemeral) must use the same
+`app=` root and matching serve options including `https_scheme`. See
+[Trust boundaries](trust.md).
 
 **DevTools:** open / close / `is_devtools_open` work under WebKitGTK when
 the runtime supports the inspector (headless / Xvfb may lack a UI).

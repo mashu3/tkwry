@@ -81,11 +81,12 @@ def test_session_bind_app_root_mismatch(tmp_path: Path) -> None:
         session._bind_app_root("/tmp/app-b")
 
 
-def test_ephemeral_session_allows_distinct_app_roots(tmp_path: Path) -> None:
+def test_ephemeral_session_rejects_distinct_app_roots(tmp_path: Path) -> None:
     session = WebSession(ephemeral=True)
     session._bind_app_root(str(tmp_path / "a"))
-    session._bind_app_root(str(tmp_path / "b"))
-    assert session.app_root is None
+    with pytest.raises(ValueError, match="same app="):
+        session._bind_app_root(str(tmp_path / "b"))
+    assert session.app_root == (tmp_path / "a")
 
 
 def test_emit_all_broadcasts_to_registered_views(

@@ -1994,34 +1994,32 @@ impl WebView {
             csp: app_csp.clone(),
             coop: app_coop,
             corp: app_corp,
+            https_scheme,
         };
 
         let (register_app, ephemeral) = match (&app_root_path, session_refs.as_ref()) {
             (Some(root), Some(refs)) => {
                 let guard = refs.lock_meta()?;
-                if !guard.ephemeral {
-                    if let Some(existing) = &guard.registered_app_root {
-                        if existing != root {
-                            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                                "WebSession already has app root {}; cannot use {}. \
+                // Shared WebContext (including ephemeral) registers tkwry://
+                // once — same root / serve-option rules as persistent sessions.
+                if let Some(existing) = &guard.registered_app_root {
+                    if existing != root {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "WebSession already has app root {}; cannot use {}. \
 WebViews that share a session must use the same app= root \
 (Linux registers tkwry:// once per WebContext)",
-                                existing.display(),
-                                root.display()
-                            )));
-                        }
-                        app_protocol::validate_app_serve_options(
-                            guard.registered_app_serve_options.as_ref(),
-                            &serve_options,
-                        )
-                        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+                            existing.display(),
+                            root.display()
+                        )));
                     }
+                    app_protocol::validate_app_serve_options(
+                        guard.registered_app_serve_options.as_ref(),
+                        &serve_options,
+                    )
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
                 }
-                let register = if guard.ephemeral {
-                    true
-                } else {
-                    session::should_attach_app_protocol(guard.registered_app_root.as_ref(), root)
-                };
+                let register =
+                    session::should_attach_app_protocol(guard.registered_app_root.as_ref(), root);
                 (register, guard.ephemeral)
             }
             (Some(_), None) => (true, false),

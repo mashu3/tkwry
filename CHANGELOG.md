@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Shared ephemeral ``WebSession`` + ``app=`` uses the same protocol attach /
+  commit rules as persistent sessions (Linux no longer re-registers
+  ``tkwry://`` on a second view)
+- Shared-session ``app=`` serve-option matching includes ``https_scheme`` so
+  sibling Windows views cannot mix ``http://`` / ``https://tkwry.localhost``
 - macOS focus hit-testing no longer treats the shared toplevel content
   ``NSView`` as every WebView; chrome / gap clicks release web focus instead of
   activating the first entry

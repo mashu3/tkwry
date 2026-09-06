@@ -105,7 +105,7 @@ pub(crate) fn should_attach_app_protocol(
 }
 
 pub(crate) fn commit_registered_app_root(state: &mut WebSessionMeta, app_root: &Path) {
-    if state.ephemeral || state.registered_app_root.is_some() {
+    if state.registered_app_root.is_some() {
         return;
     }
     state.registered_app_root = Some(app_root.to_path_buf());
@@ -115,7 +115,7 @@ pub(crate) fn commit_registered_app_serve_options(
     state: &mut WebSessionMeta,
     options: crate::app_protocol::AppServeOptions,
 ) {
-    if state.ephemeral || state.registered_app_serve_options.is_some() {
+    if state.registered_app_serve_options.is_some() {
         return;
     }
     state.registered_app_serve_options = Some(options);
@@ -232,6 +232,27 @@ mod tests {
     }
 
     #[test]
+    fn ephemeral_session_commits_app_root_like_persistent() {
+        let root = PathBuf::from("/tmp/tkwry-ephemeral-app");
+        let mut state = WebSessionMeta {
+            ephemeral: true,
+            data_directory: None,
+            registered_app_root: None,
+            registered_app_serve_options: None,
+            #[cfg(target_os = "macos")]
+            data_store_id: None,
+        };
+        assert!(should_attach_app_protocol(None, &root));
+        commit_registered_app_root(&mut state, &root);
+        assert_eq!(state.registered_app_root.as_deref(), Some(root.as_path()));
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        assert!(!should_attach_app_protocol(
+            state.registered_app_root.as_ref(),
+            &root
+        ));
+    }
+
+    #[test]
     fn app_serve_options_must_match_on_shared_session() {
         use crate::app_protocol::{validate_app_serve_options, AppServeOptions};
 
@@ -245,8 +266,13 @@ mod tests {
             coop: true,
             ..first.clone()
         };
+        let scheme_mismatch = AppServeOptions {
+            https_scheme: false,
+            ..first.clone()
+        };
         assert!(validate_app_serve_options(None, &first).is_ok());
         assert!(validate_app_serve_options(Some(&first), &same).is_ok());
         assert!(validate_app_serve_options(Some(&first), &different).is_err());
+        assert!(validate_app_serve_options(Some(&first), &scheme_mismatch).is_err());
     }
 }

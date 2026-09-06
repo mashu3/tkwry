@@ -259,7 +259,9 @@ Short checklist — **details live in [Platform notes](https://github.com/mashu3
 
 **Trust & session**
 
-- Shared non-ephemeral `WebSession` + `app=` must use the same root; do not share a persistent profile with untrusted sites
+- Shared `WebSession` + `app=` must use the same root and matching serve
+  options (including `https_scheme`); do not share a persistent profile with
+  untrusted sites
 - External content / IPC defaults and `untrusted=` — [Trust boundaries](https://github.com/mashu3/tkwry/blob/main/docs/trust.md)
 
 **Lifecycle & IPC**

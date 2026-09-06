@@ -415,8 +415,9 @@ class WebView(WebViewRpcMixin):
     ``data_directory=`` / ``ephemeral=`` / ``incognito=``): share a
     wry ``WebContext`` (cookies / cache / localStorage where the platform
     supports it) across WebViews. Prefer one :class:`~tkwry.WebSession` per
-    profile. WebViews that share a **non-ephemeral** session must use the
-    **same** ``app=`` root (``ValueError`` otherwise). Linux can register
+    profile. WebViews that share a session (persistent or ephemeral) must use
+    the **same** ``app=`` root and matching serve options including
+    ``https_scheme`` (``ValueError`` otherwise). Linux can register
     ``tkwry://`` only once per context; tkwry enforces the same rule everywhere.
     Do **not** share a persistent session between a local ``app=`` WebView and
     an untrusted external site.
@@ -614,8 +615,9 @@ class WebView(WebViewRpcMixin):
         """Embed a WebView in *frame*.
 
         See the class docstring for lifecycle, RPC, and platform notes.
-        WebViews that share a non-ephemeral ``session`` must use the same
-        ``app=`` root (``ValueError`` otherwise).
+        WebViews that share a ``session`` must use the same ``app=`` root and
+        matching serve options including ``https_scheme`` (``ValueError``
+        otherwise).
         """
         require_tk_thread(frame)
         if background_color is not None:

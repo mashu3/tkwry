@@ -232,8 +232,9 @@ read the result with `session.ephemeral`. Not a second profile mode, and
 not a per-view override on a persistent session. Cookie sharing across
 views in an ephemeral session is best-effort by platform. Call :meth:`WebSession.close` when the profile
 is no longer needed (or destroy every WebView first). Keep the session open
-while any WebView uses it (especially with `app=` on macOS). Isolation rules (same `app=`
-root, do not share a persistent profile with untrusted sites):
+while any WebView uses it (especially with `app=` on macOS). Isolation rules
+(same `app=` root and serve options including `https_scheme`, do not share a
+persistent profile with untrusted sites):
 [Trust boundaries — Session isolation](trust.md#session-isolation).
 See also [`examples/tkwry_browser.py`](../examples/tkwry_browser.py).
 

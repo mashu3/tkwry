@@ -21,14 +21,16 @@ class WebSession:
     uses it is alive (required on macOS when ``app=`` / custom protocols are
     involved).
 
-    **``app=`` sharing:** WebViews that share a **non-ephemeral** session must
-    use the **same** ``app=`` root. Linux can register the ``tkwry://`` custom
-    protocol only once per ``WebContext``; tkwry raises ``ValueError`` if a
-    second root is used (all platforms). Use a separate ``WebSession`` for
-    unrelated local apps. Ephemeral sessions are not bound to one root.
-    Do not share a persistent session between a trusted ``app=`` WebView and
-    an untrusted external site — use ``untrusted=True`` (ephemeral) or a
-    separate :class:`WebSession`.
+    **``app=`` sharing:** WebViews that share a session (persistent or
+    ephemeral) must use the **same** ``app=`` root and matching serve options
+    (``csp`` / ``coop`` / ``corp`` / ``spa`` / ``cache_control`` /
+    ``https_scheme``). Linux can register the ``tkwry://`` custom protocol
+    only once per ``WebContext``; tkwry raises ``ValueError`` if a second
+    root or mismatched options are used (all platforms). Use a separate
+    ``WebSession`` for unrelated local apps. Do not share a persistent
+    session between a trusted ``app=`` WebView and an untrusted external
+    site — use ``untrusted=True`` (ephemeral) or a separate
+    :class:`WebSession`.
 
     **Broadcast:** :meth:`emit_all` sends a Python→JS event to every live
     WebView that shares this session and is eligible for
@@ -120,7 +122,7 @@ class WebSession:
 
     def _bind_app_root(self, root: str | None) -> None:
         """Record ``app=`` root for this session; reject a conflicting root."""
-        if root is None or self.ephemeral:
+        if root is None:
             return
         existing = self._app_root
         if existing is None:
