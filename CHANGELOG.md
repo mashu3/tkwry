@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Deprecated
+
+- ``WebView.take_queue_drop_counts()`` emits ``DeprecationWarning``; prefer
+  ``take_queue_drop_stats()`` → ``QueueDropCounts`` (method still works in
+  0.1.x)
+
 ### Docs
 
 - Clarify Internal ``tkwry._core`` / ``WebView.native`` / ``WebSession.native``

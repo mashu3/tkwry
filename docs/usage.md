@@ -560,9 +560,10 @@ pending items each; further events are compacted or dropped. Worker→Tk
 RPC **stream** chunks and download-complete events also cap at 2048.
 Each IPC/RPC **message** also caps at **10 MiB**. RPC is a separate queue
 from IPC. Prefer `take_queue_drop_stats()` → `QueueDropCounts` (named
-fields including `download_complete` and `rpc_stream`). The legacy
+fields including `download_complete` and `rpc_stream`). The deprecated
 `take_queue_drop_counts()` 6-tuple
-`(ipc, page_load, title, drag_drop, eval, rpc)` remains for 0.1.x.
+`(ipc, page_load, title, drag_drop, eval, rpc)` remains for 0.1.x
+(emits ``DeprecationWarning``).
 
 Callback exceptions are printed to stderr and do not stop event delivery.
 Optional provisional ``on_callback_error=(exc, kind) -> None`` (or
@@ -713,8 +714,8 @@ if any(
 
 Call periodically from a Tk timer or after heavy bursts (IPC storms, stream
 chunks, download-complete without handler). Each call **resets** counters
-(both ``take_queue_drop_stats`` and the legacy six-field
-``take_queue_drop_counts`` share the first six buckets).
+(``take_queue_drop_stats`` and the deprecated six-field
+``take_queue_drop_counts`` share the first six buckets — prefer stats).
 
 **Interpretation:**
 
@@ -824,7 +825,7 @@ after; prefer one style per app.
 | Create-only | `set_user_agent`, `set_initialization_script`, `add_init_script` (raise after native create); `devtools=`, `clipboard=`, `javascript_enabled=`, `autoplay=`, `hotkeys_zoom=`, `back_forward_gestures=`, `default_context_menus=`, `https_scheme=`, `proxy=`, `permission_handler=` |
 | Layout | `pack`, `grid`, `place`, `sync_bounds`, `bounds` (native geometry in ``set_bounds`` space) |
 | Lifecycle | `ready`, `phase` / `WebViewPhase`, `get_state` / `WebViewState`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadStarted>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `last_started_download`, `in_flight_downloads`, `profile`, `untrusted`, `clipboard`, `javascript_enabled`, `autoplay`, `hotkeys_zoom`, `back_forward_gestures`, `default_context_menus`, `https_scheme`, `proxy`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
-| Diagnostics | `take_queue_drop_stats` / `QueueDropCounts`, `take_queue_drop_counts` |
+| Diagnostics | `take_queue_drop_stats` / `QueueDropCounts`; deprecated `take_queue_drop_counts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
 `app_dev`, `csp` / `coop` / `corp`, `session` / `profile` / `user_data_dir` /

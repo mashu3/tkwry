@@ -2466,6 +2466,10 @@ class WebView(WebViewRpcMixin):
     def take_queue_drop_counts(self) -> tuple[int, int, int, int, int, int]:
         """Return overflow drop counts since the last call.
 
+        .. deprecated::
+            Prefer :meth:`take_queue_drop_stats` → :class:`QueueDropCounts`.
+            This six-tuple remains in 0.1.x for compatibility.
+
         Returns ``(ipc, page_load, title, drag_drop, eval, rpc)``. Each internal
         queue caps at 2048 pending items; additional events are compacted or
         discarded and counted here so applications can detect handler backlogs.
@@ -2477,6 +2481,12 @@ class WebView(WebViewRpcMixin):
         use :meth:`take_queue_drop_stats` for the full named snapshot. Calling
         either method resets the shared six counters.
         """
+        warnings.warn(
+            "WebView.take_queue_drop_counts() is deprecated; use "
+            "take_queue_drop_stats() → QueueDropCounts instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._require_tk_thread()
         local = self._take_local_queue_drop_counts()
         if self._destroyed or self._webview is None:

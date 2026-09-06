@@ -169,8 +169,9 @@ overflow cannot drop `tkwry.call`. Worker→Tk **stream** chunks also cap
 at 2048 pending; further chunks are dropped (``rpc_stream``).
 
 Prefer `take_queue_drop_stats()` → `QueueDropCounts` (includes
-`download_complete` and `rpc_stream`). Legacy `take_queue_drop_counts()`
-still returns `(ipc, page_load, title, drag_drop, eval, rpc)`.
+`download_complete` and `rpc_stream`). Deprecated `take_queue_drop_counts()`
+still returns `(ipc, page_load, title, drag_drop, eval, rpc)` (emits
+``DeprecationWarning``).
 
 ## Python to JS events (emit)
 

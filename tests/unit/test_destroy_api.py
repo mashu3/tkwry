@@ -145,7 +145,8 @@ def test_destroy_is_idempotent_and_drop_counts_readable(tk_root) -> None:
     web.destroy()
     web.destroy()
     assert web.destroyed is True
-    assert web.take_queue_drop_counts() == (0, 0, 0, 0, 0, 0)
+    with pytest.warns(DeprecationWarning, match="take_queue_drop_stats"):
+        assert web.take_queue_drop_counts() == (0, 0, 0, 0, 0, 0)
     assert web.take_queue_drop_stats() == (
         0,
         0,
