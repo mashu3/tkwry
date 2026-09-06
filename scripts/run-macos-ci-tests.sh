@@ -35,12 +35,12 @@ cleanup_webkit() {
 }
 
 run_pytest() {
-  # Prefer array expansion so coverage flags stay intact under ``set -u``.
-  local -a cov_args=()
+  # Avoid ``"${empty[@]}"`` under ``set -u`` (macOS / bash 3.2 unbound error).
   if [[ "${TKWRY_COVERAGE:-}" == "1" ]]; then
-    cov_args=(--cov=tkwry --cov-append --cov-report=)
+    pytest "$@" -v --tb=short --cov=tkwry --cov-append --cov-report=
+  else
+    pytest "$@" -v --tb=short
   fi
-  pytest "$@" -v --tb=short "${cov_args[@]}"
   cleanup_webkit
 }
 

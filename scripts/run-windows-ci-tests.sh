@@ -38,11 +38,12 @@ cleanup_webview2() {
 }
 
 run_pytest() {
-  local -a cov_args=()
+  # Avoid ``"${empty[@]}"`` under ``set -u`` (same as macOS runner).
   if [[ "${TKWRY_COVERAGE:-}" == "1" ]]; then
-    cov_args=(--cov=tkwry --cov-append --cov-report=)
+    pytest "$@" -v --tb=short --cov=tkwry --cov-append --cov-report=
+  else
+    pytest "$@" -v --tb=short
   fi
-  pytest "$@" -v --tb=short "${cov_args[@]}"
   cleanup_webview2
 }
 
