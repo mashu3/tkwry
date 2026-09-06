@@ -10,6 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Windows CI: run off-thread native WebView GC lifecycle tests in their own
   pytest process (same STATUS_BREAKPOINT class as isolated RPC worker cases)
+- macOS CI: split unit / integration / ``tests/macos`` across pytest processes
+  (and reap WebKit helpers between suites on GHA) so a long single-process
+  streak no longer wedges at ``collected N items``; step timeout 40 minutes
 
 ## [0.1.8] - 2026-09-06
 

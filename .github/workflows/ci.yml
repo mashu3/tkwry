@@ -163,6 +163,7 @@ jobs:
 
       - name: Run tests (macOS)
         if: runner.os == 'macOS'
+        timeout-minutes: 40
         shell: bash
         env:
           TK_SILENCE_DEPRECATION: "1"
