@@ -157,12 +157,72 @@ def test_schedule_destroy_from_off_thread_queues_wakeup(
     assert write_calls == [b"\x01"]
     pending = getattr(toplevel, "_tkwry_pending_destroy_webviews", [])
     assert len(pending) == 1
-    assert pending[0]() is web
+    assert pending[0] is web
 
     from tkwry.webview import _drain_pending_destroy_webviews
 
     _drain_pending_destroy_webviews(toplevel)
     assert destroyed == [True]
+
+
+def test_off_thread_pending_destroy_survives_caller_drop(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Off-thread schedule must keep a strong ref until Tk drain (not weakref-only)."""
+    import gc
+    import threading
+
+    frame = tk.Frame(tk_root)
+    frame.pack()
+    web = WebView(frame, width=400, height=300)
+    destroyed: list[bool] = []
+    original_destroy = web.destroy
+
+    def track_destroy() -> None:
+        destroyed.append(True)
+        original_destroy()
+
+    # Assign directly so monkeypatch undo state does not keep ``web`` alive.
+    web.destroy = track_destroy  # type: ignore[method-assign]
+    web._unbind_frame_events()
+    toplevel = frame.winfo_toplevel()
+    if sys.platform == "darwin":
+        setattr(toplevel, "_tkwry_mac_wake_read_fd", 1)
+        setattr(toplevel, "_tkwry_mac_wake_write_fd", 2)
+    else:
+        setattr(toplevel, "_tkwry_wake_write_fd", 2)
+    monkeypatch.setattr(os, "write", lambda _fd, data: None)
+    simulate_off_thread = [False]
+    real_get_ident = threading.get_ident
+    tk_thread_id = web._tk_thread_id
+    monkeypatch.setattr(
+        "tkwry.webview.threading.get_ident",
+        lambda: tk_thread_id + 1 if simulate_off_thread[0] else real_get_ident(),
+    )
+
+    simulate_off_thread[0] = True
+    web._schedule_destroy_on_tk_thread()
+    simulate_off_thread[0] = False
+
+    pending = getattr(toplevel, "_tkwry_pending_destroy_webviews", [])
+    assert len(pending) == 1
+    assert pending[0] is web
+    web_id = id(web)
+    del web
+    gc.collect()
+
+    pending = getattr(toplevel, "_tkwry_pending_destroy_webviews", [])
+    assert len(pending) == 1
+    survivor = pending[0]
+    assert id(survivor) == web_id
+    assert survivor._destroyed is False
+
+    from tkwry.webview import _drain_pending_destroy_webviews
+
+    _drain_pending_destroy_webviews(toplevel)
+    assert destroyed == [True]
+    assert survivor.destroyed is True
+    assert not getattr(toplevel, "_tkwry_pending_destroy_webviews", None)
 
 
 def test_schedule_destroy_falls_back_when_after_unavailable(
@@ -207,7 +267,7 @@ def test_atexit_drain_runs_destroy_on_tk_thread(
     monkeypatch.setattr(web, "destroy", track_destroy, raising=False)
     web._unbind_frame_events()
     toplevel = frame.winfo_toplevel()
-    setattr(toplevel, "_tkwry_pending_destroy_webviews", [weakref.ref(web)])
+    setattr(toplevel, "_tkwry_pending_destroy_webviews", [web])
     previous = list(host_mod._atexit_destroy_toplevels)
     host_mod._atexit_destroy_toplevels[:] = [weakref.ref(toplevel)]
     try:
@@ -261,7 +321,7 @@ def test_atexit_leftover_uses_teardown_not_bare_force(
     )
 
     toplevel = frame.winfo_toplevel()
-    setattr(toplevel, "_tkwry_pending_destroy_webviews", [weakref.ref(web)])
+    setattr(toplevel, "_tkwry_pending_destroy_webviews", [web])
     previous = list(host_mod._atexit_destroy_toplevels)
     host_mod._atexit_destroy_toplevels[:] = [weakref.ref(toplevel)]
     try:

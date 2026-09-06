@@ -205,21 +205,24 @@ def _drain_toplevel_sync_hooks(toplevel: tk.Misc) -> None:
 
 
 def _drain_pending_destroy_webviews(toplevel: tk.Misc) -> None:
-    """Run ``destroy()`` queued from off-thread ``__del__`` on the Tk thread."""
-    refs = getattr(toplevel, "_tkwry_pending_destroy_webviews", None)
-    if not refs:
+    """Run ``destroy()`` queued from off-thread ``__del__`` on the Tk thread.
+
+    The pending list holds strong ``WebView`` references so the object stays
+    alive from off-thread ``__del__`` until this drain finishes.
+    """
+    pending = getattr(toplevel, "_tkwry_pending_destroy_webviews", None)
+    if not pending:
         return
-    live: list[weakref.ReferenceType[WebView]] = []
-    for ref in refs:
-        web = ref()
-        if web is None or web._destroyed:
+    live: list[WebView] = []
+    for web in pending:
+        if web._destroyed:
             continue
         if threading.get_ident() != web._tk_thread_id:
-            live.append(ref)
+            live.append(web)
             continue
         _run_pending_webview_destroy(web)
         if not web._destroyed:
-            live.append(ref)
+            live.append(web)
     if live:
         setattr(toplevel, "_tkwry_pending_destroy_webviews", live)
     elif hasattr(toplevel, "_tkwry_pending_destroy_webviews"):
@@ -258,12 +261,11 @@ def _atexit_drain_pending_destroys() -> None:
             _drain_pending_destroy_webviews(toplevel)
             if not getattr(toplevel, "_tkwry_pending_destroy_webviews", None):
                 break
-        refs = getattr(toplevel, "_tkwry_pending_destroy_webviews", None)
-        if not refs:
+        leftovers = getattr(toplevel, "_tkwry_pending_destroy_webviews", None)
+        if not leftovers:
             continue
-        for pending_ref in list(refs):
-            web = pending_ref()
-            if web is None or web._destroyed:
+        for web in list(leftovers):
+            if web._destroyed:
                 continue
             _run_pending_webview_destroy(web)
     _atexit_destroy_toplevels[:] = live

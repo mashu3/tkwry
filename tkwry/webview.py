@@ -1460,13 +1460,15 @@ class WebView(WebViewRpcMixin):
             return
 
         try:
-            pending: list[weakref.ReferenceType[WebView]] | None = getattr(
+            # Strong refs until Tk drain: a weakref dies as soon as ``__del__``
+            # returns with no other owners, so ``destroy()`` would never run.
+            pending: list[WebView] | None = getattr(
                 toplevel, "_tkwry_pending_destroy_webviews", None
             )
             if pending is None:
                 pending = []
                 setattr(toplevel, "_tkwry_pending_destroy_webviews", pending)
-            pending.append(weakref.ref(self))
+            pending.append(self)
             _track_atexit_destroy_toplevel(toplevel)
             write_fd = self._tk_wakeup_write_fd
             if write_fd is None:
