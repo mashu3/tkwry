@@ -1,7 +1,8 @@
 name: Coverage
 
-# Dedicated Win + macOS coverage uploads (Codecov flags). Not hung on every
-# matrix cell in ci.yml — same split suites as CI, plus pytest-cov append.
+# Dedicated Win + macOS coverage uploads (Codecov flags).
+# Editable install (maturin develop) so coverage paths match the repo — a plain
+# wheel under site-packages uploads as ~0% on Codecov (tkface uses editable too).
 
 on:
   push:
@@ -40,18 +41,16 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install Python dependencies
+      - name: Install Python tooling
         run: |
           python -m pip install --upgrade pip
           pip install maturin pytest pytest-cov
 
-      - name: Build and install
+      - name: Editable install (coverage paths = checkout)
         shell: bash
         env:
           PKG_CONFIG_PATH: ""
-        run: |
-          maturin build --profile ci --out dist
-          pip install dist/*.whl
+        run: maturin develop --profile ci
 
       - name: Configure Tcl/Tk (Windows)
         if: runner.os == 'Windows'
@@ -59,6 +58,23 @@ jobs:
         run: |
           echo "TCL_LIBRARY=${pythonLocation}/tcl/tcl8.6" >> "$GITHUB_ENV"
           echo "TK_LIBRARY=${pythonLocation}/tcl/tk8.6" >> "$GITHUB_ENV"
+
+      - name: Sanity — tkwry resolves into the checkout
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib
+          import tkwry
+          import tkwry.webview as wv
+
+          root = pathlib.Path.cwd().resolve()
+          for label, mod in (("tkwry", tkwry), ("webview", wv)):
+              path = pathlib.Path(mod.__file__).resolve()
+              print(f"{label}: {path}")
+              if root not in path.parents and path.parent != root:
+                  raise SystemExit(f"{label} is not under checkout: {path}")
+          print("ok: imports resolve into the git tree")
+          PY
 
       - name: Run tests with coverage
         shell: bash
@@ -68,8 +84,27 @@ jobs:
           TKWRY_COVERAGE: "1"
         run: bash ${{ matrix.script }}
 
+      - name: Sanity — coverage.xml points at checkout (not site-packages)
+        shell: bash
+        run: |
+          test -f coverage.xml
+          grep -q 'filename="webview.py"' coverage.xml
+          if ! grep -E '<source>[^<]*[/\\]tkwry</source>' coverage.xml >/dev/null; then
+            echo "::error::coverage.xml <source> is not checkout tkwry/"
+            grep -E '<source>' coverage.xml || true
+            exit 1
+          fi
+          if grep -E '<source>[^<]*site-packages[/\\]tkwry</source>' coverage.xml >/dev/null; then
+            echo "::error::coverage.xml <source> is site-packages — use maturin develop"
+            grep -E '<source>' coverage.xml || true
+            exit 1
+          fi
+          grep -E '<source>' coverage.xml
+          echo "line-rate sample:" 
+          grep -o 'line-rate="[^"]*"' coverage.xml | head -n 3
+
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml

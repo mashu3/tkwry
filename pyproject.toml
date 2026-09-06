@@ -74,6 +74,19 @@ markers = [
     "integration: requires display and native WebView (tests/integration, tests/macos)",
 ]
 
+# Codecov: measure the checkout copy. Coverage CI must use editable install
+# (``maturin develop``); a wheel under site-packages uploads as ~0% on Codecov.
+[tool.coverage.run]
+source = ["tkwry"]
+omit = [
+    "*/tkwry/_core.*",
+]
+
+[tool.coverage.report]
+omit = [
+    "*/tkwry/_core.*",
+]
+
 [tool.mypy]
 python_version = "3.10"
 warn_unused_ignores = true
