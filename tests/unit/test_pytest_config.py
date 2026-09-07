@@ -17,6 +17,9 @@ def test_item_wants_integration_marker_matches_integration_and_macos() -> None:
         "/home/runner/work/tkwry/tkwry/tests/integration/test_layout.py"
     )
     assert item_wants_integration_marker("D:/a/tkwry/tkwry/tests/macos/test_input.py")
+    assert item_wants_integration_marker(
+        "D:/a/tkwry/tkwry/tests/macos/test_input_ci.py"
+    )
 
 
 def test_item_wants_integration_marker_skips_unit_tests() -> None:

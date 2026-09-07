@@ -52,6 +52,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (``drain_window_ipc_messages`` only) in ``docs/usage.md`` and the README
 - Document canonical call shapes, error observation, and intentional API
   asymmetries in ``docs/usage.md`` (link from ``docs/rpc.md``)
+- Declare macOS keyboard-ownership / IME metrics (CI handoff ≤1000 ms;
+  local Tcl unfocus ≤50 ms; IME composition not measured) in
+  ``docs/platforms.md`` + README Known limitations
 
 ### Tests
 
@@ -59,6 +62,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and ``on_download_failed`` (including clear-to-default)
 - Unit / integration fixtures use pytest ``tmp_path`` (or non-``/tmp``
   ``file://`` URLs) instead of hardcoded ``/tmp/...`` paths
+- macOS CI keyboard probe without CGEvent
+  (``tests/macos/test_input_ci.py``) — ownership handoff + hit-test
 
 ### Fixed
 

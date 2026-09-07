@@ -255,7 +255,13 @@ Short checklist — **details live in [Platform notes](https://github.com/mashu3
 
 **macOS / Windows quirks**
 
-- **macOS** — import `tkwry` before AppKit; IME not Safari-parity; inline `url()` may be `None`; DevTools needs `devtools=True` then `open_devtools()` (private APIs — avoid Mac App Store) ([macOS embedding](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#macos-embedding), [DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools))
+- **macOS** — import `tkwry` before AppKit; IME not Safari-parity (declared
+  ownership handoff budgets in
+  [macOS embedding — Input / IME metrics](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#input--ime-metrics-declared));
+  inline `url()` may be `None`; DevTools needs `devtools=True` then
+  `open_devtools()` (private APIs — avoid Mac App Store)
+  ([macOS embedding](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#macos-embedding),
+  [DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools))
 - **Windows DevTools** — `open_devtools()` works; `close_devtools` is a no-op; `is_devtools_open` always `False` ([DevTools](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#devtools))
 
 **Trust & session**

@@ -128,6 +128,23 @@ WebView mid-composition (or fighting the system candidate window) can cancel
 or mis-deliver input vs Safari. **Not** a v0.1 goal — finish composition
 before changing focus, or keep IME editing in one surface.
 
+### Input / IME metrics (declared)
+
+Pinned numbers for the macOS CI job (``scripts/run-macos-ci-tests.sh`` →
+``tests/macos/``). These are **ownership / routing** budgets, not Safari
+keystroke or IME composition parity.
+
+| Metric | Budget | Where |
+|--------|--------|-------|
+| ``focus()`` → ``mac_web_input_active()`` true | ≤ **1000 ms** | ``tests/macos/test_input_ci.py`` (CI) |
+| ``focus_parent()`` → inactive | ≤ **1000 ms** | same |
+| Chrome Entry vs WebView hit-test | must separate | same |
+| Tcl focus leave after ``mac_request_tk_unfocus`` | ≤ **50 ms** | ``tests/macos/test_input.py`` (**local Mac** only; skipped on GHA) |
+| IME composition latency | **not measured** | first-responder contract above |
+
+CGEvent click / key injection stays **local Mac** (Accessibility). Do not
+treat GHA skips there as a regression of the CI probe.
+
 **Import order / double titlebar:** import `tkwry` **before** anything that
 starts `AppKit` / `NSApplication`. On import, tkwry disables process-level
 automatic window tabbing on the main thread. If AppKit starts first, macOS
