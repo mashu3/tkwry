@@ -285,9 +285,7 @@ class WebViewRpcMixin:
             raise ValueError("WebView: untrusted=True cannot emit()")
         current = self._emit_document_url()
         if current is None or not self._bridge_origin_allowed(current):
-            raise ValueError(
-                f"emit: current page origin is not allowed ({current!r})"
-            )
+            raise ValueError(f"emit: current page origin is not allowed ({current!r})")
         script = emit_script(event, data)
         self._require_ready("emit")
         self._rpc_bridge_wanted = True

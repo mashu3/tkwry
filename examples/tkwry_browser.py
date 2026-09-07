@@ -205,6 +205,8 @@ def _design_px(value: int) -> int:
         return int(design_to_physical(value))
     except Exception:
         return value
+
+
 UI_BG_LIGHT = (244, 245, 247, 255)
 UI_BG_DARK = (28, 30, 34, 255)
 # Allow https favicons in chrome / side (default app CSP blocks them).
@@ -3741,7 +3743,9 @@ class BrowserApp:
         self._safe_when_ready(self.chrome, self.push_chrome_state)
         self._safe_when_ready(self.side, self.push_side_state)
         self._schedule_chrome_refresh()
-        self._schedule_after(50, lambda: self.content_split.sashpos(0, self._side_pane_width))
+        self._schedule_after(
+            50, lambda: self.content_split.sashpos(0, self._side_pane_width)
+        )
         self._schedule_after(80, self._sync_side_webview)
         self._schedule_after(120, self.push_side_state)
 
@@ -4413,7 +4417,9 @@ class BrowserApp:
             self.content_split.add(self.side_frame, weight=0)
             self.content_split.add(self.content_host, weight=1)
         self._side_visible = True
-        self._schedule_after(20, lambda: self.content_split.sashpos(0, self._side_pane_width))
+        self._schedule_after(
+            20, lambda: self.content_split.sashpos(0, self._side_pane_width)
+        )
         self._schedule_after(40, self._sync_side_webview)
         self._schedule_after(60, self.push_side_state)
 
