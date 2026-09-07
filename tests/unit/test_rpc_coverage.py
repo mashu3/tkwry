@@ -85,6 +85,27 @@ def test_emit_validation_and_origin(tk_root) -> None:
     frame.destroy()
 
 
+def test_emit_app_allows_missing_engine_url(
+    tk_root, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """WebView2 often reports no URL (blank→None) while app= chrome is ready."""
+    app_dir = tmp_path / "chrome"
+    app_dir.mkdir()
+    (app_dir / "index.html").write_text("<p>chrome</p>", encoding="utf-8")
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, app=app_dir)
+    native = MagicMock()
+    native.url.return_value = None
+    web._webview = native
+    monkeypatch.setattr(web, "_layout_ready", lambda: True)
+    monkeypatch.setattr(web, "_run_eval_js", MagicMock())
+    assert web._emit_eligible() is True
+    web.emit("state", {"ok": True})
+    web._run_eval_js.assert_called_once()
+    web.destroy()
+    frame.destroy()
+
+
 def test_emit_eligible_branches(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>x</p>")

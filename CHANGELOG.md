@@ -87,6 +87,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- ``emit`` / ``_emit_eligible`` treat missing engine URLs on ``app=`` views
+  as the platform app origin (WebView2 often reports blank→``None`` while
+  ``ready`` is already true) so flagship chrome/side ``emit("state")`` no
+  longer raises ``current page origin is not allowed (None)`` on Windows
 - Flagship ``tkwry_browser`` best-effort UI/teardown paths log via traceback
   instead of silent ``except Exception: pass``
 - ``WebView`` teardown / snapshot paths no longer use silent

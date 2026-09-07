@@ -24,6 +24,7 @@ from tkwry._app import (
     normalize_watch_suffixes,
     scan_app_mtime,
 )
+from tkwry._origin import APP_ORIGINS, origin_allowed
 from tkwry.context_menu import (
     CONTEXT_MENU_DISABLE_JS,
     CONTEXT_MENU_JS,
@@ -282,19 +283,51 @@ class WebViewRpcMixin:
             raise ValueError("emit: event name must be non-empty")
         if self._untrusted:
             raise ValueError("WebView: untrusted=True cannot emit()")
-        current = None
-        if self._webview is not None:
-            try:
-                current = self._webview.url()
-            except Exception:
-                current = None
-        if not self._bridge_origin_allowed(current or "about:blank"):
-            raise ValueError(f"emit: current page origin is not allowed ({current!r})")
+        current = self._emit_document_url()
+        if current is None or not self._bridge_origin_allowed(current):
+            raise ValueError(
+                f"emit: current page origin is not allowed ({current!r})"
+            )
         script = emit_script(event, data)
         self._require_ready("emit")
         self._rpc_bridge_wanted = True
         self._enable_rpc()
         self._run_eval_js(script)
+
+    def _emit_document_url(self) -> str | None:
+        """URL used for :meth:`emit` / ``_emit_eligible`` origin checks.
+
+        Native ``url()`` maps ``about:blank`` to ``None`` (see
+        ``normalize_document_url``). During ``app=`` startup WebView2 often
+        still reports blank while ``ready`` is already true — fall back to the
+        platform ``app=`` origin so chrome/side ``emit`` is not rejected.
+        """
+        raw: str | None = None
+        if self._webview is not None:
+            try:
+                raw = self._webview.url()
+            except Exception:
+                raw = None
+        if raw and str(raw).strip():
+            return str(raw).strip()
+        # Inline ``html=`` / blank documents.
+        if origin_allowed("about:blank", self._bridge_origins):
+            return "about:blank"
+        # ``app=`` allowlist while the engine has not published a concrete URL.
+        if getattr(self, "_app_root", None) is not None:
+            stand_ins = (
+                "https://tkwry.localhost/",
+                "http://tkwry.localhost/",
+                "tkwry://localhost/",
+                "tkwry://app/",
+            )
+            for candidate in stand_ins:
+                if origin_allowed(candidate, self._bridge_origins):
+                    return candidate
+            if self._bridge_origins != "*" and self._bridge_origins & APP_ORIGINS:
+                # Allowlist uses bare origins (no path); any APP entry is fine.
+                return next(iter(self._bridge_origins & APP_ORIGINS))
+        return None
 
     def _emit_eligible(self) -> bool:
         """Whether :meth:`emit` / session broadcast may deliver to this view."""
@@ -304,13 +337,8 @@ class WebViewRpcMixin:
             return False
         if not self.ready:
             return False
-        current = None
-        if self._webview is not None:
-            try:
-                current = self._webview.url()
-            except Exception:
-                current = None
-        return self._bridge_origin_allowed(current or "about:blank")
+        current = self._emit_document_url()
+        return current is not None and self._bridge_origin_allowed(current)
 
     def watch_app(
         self,
