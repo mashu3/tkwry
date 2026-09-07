@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -54,8 +55,28 @@ def test_configure_window_rejects_bad_minsize(root) -> None:
         configure_window(root, minsize=(1, 2, 3))  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="minsize"):
         configure_window(root, minsize=(1.5, 2))  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="minsize"):
+        configure_window(root, minsize=(True, 2))  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="minsize"):
         configure_window(root, minsize=(-1, 10))
+
+
+def test_configure_window_maxsize_and_bool_pair(root) -> None:
+    configure_window(root, maxsize=(800, 600))
+    assert root.maxsize() == (800, 600)
+    with pytest.raises(TypeError, match="maxsize"):
+        configure_window(root, maxsize=(False, 10))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="maxsize"):
+        configure_window(root, maxsize=(10, -1))
+
+
+def test_configure_window_icon_ico_rejected_off_windows(root, tmp_path: Path) -> None:
+    ico = tmp_path / "app.ico"
+    ico.write_bytes(b"fake-ico")
+    if sys.platform == "win32":
+        pytest.skip("Windows accepts .ico via iconbitmap")
+    with pytest.raises(ValueError, match="Windows-only"):
+        configure_window(root, icon=ico)
 
 
 def test_configure_window_icon_png(root, tmp_path: Path) -> None:

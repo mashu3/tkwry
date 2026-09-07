@@ -544,6 +544,15 @@ def test_save_as_rejects_relative_path(tmp_path: Path) -> None:
         download.save_as("../escape.pdf")
 
 
+def test_save_as_accepts_absolute_path(tmp_path: Path) -> None:
+    download = Download(
+        url="https://example.com/report.pdf",
+        suggested_dest=str(tmp_path / "report.pdf"),
+    )
+    dest = tmp_path / "chosen.pdf"
+    assert download.save_as(dest) == str(dest.resolve())
+
+
 def test_on_download_accepts_download_object(tk_root, tmp_path: Path) -> None:
     seen: list[Download] = []
 

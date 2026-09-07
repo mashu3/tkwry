@@ -69,6 +69,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``file://`` URLs) instead of hardcoded ``/tmp/...`` paths
 - macOS CI keyboard probe without CGEvent
   (``tests/macos/test_input_ci.py``) — ownership handoff + hit-test
+- Coverage: unit suite reaches ≥90% with OS-foreign platform modules
+  omitted (``scripts/ci-coverage.sh`` → ``.coveragerc``, ``fail_under = 90``);
+  extra unit cases in ``tests/unit/test_coverage_boost.py`` and helpers
 
 ### Fixed
 

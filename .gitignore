@@ -14,6 +14,7 @@ vendor/
 .mypy_cache/
 .pytest_cache/
 .coverage
+.coveragerc
 htmlcov/
 .DS_Store
 .python-version

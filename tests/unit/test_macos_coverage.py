@@ -487,3 +487,148 @@ def test_release_tk_keyboard_focus_mocked(monkeypatch: pytest.MonkeyPatch) -> No
     toplevel.focus_set = MagicMock()
     toplevel.focus_force = MagicMock()
     _macos._release_tk_keyboard_focus(toplevel)
+
+
+def test_mac_event_toplevel_none_and_tcl_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_macos, "_mac_event_widget", lambda _e: None)
+    assert _macos._mac_event_toplevel(SimpleNamespace()) is None
+
+    widget = MagicMock()
+    widget.winfo_toplevel.side_effect = __import__("tkinter").TclError("gone")
+    monkeypatch.setattr(_macos, "_mac_event_widget", lambda _e: widget)
+    assert _macos._mac_event_toplevel(SimpleNamespace()) is None
+
+
+def test_widget_accepts_tk_keys_tcl_and_suffix(
+    tk_root, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tkinter as tk
+
+    label = tk.Label(tk_root)
+    monkeypatch.setattr(
+        label,
+        "winfo_class",
+        lambda: (_ for _ in ()).throw(tk.TclError("x")),
+    )
+    assert _macos._widget_accepts_tk_keys(label) is False
+
+    custom = MagicMock()
+    custom.winfo_class.return_value = "CustomEntry"
+    custom.cget.return_value = "1"
+    custom.insert = lambda *_a: None
+    custom.get = lambda *_a: ""
+    assert _macos._widget_accepts_tk_keys(custom) is True
+
+
+def test_sync_mac_webview_layout_skips_and_devtools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    toplevel = MagicMock()
+    dead = MagicMock()
+    dead.ready = False
+    dead.destroyed = False
+    alive = MagicMock()
+    alive.ready = True
+    alive.destroyed = False
+    alive.sync_bounds.side_effect = [None, RuntimeError("sync")]
+    alive.native = MagicMock()
+    alive.is_devtools_open.side_effect = RuntimeError("dev")
+
+    monkeypatch.setattr(_macos, "_mac_webviews", lambda _t: [dead, alive])
+    _macos.sync_mac_webview_layout(toplevel)
+    alive.sync_bounds.assert_called()
+
+    alive.sync_bounds.side_effect = None
+    alive.is_devtools_open.side_effect = None
+    alive.is_devtools_open.return_value = True
+    _macos.sync_mac_webview_layout(toplevel, devtools_web=alive)
+    alive.native.raise_to_front.assert_called()
+
+    destroyed = MagicMock()
+    destroyed.destroyed = True
+    destroyed.ready = True
+    _macos.sync_mac_webview_layout(toplevel, devtools_web=destroyed)
+
+
+def test_prepare_mac_devtools_open_tcl_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    import tkinter as tk
+
+    web = MagicMock()
+    web._frame.winfo_toplevel.side_effect = tk.TclError("x")
+    _macos.prepare_mac_devtools_open(web)
+
+
+def test_mac_devtools_bounds_watch_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    import tkinter as tk
+
+    web = MagicMock()
+    web.destroyed = True
+    _macos._mac_devtools_bounds_watch(web)
+
+    web.destroyed = False
+    web._frame.winfo_toplevel.side_effect = tk.TclError("x")
+    _macos._mac_devtools_bounds_watch(web)
+
+    web._frame.winfo_toplevel.side_effect = None
+    toplevel = MagicMock()
+    web._frame.winfo_toplevel.return_value = toplevel
+    scheduled: list[tuple] = []
+    toplevel.after = lambda ms, fn: scheduled.append((ms, fn))
+    monkeypatch.setattr(_macos, "sync_mac_webview_layout", lambda *_a, **_k: None)
+    web.is_devtools_open.return_value = True
+    _macos._mac_devtools_bounds_watch(web, tick=0)
+    assert scheduled
+
+
+def test_mac_webviews_prunes_dead_weakrefs() -> None:
+    import weakref
+
+    toplevel = MagicMock()
+    alive = MagicMock()
+    alive.destroyed = False
+    alive.native = object()
+    dead = MagicMock()
+    dead.destroyed = True
+    dead.native = object()
+    ephemeral = MagicMock()
+    dead_ref = weakref.ref(ephemeral)
+    del ephemeral
+    toplevel._tkwry_mac_webviews = [alive, dead, dead_ref]
+    result = _macos._mac_webviews(toplevel)
+    assert alive in result
+    assert dead not in result
+
+
+def test_mac_bind_root_fallback(tk_root, monkeypatch: pytest.MonkeyPatch) -> None:
+    import tkinter as tk
+
+    assert _macos._mac_bind_root(tk_root) is tk_root
+    frame = tk.Frame(tk_root)
+    assert _macos._mac_bind_root(frame) is tk_root
+
+    orphan = MagicMock()
+    orphan._root.side_effect = AttributeError("x")
+    orphan.winfo_class.side_effect = tk.TclError("x")
+    orphan.master = None
+    assert _macos._mac_bind_root(orphan) is orphan
+
+
+def test_unbind_mac_global_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    import tkinter as tk
+
+    _macos._unbind_mac_global(MagicMock(), MagicMock(), "<Key>", None)
+
+    bind_root = MagicMock()
+    toplevel = MagicMock()
+    bind_root._unbind.side_effect = tk.TclError("a")
+    toplevel._unbind.side_effect = tk.TclError("b")
+    toplevel._root.side_effect = AttributeError("c")
+    _macos._unbind_mac_global(bind_root, toplevel, "<Key>", "funcid")
+
+    fallback = MagicMock()
+    fallback._unbind.side_effect = tk.TclError("d")
+    toplevel._root.side_effect = None
+    toplevel._root.return_value = fallback
+    _macos._unbind_mac_global(bind_root, toplevel, "<Key>", "funcid2")

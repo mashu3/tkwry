@@ -59,6 +59,36 @@ def test_close_profile_drops_registry_entry() -> None:
     assert not again.closed
 
 
+def test_profiles_base_from_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import tkwry.profile as profile_mod
+
+    monkeypatch.setattr(profile_mod, "_profiles_base", None)
+    env_dir = tmp_path / "env_profiles"
+    monkeypatch.setenv("TKWRY_PROFILES_DIR", str(env_dir))
+    assert profile_mod.profiles_base() == env_dir.resolve()
+    # Cached via set_profiles_base in fixture — clear and use home default path.
+    monkeypatch.delenv("TKWRY_PROFILES_DIR", raising=False)
+    monkeypatch.setattr(profile_mod, "_profiles_base", None)
+    home_base = profile_mod.profiles_base()
+    assert home_base.name == "profiles"
+    assert home_base.parent.name == ".tkwry"
+
+
+def test_get_profile_session_reopens_after_closed_without_close_profile(
+    tmp_path: Path,
+) -> None:
+    session = get_profile_session("reopen")
+    session.close()
+    assert session.closed
+    # Entry still in registry but closed → drop and recreate (line 71).
+    again = get_profile_session("reopen")
+    assert again is not session
+    assert not again.closed
+    close_profile("reopen")
+
+
 def test_profile_names_stay_distinct_on_unix() -> None:
     if sys.platform == "win32":
         pytest.skip("Unix-only distinction")

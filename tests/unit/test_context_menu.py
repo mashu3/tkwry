@@ -45,6 +45,40 @@ def test_parse_context_menu_event_ok() -> None:
 def test_parse_context_menu_event_rejects_other() -> None:
     assert parse_context_menu_event('{"__tkwry":"rpc","id":"r1"}') is None
     assert parse_context_menu_event("not-json") is None
+    assert parse_context_menu_event("[]") is None
+    assert (
+        parse_context_menu_event(
+            json.dumps({"__tkwry": "contextmenu", "x": "bad", "y": 1})
+        )
+        is None
+    )
+    assert (
+        parse_context_menu_event(
+            json.dumps(
+                {
+                    "__tkwry": "contextmenu",
+                    "x": 1,
+                    "y": 2,
+                    "link_url": 99,
+                    "selected_text": 3,
+                }
+            )
+        )
+        == ContextMenuEvent(x=1, y=2, link_url=None, selected_text=None)
+    )
+    assert (
+        parse_context_menu_event(
+            json.dumps(
+                {
+                    "__tkwry": "contextmenu",
+                    "x": 1,
+                    "y": 2,
+                    "selected_text": "",
+                }
+            )
+        )
+        == ContextMenuEvent(x=1, y=2, selected_text=None)
+    )
 
 
 def test_normalize_context_menu_items() -> None:
@@ -64,6 +98,10 @@ def test_normalize_context_menu_items_rejects_bad() -> None:
         normalize_context_menu_items([])
     with pytest.raises(TypeError):
         normalize_context_menu_items([("Back", None)])
+    with pytest.raises(TypeError):
+        normalize_context_menu_items([("only",)])  # type: ignore[list-item]
+    with pytest.raises(ValueError, match="non-empty"):
+        normalize_context_menu_items([("", lambda: None)])
 
 
 def test_merge_context_menu_script() -> None:
@@ -74,6 +112,11 @@ def test_merge_context_menu_script() -> None:
     assert merged is not None
     assert merged.startswith("void 0;")
     assert CONTEXT_MENU_JS in merged
+    # Already contains marker — leave unchanged.
+    stamped = merge_context_menu_script(
+        "void 0;\n__tkwryContextMenu", context_menu_enabled=True
+    )
+    assert stamped == "void 0;\n__tkwryContextMenu"
 
 
 def test_set_on_context_menu_delivers(tk_root) -> None:

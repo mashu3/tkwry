@@ -5,7 +5,14 @@ from __future__ import annotations
 import tkinter as tk
 
 from tkwry import NavigationEvent, NavigationType, WebView
-from tkwry.navigation import call_navigation_handler
+from tkwry.navigation import call_navigation_handler, coerce_navigation_result
+
+
+def test_coerce_navigation_result() -> None:
+    assert coerce_navigation_result(True) is True
+    assert coerce_navigation_result(False) is False
+    assert coerce_navigation_result(0) is False
+    assert coerce_navigation_result("x") is False
 
 
 def test_navigation_event_fields() -> None:
