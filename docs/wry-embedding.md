@@ -115,7 +115,7 @@ yet; **Upstream gap** = wry lacks it (see [platforms.md](platforms.md)).
 |-----|-------|-------|
 | Download started / completed | `on_download*` / `Download` / events | Start-deny only; **no** mid-flight abort or progress % |
 | `print` / macOS `print_with_options` | Wrapped | No PDF / no result callback |
-| Cookies / clear browsing data | Wrapped | Never log values |
+| Cookies / clear browsing data | Wrapped | Never log values; wipe-all only — **no** dedicated Storage / selective clear (upstream gap) |
 | Permission handler | Wrapped | |
 | IPC handler | `expose` / RPC / `emit` | Trust / origins are tkwry |
 | Find in page | Upstream gap | No shim via `window.find` |

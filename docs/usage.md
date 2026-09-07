@@ -184,7 +184,10 @@ server on quit ([Cleanup](#cleanup)).
 ## Shared session (`WebSession`)
 
 Share cookies / cache / `localStorage` across WebViews via wry's
-`WebContext`:
+`WebContext` (engine profile). That is **not** a Python Storage API —
+there is no `get_local_storage` / selective cache clear; use page JS /
+`eval_js`, or `clear_all_browsing_data()` for a **full wipe** of that
+WebView’s store ([Cookies / browsing data](platforms.md#cookies--browsing-data)):
 
 ```python
 from tkwry import Cookie, WebSession, WebView
@@ -195,14 +198,14 @@ right = WebView(frame_b, html=HTML, session=session)
 session.emit_all("theme", {"mode": "dark"})  # → both views (if emit-eligible)
 
 # Cookie CRUD is on WebView (wry names; Tk thread; ready). Never log values:
-for c in left.cookies_for_url("https://example.com/"):
+for c in left.cookies():  # cookies_for_url may be empty on macOS — see platforms
     print(c.name, c.domain)  # not c.value
 left.set_cookie(
     Cookie("sid", "…", domain="example.com", path="/", secure=True, http_only=True)
 )
 left.delete_cookie("sid", "https://example.com/")
 # or: left.delete_cookie(Cookie("sid", "", domain="example.com", path="/"))
-left.clear_all_browsing_data()  # this WebView's store
+left.clear_all_browsing_data()  # wipe-all for this WebView's store
 
 # App shutdown: tear down every live view on the profile, then release it.
 session.close()  # idempotent; run on the Tk main thread

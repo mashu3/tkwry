@@ -345,6 +345,33 @@ optional tkwry glue may `import tkface`; do not reimplement in
 `configure_window`). Windows DPI: `tkface.win.enable_dpi_awareness()`
 before `tk.Tk()` (above).
 
+## Cookies / browsing data
+
+wry 0.56 exposes five WebView surfaces; tkwry wraps all of them (Tk thread,
+after ready). **Never log cookie values** (`Cookie.__repr__` omits `value`).
+
+| API | Role |
+|-----|------|
+| `cookies()` | Full jar for this WebView’s store |
+| `cookies_for_url(url)` | URL-filtered jar (same normalize/validate as `load_url`) |
+| `set_cookie` / `delete_cookie` | Add / remove (`delete_cookie(name, url)` builds `Path=/`) |
+| `clear_all_browsing_data()` | **Wipe-all** website data for this WebView (cookies, HTTP cache, `localStorage`, … — engine types) |
+
+**Not wrapped (and not invented):** dedicated Python APIs for `localStorage` /
+`sessionStorage` / IndexedDB / HTTP-cache quotas, selective clear, or CDP
+Storage. Shared `WebSession` means sibling views share the **engine** profile
+(cookies / cache / `localStorage`); reading or writing storage from Python is
+`eval_js` (or leave it to the page). `clear_all_browsing_data()` is **per
+WebView**, not a session-wide CDP wipe — sibling effects follow the engine.
+
+**macOS:** `cookies_for_url` often returns `[]` even when `cookies()` lists
+host cookies for the same jar. Prefer `cookies()` (or try the URL filter
+first, then fall back) when enumerating. Windows / Linux usually honor the
+filter.
+
+See [Usage — Shared session](usage.md#shared-session-websession) and
+[wry embedding — cookies](wry-embedding.md#downloads--print--cookies--ipc).
+
 ## Screenshot
 
 wry **0.56.1** has no `WebView` screenshot / capture method
@@ -370,6 +397,7 @@ When wry ships a cross-platform find API, wrap it in the next open cut.
 ## Related
 
 - [wry embedding and API map](wry-embedding.md) — ownership vs Tk bridge
+- [Cookies / browsing data](#cookies--browsing-data)
 - [Usage](usage.md)
 - [Mini-browser example](examples-browser.md)
 - [Trust boundaries](trust.md)

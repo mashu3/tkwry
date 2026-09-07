@@ -56,6 +56,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``docs/platforms.md`` keeps a short first-responder tip. CI routing
   probe in ``tests/macos/test_input_ci.py``. Local measure scripts and
   samples stay under gitignored ``.bench/``
+- Cookie / cache / Storage honesty: Cookie CRUD + ``clear_all_browsing_data``
+  stay the only engine wraps; no dedicated Storage / selective-clear APIs
+  (documented in README Known limitations, ``docs/platforms.md``,
+  ``docs/usage.md``)
 
 ### Tests
 

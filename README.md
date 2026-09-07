@@ -251,6 +251,7 @@ Short checklist — **details live in [Platform notes](https://github.com/mashu3
 
 - **Print** — system dialog (`print()`; macOS also `print_with_options` for margins); no PDF / no result ([Print](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#print))
 - **Downloads** — start-deny only; no mid-flight abort, pause/resume, or progress % ([Downloads](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#downloads))
+- **Cookies / browsing data** — Cookie CRUD + `clear_all_browsing_data()` (WebView wipe-all); **no** dedicated `localStorage` / cache / IndexedDB Python APIs and **no** selective clear ([Cookies / browsing data](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#cookies--browsing-data))
 - **Screenshot / find in page** — not exposed as tkwry APIs (Windows may still show engine Ctrl+F chrome) ([Screenshot](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#screenshot), [Find](https://github.com/mashu3/tkwry/blob/main/docs/platforms.md#find-in-page))
 
 **macOS / Windows quirks**
