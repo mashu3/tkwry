@@ -9,10 +9,12 @@ OS / freezer / mode is verified.
 (``.github/workflows/freeze.yml``) builds the flagship
 ``examples/tkwry_browser.py`` on Windows and macOS **serially**: **onedir**
 first (assert native ``tkwry._core`` on disk), then **onefile** (build +
-binary present). It runs **only** via **workflow_dispatch** (Actions →
-Freeze → Run workflow) — not on push and not on tags. It does **not**
-launch the GUI. Nuitka / non-flagship recipes stay unverified by that
-workflow.
+binary present; separate output name so paths do not clash). macOS onedir
+uses ``--windowed`` (``.app``); macOS onefile **omits** ``--windowed``
+because PyInstaller deprecates windowed+onefile on macOS (error in v7).
+Pinned ``pyinstaller==6.22.2``. Runs **only** via **workflow_dispatch**
+(Actions → Freeze → Run workflow) — not on push/tags. No GUI launch.
+Nuitka / non-flagship recipes stay unverified by that workflow.
 
 Recipes here cover **Windows and macOS** (PyPI wheels). Linux is source-only
 and out of scope for these freeze samples — see [Platform notes](platforms.md).
@@ -115,24 +117,25 @@ Microsoft guidance. Missing WebView2 → `creation_failed` /
 
 ### macOS → app
 
-One-file (typical paste shape; same idea as Windows):
-
-```bash
-pyinstaller --windowed --onefile --collect-submodules tkwry --name MyApp main.py
-```
-
-Output: `dist/MyApp` (windowed one-file binary). Sign and notarize before
-distribution. Import `tkwry` before other AppKit startup
-([Platform notes — macOS](platforms.md#macos-embedding)).
-
-Onedir `.app` bundle (easier to sign; **Freeze** CI builds onedir first to
-assert ``tkwry._core`` on disk, then one-file):
+Onedir ``.app`` (paste / ship shape; PyInstaller rejects
+``--windowed --onefile`` on macOS — deprecated, error in v7):
 
 ```bash
 pyinstaller --windowed --onedir --collect-submodules tkwry --name MyApp main.py
 ```
 
-Output: `dist/MyApp.app`.
+Output: `dist/MyApp.app`. Sign and notarize before distribution. Import
+`tkwry` before other AppKit startup
+([Platform notes — macOS](platforms.md#macos-embedding)).
+
+Console one-file (no ``--windowed``; **Freeze** builds this after onedir as
+a packing smoke, not a GUI ``.app``):
+
+```bash
+pyinstaller --onefile --collect-submodules tkwry --name MyApp main.py
+```
+
+Output: `dist/MyApp`.
 
 ### Flagship demo (`tkwry_browser.py`)
 

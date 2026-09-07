@@ -71,11 +71,13 @@ because WKWebView pasteboard access is unreliable for this demo.
 UI assets are embedded in the script (no separate `web/` folder). From a
 clone with tkwry installed (`pip install -e .`).
 
-Recipes below are the usual PyInstaller **one-file** paste commands (both
-OS). The manual **Freeze** workflow smokes **onedir then onefile** serially
-on Windows + macOS (no GUI; not on push/tags): onedir asserts native
-``tkwry._core`` on disk; onefile checks the build + binary. Nuitka stays
-best-effort — see [Packaging notes](packaging.md).
+Recipes below are the usual paste commands: Windows **one-file**, macOS
+**windowed onedir** ``.app`` (PyInstaller does not support windowed+onefile
+on macOS). The manual **Freeze** workflow smokes **onedir then onefile**
+serially on both OS (no GUI; not on push/tags): onedir asserts
+``tkwry._core``; onefile checks the build (macOS onefile without
+``--windowed``). Nuitka stays best-effort — see
+[Packaging notes](packaging.md).
 
 ### PyInstaller
 
@@ -85,10 +87,10 @@ best-effort — see [Packaging notes](packaging.md).
 pyinstaller --noconsole --onefile --collect-submodules tkwry --name tkwry-browser examples/tkwry_browser.py
 ```
 
-**macOS** — one-file app:
+**macOS** — onedir `.app`:
 
 ```bash
-pyinstaller --windowed --onefile --collect-submodules tkwry --name tkwry-browser examples/tkwry_browser.py
+pyinstaller --windowed --onedir --collect-submodules tkwry --name tkwry-browser examples/tkwry_browser.py
 ```
 
 ### Nuitka

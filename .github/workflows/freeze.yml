@@ -5,6 +5,9 @@
 #
 # Serial per OS: onedir (assert native tkwry._core on disk) then onefile
 # (build succeeds; binary present). No GUI launch.
+#
+# macOS: onedir uses --windowed (.app). onefile omits --windowed —
+# PyInstaller deprecates windowed+onefile on macOS (error in v7).
 name: Freeze
 
 on:
@@ -24,11 +27,13 @@ jobs:
         include:
           - id: windows-x86_64
             os: windows-latest
-            # Windowed / console flags only; shared freeze steps supply paths.
-            freeze_ui: --noconsole
+            onedir_ui: --noconsole
+            onefile_ui: --noconsole
           - id: macos-arm64
             os: macos-latest
-            freeze_ui: --windowed
+            onedir_ui: --windowed
+            # No --windowed: onefile + .app is deprecated (PyInstaller ≥6.22).
+            onefile_ui: ""
     steps:
       - uses: actions/checkout@v5
 
@@ -57,12 +62,13 @@ jobs:
 
       - name: Install PyInstaller
         shell: bash
-        run: pip install pyinstaller
+        # Pin to the version that passed Freeze smoke (bump deliberately).
+        run: pip install "pyinstaller==6.22.2"
 
       - name: Freeze flagship (onedir)
         shell: bash
         env:
-          FREEZE_UI: ${{ matrix.freeze_ui }}
+          FREEZE_UI: ${{ matrix.onedir_ui }}
         run: |
           # Analyze outside the checkout so PyInstaller collects the installed
           # wheel (with native ``_core``), not the source tree.
@@ -70,6 +76,7 @@ jobs:
           # shellcheck disable=SC2086
           pyinstaller \
             ${FREEZE_UI} \
+            --noconfirm \
             --onedir \
             --collect-submodules tkwry \
             --name tkwry-browser \
@@ -85,15 +92,18 @@ jobs:
       - name: Freeze flagship (onefile)
         shell: bash
         env:
-          FREEZE_UI: ${{ matrix.freeze_ui }}
+          FREEZE_UI: ${{ matrix.onefile_ui }}
         run: |
           cd "${RUNNER_TEMP}"
+          # Distinct --name so this does not clash with onedir's
+          # dist/tkwry-browser/ (or .app) from the previous step.
           # shellcheck disable=SC2086
           pyinstaller \
             ${FREEZE_UI} \
+            --noconfirm \
             --onefile \
             --collect-submodules tkwry \
-            --name tkwry-browser \
+            --name tkwry-browser-onefile \
             --distpath "${GITHUB_WORKSPACE}/dist" \
             --workpath "${GITHUB_WORKSPACE}/build-onefile" \
             --specpath "${GITHUB_WORKSPACE}" \
@@ -105,11 +115,11 @@ jobs:
           # One-file packs ``_core`` inside the archive; existence + successful
           # build is the smoke (onedir step already asserted the native module).
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            test -f dist/tkwry-browser.exe
-            ls -la dist/tkwry-browser.exe
+            test -f dist/tkwry-browser-onefile.exe
+            ls -la dist/tkwry-browser-onefile.exe
           else
-            test -f dist/tkwry-browser
-            ls -la dist/tkwry-browser
+            test -f dist/tkwry-browser-onefile
+            ls -la dist/tkwry-browser-onefile
           fi
 
       - uses: actions/upload-artifact@v6
@@ -119,7 +129,7 @@ jobs:
           path: |
             dist/tkwry-browser/
             dist/tkwry-browser.app/
-            dist/tkwry-browser.exe
-            dist/tkwry-browser
+            dist/tkwry-browser-onefile.exe
+            dist/tkwry-browser-onefile
           if-no-files-found: error
           retention-days: 14
