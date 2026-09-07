@@ -54,7 +54,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   asymmetries in ``docs/usage.md`` (link from ``docs/rpc.md``)
 - Declare macOS keyboard-ownership / IME metrics (CI handoff ≤1000 ms;
   local Tcl unfocus ≤50 ms; IME composition not measured) in
-  ``docs/platforms.md`` + README Known limitations
+  ``docs/platforms.md`` + README Known limitations; local sample via
+  ``scripts/measure_macos_input.py`` (focus median ~2 ms,
+  ``focus_parent`` median ~10 ms, Tcl unfocus median ~1 ms on Apple Silicon)
 
 ### Tests
 

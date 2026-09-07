@@ -134,16 +134,27 @@ Pinned numbers for the macOS CI job (``scripts/run-macos-ci-tests.sh`` →
 ``tests/macos/``). These are **ownership / routing** budgets, not Safari
 keystroke or IME composition parity.
 
+**Local sample** (2026-09-07, Apple Silicon Mac, ``python scripts/measure_macos_input.py``,
+n=20 rounds):
+
+| Metric | Local median | Local p95 | Local max |
+|--------|-------------:|----------:|----------:|
+| ``focus()`` → ``mac_web_input_active()`` true | **2.0 ms** | **5.7 ms** | **5.9 ms** |
+| ``focus_parent()`` → inactive | **10.2 ms** | **14.3 ms** | **14.5 ms** |
+| Tcl focus leave after ``mac_request_tk_unfocus`` | **0.8 ms** | **1.6 ms** | **1.9 ms** |
+
+**CI / gate budgets** (must stay honest on GHA VMs — slower than local):
+
 | Metric | Budget | Where |
 |--------|--------|-------|
-| ``focus()`` → ``mac_web_input_active()`` true | ≤ **1000 ms** | ``tests/macos/test_input_ci.py`` (CI) |
-| ``focus_parent()`` → inactive | ≤ **1000 ms** | same |
+| ``focus()`` / ``focus_parent()`` handoff | ≤ **1000 ms** each | ``tests/macos/test_input_ci.py`` (CI) |
 | Chrome Entry vs WebView hit-test | must separate | same |
 | Tcl focus leave after ``mac_request_tk_unfocus`` | ≤ **50 ms** | ``tests/macos/test_input.py`` (**local Mac** only; skipped on GHA) |
 | IME composition latency | **not measured** | first-responder contract above |
 
-CGEvent click / key injection stays **local Mac** (Accessibility). Do not
-treat GHA skips there as a regression of the CI probe.
+Re-measure locally with ``python scripts/measure_macos_input.py``. CGEvent click /
+key injection stays **local Mac** (Accessibility). Do not treat GHA skips
+there as a regression of the CI probe.
 
 **Import order / double titlebar:** import `tkwry` **before** anything that
 starts `AppKit` / `NSApplication`. On import, tkwry disables process-level

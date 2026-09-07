@@ -7,8 +7,9 @@ hit-test separation of chrome vs WebView.
 
 Declared budgets (documented in ``docs/platforms.md``):
 
-- focus → ``mac_web_input_active()``: ≤ 1000 ms
-- focus_parent → inactive: ≤ 1000 ms
+- CI gate: focus / focus_parent handoff ≤ 1000 ms (GHA VM)
+- Local sample (``scripts/measure_macos_input.py``): focus median ~2 ms,
+  focus_parent median ~10 ms, Tcl unfocus median ~1 ms
 
 IME composition latency is **not** measured here (OS / first-responder
 contract only — not Safari parity).
@@ -30,7 +31,7 @@ if sys.platform == "darwin":
     from support.macos_input import activate_window, pump, wait_until, wry_point
 
 # Generous VM budget — state the number even when GHA is slow (honesty over
-# aspirational Safari-class latency).
+# aspirational Safari-class latency). Local hardware is typically << 20 ms.
 _CI_HANDOFF_BUDGET_S = 1.0
 
 
@@ -96,6 +97,15 @@ def test_ci_keyboard_ownership_handoff_within_budget(url_demo_layout) -> None:
         web.focus_parent()
         resign_s = _until_active(web, url_demo_layout.root, want=False)
         assert resign_s <= _CI_HANDOFF_BUDGET_S
+
+        # Surface the sample in CI logs (budget is the gate; this is the measure).
+        print(
+            f"macOS input handoff sample: "
+            f"focus={activate_s * 1000:.1f}ms "
+            f"focus_parent={resign_s * 1000:.1f}ms "
+            f"(budget={_CI_HANDOFF_BUDGET_S * 1000:.0f}ms)",
+            flush=True,
+        )
     finally:
         web.destroy()
 
