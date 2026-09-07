@@ -46,9 +46,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   coverage in the split CI test scripts
 - Manual **Freeze** workflow (``.github/workflows/freeze.yml``):
   ``workflow_dispatch`` only (not push, not tags). Win + macOS PyInstaller
-  onedir smoke for ``examples/tkwry_browser.py``; asserts native
-  ``tkwry._core`` in the artifact; no GUI launch
-  (``scripts/check_freeze_artifact.py``)
+  **onedir then onefile** (serial) for ``examples/tkwry_browser.py``; onedir
+  asserts native ``tkwry._core``; onefile asserts the binary exists; no GUI
+  launch (``scripts/check_freeze_artifact.py``)
 
 ### Docs
 
@@ -65,9 +65,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stay the only engine wraps; no dedicated Storage / selective-clear APIs
   (documented in README Known limitations, ``docs/platforms.md``,
   ``docs/usage.md``)
-- Packaging: flagship PyInstaller onedir Win/mac smoked via manual Freeze
-  workflow; Nuitka / one-file remain best-effort
-  (``docs/packaging.md``, ``docs/examples-browser.md``, README)
+- Packaging: flagship Freeze smokes PyInstaller **onedir then onefile**
+  (Win/mac); public paste samples are **one-file**; Nuitka remains
+  best-effort (``docs/packaging.md``, ``docs/examples-browser.md``, README)
 
 ### Tests
 

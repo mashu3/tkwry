@@ -283,10 +283,11 @@ See [CHANGELOG.md](https://github.com/mashu3/tkwry/blob/main/CHANGELOG.md) for r
 
 ## 📤 Packaging (best-effort)
 
-Freeze a tkwry app to a Windows ``.exe`` or macOS ``.app`` with PyInstaller or
-Nuitka. Flagship **PyInstaller onedir** (Windows + macOS) is smoked by a
-**manual** GitHub Actions **Freeze** workflow (not on push/tags; no GUI
-launch). Other freezer modes stay best-effort — verify on your target OS.
+Freeze a tkwry app to a Windows ``.exe`` or macOS app with PyInstaller or
+Nuitka. Samples below are the usual **one-file** paste recipes. A **manual**
+GitHub Actions **Freeze** workflow smokes **onedir then onefile** serially
+on Windows + macOS (not on push/tags; no GUI): onedir asserts native
+``tkwry._core``; onefile checks the build. Nuitka stays best-effort.
 Full notes:
 [docs/packaging.md](https://github.com/mashu3/tkwry/blob/main/docs/packaging.md).
 
@@ -294,16 +295,16 @@ Full notes:
 pip install pyinstaller tkwry   # or: pip install nuitka tkwry
 ```
 
-**PyInstaller — Windows ``.exe``**
+**PyInstaller — Windows one-file ``.exe``**
 
 ```bat
 pyinstaller --noconsole --onefile --collect-submodules tkwry --name MyApp main.py
 ```
 
-**PyInstaller — macOS ``.app``**
+**PyInstaller — macOS one-file**
 
 ```bash
-pyinstaller --windowed --onedir --collect-submodules tkwry --name MyApp main.py
+pyinstaller --windowed --onefile --collect-submodules tkwry --name MyApp main.py
 ```
 
 **Nuitka — Windows one-file ``.exe``**

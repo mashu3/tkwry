@@ -1,7 +1,10 @@
 # Flagship freeze smoke (packaging).
 #
 # Manual only — not on push, not on tags. Run from Actions → Freeze →
-# "Run workflow" when you want a Win/mac PyInstaller onedir check.
+# "Run workflow" when you want a Win/mac PyInstaller check.
+#
+# Serial per OS: onedir (assert native tkwry._core on disk) then onefile
+# (build succeeds; binary present). No GUI launch.
 name: Freeze
 
 on:
@@ -12,16 +15,16 @@ permissions:
 
 jobs:
   pyinstaller:
-    name: PyInstaller onedir (${{ matrix.id }})
+    name: PyInstaller (${{ matrix.id }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
           - id: windows-x86_64
             os: windows-latest
-            # Windowed / console flags only; shared freeze step supplies paths.
+            # Windowed / console flags only; shared freeze steps supply paths.
             freeze_ui: --noconsole
           - id: macos-arm64
             os: macos-latest
@@ -71,13 +74,43 @@ jobs:
             --collect-submodules tkwry \
             --name tkwry-browser \
             --distpath "${GITHUB_WORKSPACE}/dist" \
-            --workpath "${GITHUB_WORKSPACE}/build" \
+            --workpath "${GITHUB_WORKSPACE}/build-onedir" \
             --specpath "${GITHUB_WORKSPACE}" \
             "${GITHUB_WORKSPACE}/examples/tkwry_browser.py"
 
-      - name: Assert native tkwry._core in artifact
+      - name: Assert native tkwry._core in onedir artifact
         shell: bash
         run: python scripts/check_freeze_artifact.py dist
+
+      - name: Freeze flagship (onefile)
+        shell: bash
+        env:
+          FREEZE_UI: ${{ matrix.freeze_ui }}
+        run: |
+          cd "${RUNNER_TEMP}"
+          # shellcheck disable=SC2086
+          pyinstaller \
+            ${FREEZE_UI} \
+            --onefile \
+            --collect-submodules tkwry \
+            --name tkwry-browser \
+            --distpath "${GITHUB_WORKSPACE}/dist" \
+            --workpath "${GITHUB_WORKSPACE}/build-onefile" \
+            --specpath "${GITHUB_WORKSPACE}" \
+            "${GITHUB_WORKSPACE}/examples/tkwry_browser.py"
+
+      - name: Assert onefile binary exists
+        shell: bash
+        run: |
+          # One-file packs ``_core`` inside the archive; existence + successful
+          # build is the smoke (onedir step already asserted the native module).
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            test -f dist/tkwry-browser.exe
+            ls -la dist/tkwry-browser.exe
+          else
+            test -f dist/tkwry-browser
+            ls -la dist/tkwry-browser
+          fi
 
       - uses: actions/upload-artifact@v6
         if: success()
@@ -86,5 +119,7 @@ jobs:
           path: |
             dist/tkwry-browser/
             dist/tkwry-browser.app/
+            dist/tkwry-browser.exe
+            dist/tkwry-browser
           if-no-files-found: error
           retention-days: 14

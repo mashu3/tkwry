@@ -7,11 +7,12 @@ OS / freezer / mode is verified.
 
 **CI smoke (manual):** GitHub Actions workflow **Freeze**
 (``.github/workflows/freeze.yml``) builds the flagship
-``examples/tkwry_browser.py`` with **PyInstaller onedir** on Windows and
-macOS, then asserts the artifact contains native ``tkwry._core``. It runs
-**only** via **workflow_dispatch** (Actions → Freeze → Run workflow) — not
-on push and not on tags. It does **not** launch the GUI. Nuitka and
-one-file / non-flagship recipes stay unverified by that workflow.
+``examples/tkwry_browser.py`` on Windows and macOS **serially**: **onedir**
+first (assert native ``tkwry._core`` on disk), then **onefile** (build +
+binary present). It runs **only** via **workflow_dispatch** (Actions →
+Freeze → Run workflow) — not on push and not on tags. It does **not**
+launch the GUI. Nuitka / non-flagship recipes stay unverified by that
+workflow.
 
 Recipes here cover **Windows and macOS** (PyPI wheels). Linux is source-only
 and out of scope for these freeze samples — see [Platform notes](platforms.md).
@@ -89,13 +90,17 @@ pip install pyinstaller tkwry
 
 ### Windows → `.exe`
 
+One-file (typical paste / ship shape):
+
 ```bat
 pyinstaller --noconsole --onefile --collect-submodules tkwry --name MyApp main.py
 ```
 
 Output: `dist\MyApp.exe`.
 
-Onedir (easier to debug missing DLLs):
+Onedir (easier to debug missing DLLs; **Freeze** CI builds this first for
+the flagship demo so it can assert ``tkwry._core`` on disk, then builds
+one-file in the same job):
 
 ```bat
 pyinstaller --noconsole --onedir --collect-submodules tkwry --name MyApp main.py
@@ -108,18 +113,26 @@ Microsoft guidance. Missing WebView2 → `creation_failed` /
 `<<WebViewCreateFailed>>` (constructor does not raise).
 [Platform notes — WebView2](platforms.md#webview2-runtime-probe-and-install).
 
-### macOS → `.app`
+### macOS → app
+
+One-file (typical paste shape; same idea as Windows):
+
+```bash
+pyinstaller --windowed --onefile --collect-submodules tkwry --name MyApp main.py
+```
+
+Output: `dist/MyApp` (windowed one-file binary). Sign and notarize before
+distribution. Import `tkwry` before other AppKit startup
+([Platform notes — macOS](platforms.md#macos-embedding)).
+
+Onedir `.app` bundle (easier to sign; **Freeze** CI builds onedir first to
+assert ``tkwry._core`` on disk, then one-file):
 
 ```bash
 pyinstaller --windowed --onedir --collect-submodules tkwry --name MyApp main.py
 ```
 
-Output: `dist/MyApp.app`. Sign and notarize before distribution. Import
-`tkwry` before other AppKit startup
-([Platform notes — macOS](platforms.md#macos-embedding)).
-
-One-file macOS builds are possible (`--onefile --windowed`) but onedir
-`.app` bundles are usually easier to sign.
+Output: `dist/MyApp.app`.
 
 ### Flagship demo (`tkwry_browser.py`)
 
