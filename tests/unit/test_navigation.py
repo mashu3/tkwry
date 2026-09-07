@@ -136,3 +136,26 @@ def test_on_navigation_unannotated_param(tk_root) -> None:
 
     web.destroy()
     frame.destroy()
+
+
+def test_on_new_window_receives_navigation_event(tk_root) -> None:
+    from tkwry import NewWindowResponse
+
+    frame = tk.Frame(tk_root)
+    web = WebView(frame, html="<p>x</p>")
+    seen: list[NavigationEvent] = []
+
+    def deny(event: NavigationEvent) -> NewWindowResponse:
+        seen.append(event)
+        return NewWindowResponse.Deny
+
+    web.set_on_new_window(deny)
+
+    assert web._invoke_new_window_handler("https://example.com/popup") is (
+        NewWindowResponse.Deny
+    )
+    assert len(seen) == 1
+    assert seen[0].url == "https://example.com/popup"
+
+    web.destroy()
+    frame.destroy()

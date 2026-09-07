@@ -17,6 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   :class:`~tkwry.Download` (``complete`` gets ``(download, success)``;
   ``failed`` gets ``download``; ``last_download`` is ``Download | None`` with
   ``success`` set — raw ``(url, dest, success)`` tuple removed)
+- ``on_new_window`` / ``set_on_new_window`` handlers take
+  :class:`~tkwry.NavigationEvent` only (bare URL ``str`` form removed)
 
 ### CI
 

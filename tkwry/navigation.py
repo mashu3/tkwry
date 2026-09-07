@@ -28,7 +28,11 @@ class NavigationType(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class NavigationEvent:
-    """A main-frame navigation request from the engine.
+    """A navigation or new-window request from the engine.
+
+    Used by ``on_navigation`` / ``navigation_policy`` and ``on_new_window``.
+    Engines currently expose only the target URL, so optional fields default
+    honestly until wry provides richer metadata.
 
     Parameters
     ----------

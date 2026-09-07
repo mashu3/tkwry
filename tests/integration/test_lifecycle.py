@@ -219,8 +219,8 @@ def test_set_on_new_window_none_clears_handler(tk_root) -> None:
 
     calls: list[str] = []
 
-    def handler(url: str) -> NewWindowResponse:
-        calls.append(url)
+    def handler(event: NavigationEvent) -> NewWindowResponse:
+        calls.append(event.url)
         return NewWindowResponse.Deny
 
     web.set_on_new_window(handler)

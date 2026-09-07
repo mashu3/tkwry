@@ -118,7 +118,7 @@ BridgeOrigins: TypeAlias = Literal["*"] | Collection[str]
 BridgeAllow: TypeAlias = Callable[[str], bool]
 PageLoadHandler: TypeAlias = Callable[[PageLoadEvent, str], None]
 TitleChangedHandler: TypeAlias = Callable[[str], None]
-NewWindowHandler: TypeAlias = Callable[[str], NewWindowResponse]
+NewWindowHandler: TypeAlias = Callable[[NavigationEvent], NewWindowResponse]
 PermissionHandler: TypeAlias = Callable[[PermissionKind], PermissionResponse]
 DragDropHandler: TypeAlias = Callable[[DragDropEvent, list[str], tuple[int, int]], None]
 EvalCallback: TypeAlias = Callable[[str], None]
@@ -2554,7 +2554,12 @@ class WebView(WebViewRpcMixin):
             self._deliver_title_events()
 
     def set_on_new_window(self, handler: NewWindowHandler | None) -> None:
-        """Register a new-window hook (Tk main thread; WebKit waits for a response)."""
+        """Register a new-window hook (Tk main thread; WebKit waits for a response).
+
+        *handler* receives a :class:`~tkwry.NavigationEvent` (target URL and
+        reserved engine fields) and must return
+        :class:`~tkwry.NewWindowResponse`.
+        """
         self._require_not_destroyed("set_on_new_window")
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
@@ -3285,8 +3290,9 @@ class WebView(WebViewRpcMixin):
                 self._maybe_open_external(url)
                 return NewWindowResponse.Deny
             return NewWindowResponse.Allow
+        event = NavigationEvent(url=url)
         try:
-            result = handler(url)
+            result = handler(event)
         except Exception:
             traceback.print_exc()
             return NewWindowResponse.Deny

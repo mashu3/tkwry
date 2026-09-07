@@ -9,12 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from support.linux import noop_linux_runtime
 
-from tkwry import (
-    NavigationEvent,
-    NewWindowResponse,
-    WebView,
-    WebViewNavigationError,
-)
+from tkwry import NavigationEvent, NewWindowResponse, WebView, WebViewNavigationError
 
 
 @pytest.fixture(autouse=True)
@@ -76,8 +71,9 @@ def test_native_new_window_runs_handler_on_tk_thread(tk_root) -> None:
     _frame, web = _make_web(tk_root)
     seen: list[int] = []
 
-    def handler(url: str) -> NewWindowResponse:
+    def handler(event: NavigationEvent) -> NewWindowResponse:
         seen.append(threading.get_ident())
+        assert event.url == "https://example.com/popup"
         return NewWindowResponse.Deny
 
     web.set_on_new_window(handler)

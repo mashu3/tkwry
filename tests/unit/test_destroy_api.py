@@ -67,7 +67,7 @@ POST_DESTROY_ACTIONS: dict[str, Callable[[WebView], object]] = {
     "set_on_page_load": lambda w: w.set_on_page_load(lambda *_a: None),
     "set_on_title_changed": lambda w: w.set_on_title_changed(lambda _t: None),
     "set_on_new_window": lambda w: w.set_on_new_window(
-        lambda _u: NewWindowResponse.Deny
+        lambda _event: NewWindowResponse.Deny
     ),
     "set_drag_drop_handler": lambda w: w.set_drag_drop_handler(lambda *_a: None),
     "set_on_download": lambda w: w.set_on_download(lambda *_a: True),

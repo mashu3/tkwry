@@ -1559,7 +1559,7 @@ def test_creation_failure_raises_on_handler_setters(
     with pytest.raises(WebViewCreationError, match="set_on_title_changed"):
         web.set_on_title_changed(lambda _title: None)
     with pytest.raises(WebViewCreationError, match="set_on_new_window"):
-        web.set_on_new_window(lambda _url: None)
+        web.set_on_new_window(lambda _event: None)
     with pytest.raises(WebViewCreationError, match="set_drag_drop_handler"):
         web.set_drag_drop_handler(lambda *_args: None)
     with pytest.raises(WebViewCreationError, match="set_on_download"):

@@ -4940,7 +4940,7 @@ class BrowserApp:
             "initialization_script": LINK_HELPER_JS,
             "on_title_changed": on_title,
             "on_page_load": on_page_load,
-            "on_new_window": lambda _url: NewWindowResponse.Deny,
+            "on_new_window": lambda _event: NewWindowResponse.Deny,
             "on_creation_failed": lambda exc: messagebox.showerror(
                 "WebView failed", str(exc), parent=self.root
             ),

@@ -471,14 +471,15 @@ web = WebView(
     url="https://example.com",
     on_page_load=lambda evt, url: print(evt, url),
     on_title_changed=lambda title: root.title(title),
-    # ``on_navigation`` / ``set_navigation_policy``: one-arg ``NavigationEvent``.
+    # ``on_navigation`` / ``set_navigation_policy`` / ``on_new_window``:
+    # one-arg ``NavigationEvent``.
     on_navigation=lambda event: event.url.startswith("https://"),
     permission_handler=lambda kind: (
         PermissionResponse.Allow
         if kind in (PermissionKind.Camera, PermissionKind.Microphone)
         else PermissionResponse.Default
     ),
-    on_new_window=lambda url: NewWindowResponse.Deny,
+    on_new_window=lambda event: NewWindowResponse.Deny,
 )
 
 # Local app: stay on tkwry:// (+ extra origins); off-list http(s) → system browser.
@@ -734,9 +735,7 @@ Provisional callback exceptions: ``on_callback_error`` (see
 ## Canonical paths
 
 Short map of **preferred** call shapes, how to **observe** failures, and
-**intentional** asymmetries (not bugs). Prefer one style per app. Remaining
-dual call shapes (``on_new_window`` ``str``) will be removed later — this
-section documents what to use **today**.
+**intentional** asymmetries (not bugs). Prefer one style per app.
 
 ### Recommended call shapes
 
@@ -745,6 +744,7 @@ section documents what to use **today**.
 | JS → Python request/response | ``@web.expose`` / ``expose`` + ``window.tkwry.call`` | ``@web.rpc`` (alias); raw ``set_ipc_handler`` only for fire-and-forget strings |
 | Download allow / dest | One-arg ``Download``: ``on_download=lambda d: d.save("./downloads")`` | — |
 | Navigation allow/deny | ``set_navigation_policy`` / ``on_navigation`` with one-arg ``NavigationEvent`` (``event.url``, …) | — |
+| New window | ``on_new_window`` with one-arg ``NavigationEvent`` → ``NewWindowResponse`` | — |
 | Create failure | ``when_failed(cb)`` / ``<<WebViewCreateFailed>>`` | Constructor ``on_creation_failed=`` (same callback list) |
 
 Details: [IPC / RPC](rpc.md), [Navigation / lifecycle](#navigation--lifecycle-callbacks).
@@ -776,7 +776,6 @@ Queue overflow is separate — [Observability](#observability)
 | Background color | ``background_color=(r,g,b,a)`` at create; ``set_background_color(r, g, b, a=255)`` after ready |
 | Create-failed hook | ``on_creation_failed=`` vs ``when_failed()`` — both register; prefer ``when_failed`` / bind for late listeners |
 | Download cancel | Return ``False`` or ``None`` from ``on_download`` (equivalent start-deny) |
-| ``on_new_window`` | Still ``str`` URL only (no ``NavigationEvent`` yet) |
 
 ## API stability
 
