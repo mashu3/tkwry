@@ -21,14 +21,11 @@ jobs:
         include:
           - id: windows-x86_64
             os: windows-latest
-            pyinstaller_args: >-
-              --noconsole --onedir --collect-submodules tkwry
-              --name tkwry-browser examples/tkwry_browser.py
+            # Windowed / console flags only; shared freeze step supplies paths.
+            freeze_ui: --noconsole
           - id: macos-arm64
             os: macos-latest
-            pyinstaller_args: >-
-              --windowed --onedir --collect-submodules tkwry
-              --name tkwry-browser examples/tkwry_browser.py
+            freeze_ui: --windowed
     steps:
       - uses: actions/checkout@v5
 
@@ -50,6 +47,9 @@ jobs:
           pip install maturin
           maturin build --profile ci --out dist-wheel
           pip install dist-wheel/*.whl
+          # Checkout has a source ``tkwry/`` without ``_core``; importing from
+          # the workspace would shadow the wheel (same pattern as ci.yml).
+          cd "${RUNNER_TEMP}"
           python -c "import tkwry, tkwry._core; print(tkwry.__version__, tkwry._core)"
 
       - name: Install PyInstaller
@@ -58,7 +58,22 @@ jobs:
 
       - name: Freeze flagship (onedir)
         shell: bash
-        run: pyinstaller ${{ matrix.pyinstaller_args }}
+        env:
+          FREEZE_UI: ${{ matrix.freeze_ui }}
+        run: |
+          # Analyze outside the checkout so PyInstaller collects the installed
+          # wheel (with native ``_core``), not the source tree.
+          cd "${RUNNER_TEMP}"
+          # shellcheck disable=SC2086
+          pyinstaller \
+            ${FREEZE_UI} \
+            --onedir \
+            --collect-submodules tkwry \
+            --name tkwry-browser \
+            --distpath "${GITHUB_WORKSPACE}/dist" \
+            --workpath "${GITHUB_WORKSPACE}/build" \
+            --specpath "${GITHUB_WORKSPACE}" \
+            "${GITHUB_WORKSPACE}/examples/tkwry_browser.py"
 
       - name: Assert native tkwry._core in artifact
         shell: bash
@@ -71,5 +86,5 @@ jobs:
           path: |
             dist/tkwry-browser/
             dist/tkwry-browser.app/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
