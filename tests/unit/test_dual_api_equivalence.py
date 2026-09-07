@@ -81,12 +81,12 @@ def _equivalence_case(
         _equivalence_case(
             "on_download_complete",
             "set_on_download_complete",
-            lambda _url, _dest, _ok: None,
+            lambda _download, _ok: None,
         ),
         _equivalence_case(
             "on_download_failed",
             "set_on_download_failed",
-            lambda _url, _dest: None,
+            lambda _download: None,
         ),
         _equivalence_case("ipc_handler", "set_ipc_handler", lambda _msg: None),
         _equivalence_case(
@@ -151,11 +151,11 @@ def test_handler_ctor_matches_setter(
         ),
         (
             "set_on_download_complete",
-            lambda w: w.set_on_download_complete(lambda *_a: None),
+            lambda w: w.set_on_download_complete(lambda _d, _ok: None),
         ),
         (
             "set_on_download_failed",
-            lambda w: w.set_on_download_failed(lambda _u, _d: None),
+            lambda w: w.set_on_download_failed(lambda _d: None),
         ),
         ("set_ipc_handler", lambda w: w.set_ipc_handler(lambda _m: None)),
         (

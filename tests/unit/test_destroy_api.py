@@ -71,9 +71,11 @@ POST_DESTROY_ACTIONS: dict[str, Callable[[WebView], object]] = {
     ),
     "set_drag_drop_handler": lambda w: w.set_drag_drop_handler(lambda *_a: None),
     "set_on_download": lambda w: w.set_on_download(lambda *_a: True),
-    "set_on_download_complete": lambda w: w.set_on_download_complete(lambda *_a: None),
+    "set_on_download_complete": lambda w: w.set_on_download_complete(
+        lambda _d, _ok: None
+    ),
     "set_on_download_started": lambda w: w.set_on_download_started(lambda _d: None),
-    "set_on_download_failed": lambda w: w.set_on_download_failed(lambda *_a: None),
+    "set_on_download_failed": lambda w: w.set_on_download_failed(lambda _d: None),
     "set_context_menu": lambda w: w.set_context_menu([("X", lambda: None)]),
     "set_context_menu_handler": lambda w: w.set_context_menu_handler(lambda _e: None),
     "sync_bounds": lambda w: w.sync_bounds(),

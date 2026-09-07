@@ -140,8 +140,8 @@ See [Usage — Shared session](usage.md#shared-session-websession).
   `False`/`None`, an **absolute** save path, or `download.save(directory)`
   (relative dests are denied). Use `unique_download_path(dest)` to
   pick a free name (`report.pdf` → `report (1).pdf`); tkwry does not overwrite.
-  `on_download_complete(url, dest, success)` is notify-only.
-  Completions also set `last_download` and generate
+  `on_download_complete(download, success)` is notify-only.
+  Completions also set `last_download` (a `Download` with `success` set) and generate
   `<<WebViewDownloadComplete>>` or `<<WebViewDownloadFailed>>`.
   **Cancel is start-deny only** — wry has no in-flight abort; returning
   `False` / `None` from `on_download` (or failing the allowlist) is the

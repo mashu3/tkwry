@@ -12,26 +12,34 @@ from tkwry._origin import unique_download_path
 DownloadDecision: TypeAlias = str | Path | bool | None
 DownloadHandler: TypeAlias = Callable[["Download"], DownloadDecision]
 DownloadStartedHandler: TypeAlias = Callable[["Download"], None]
-DownloadFailedHandler: TypeAlias = Callable[[str, str | None], None]
+DownloadCompleteHandler: TypeAlias = Callable[["Download", bool], None]
+DownloadFailedHandler: TypeAlias = Callable[["Download"], None]
 
 
 @dataclass(frozen=True, slots=True)
 class Download:
-    """An in-flight or starting download from the engine.
+    """A download from the engine (start or completion snapshot).
 
     Parameters
     ----------
     url:
         Source URL.
     suggested_dest:
-        Engine-suggested absolute save path.
+        Engine-suggested absolute save path at start. On completion-only
+        snapshots (no start hook), mirrors ``dest`` when the engine reported
+        one, otherwise ``""``.
     dest:
         Resolved save path after ``on_download`` (override or suggested).
+        May be ``None`` when the engine omits a path (common on failure).
+    success:
+        ``True`` / ``False`` after a completion event; ``None`` for
+        start-only snapshots (``last_started_download`` / ``on_download``).
     """
 
     url: str
     suggested_dest: str
     dest: str | None = None
+    success: bool | None = None
 
     @property
     def suggested_filename(self) -> str:
@@ -63,3 +71,13 @@ def call_download_handler(
 ) -> DownloadDecision:
     """Invoke *handler* with *download*."""
     return handler(download)
+
+
+def download_from_complete(url: str, dest: str | None, *, success: bool) -> Download:
+    """Build a completion ``Download`` from engine ``(url, dest, success)``."""
+    return Download(
+        url=url,
+        suggested_dest=dest or "",
+        dest=dest,
+        success=success,
+    )

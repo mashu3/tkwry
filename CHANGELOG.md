@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   signature sniffing)
 - ``on_download`` / ``set_on_download`` handlers take :class:`~tkwry.Download`
   only (legacy ``(url, suggested_dest)`` form removed; no arity sniffing)
+- ``on_download_complete`` / ``on_download_failed`` / ``last_download`` use
+  :class:`~tkwry.Download` (``complete`` gets ``(download, success)``;
+  ``failed`` gets ``download``; ``last_download`` is ``Download | None`` with
+  ``success`` set — raw ``(url, dest, success)`` tuple removed)
 
 ### CI
 

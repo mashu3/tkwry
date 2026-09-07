@@ -523,11 +523,12 @@ web = WebView(
     download_allow=["https://cdn.example.com"],
     on_download=lambda download: download.save("./downloads"),
     on_download_started=lambda item: print("started", item.url),
-    on_download_complete=lambda url, dest, ok: print("done", ok, dest),
-    on_download_failed=lambda url, dest: print("failed", url, dest),
+    on_download_complete=lambda d, ok: print("done", ok, d.dest),
+    on_download_failed=lambda d: print("failed", d.url, d.dest),
 )
 # also: last_download, last_started_download, in_flight_downloads,
 # <<WebViewDownloadStarted>> / Complete / Failed
+# (last_download is a Download with success set)
 ```
 
 `on_page_load` fires `PageLoadEvent.Started` and `PageLoadEvent.Finished`
@@ -734,8 +735,8 @@ Provisional callback exceptions: ``on_callback_error`` (see
 
 Short map of **preferred** call shapes, how to **observe** failures, and
 **intentional** asymmetries (not bugs). Prefer one style per app. Remaining
-dual call shapes (``on_new_window`` ``str``, complete/failed download tuples)
-will be removed later — this section documents what to use **today**.
+dual call shapes (``on_new_window`` ``str``) will be removed later — this
+section documents what to use **today**.
 
 ### Recommended call shapes
 

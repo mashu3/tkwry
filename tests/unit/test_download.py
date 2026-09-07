@@ -197,7 +197,12 @@ def test_download_complete_wakeup_without_handler(tk_root) -> None:
         # which would arm poll for tests).
         web._wake_async_events()
         assert fired == ["ok"]
-        assert web.last_download == ("https://example.com/a.zip", "/tmp/a.zip", True)
+        assert web.last_download == Download(
+            url="https://example.com/a.zip",
+            suggested_dest="/tmp/a.zip",
+            dest="/tmp/a.zip",
+            success=True,
+        )
         assert web._needs_event_poll() is False
         assert web._should_keep_polling() is False
         assert web._event_poll_active is False
@@ -243,7 +248,12 @@ def test_download_complete_after_poll_without_createfilehandler(tk_root) -> None
             tk_root.update()
             time.sleep(0.01)
         assert fired == ["ok"]
-        assert web.last_download == ("https://example.com/a.zip", "/tmp/a.zip", True)
+        assert web.last_download == Download(
+            url="https://example.com/a.zip",
+            suggested_dest="/tmp/a.zip",
+            dest="/tmp/a.zip",
+            success=True,
+        )
         assert web._needs_event_poll() is False
         assert web._event_poll_active is False
     finally:
@@ -309,7 +319,12 @@ def test_download_complete_poll_path_without_handler(
         web._event_poll_active = True
         web._poll_events()
         assert fired == ["ok"]
-        assert web.last_download == ("https://example.com/b.zip", "/tmp/b.zip", True)
+        assert web.last_download == Download(
+            url="https://example.com/b.zip",
+            suggested_dest="/tmp/b.zip",
+            dest="/tmp/b.zip",
+            success=True,
+        )
         assert web._event_poll_active is False
     finally:
         web._webview = None
@@ -318,19 +333,34 @@ def test_download_complete_poll_path_without_handler(
 
 def test_download_complete_delivery(tk_root) -> None:
     web = _make_web(tk_root)
-    events: list[tuple[str, str | None, bool]] = []
+    events: list[tuple[Download, bool]] = []
     native = MagicMock()
     native.drain_download_complete_events.return_value = [
         ("https://example.com/a.zip", "/tmp/a.zip", True)
     ]
     web._webview = native
     web.set_on_download_complete(
-        lambda url, dest, success: events.append((url, dest, success))
+        lambda download, success: events.append((download, success))
     )
     try:
         web._deliver_download_complete_events()
-        assert events == [("https://example.com/a.zip", "/tmp/a.zip", True)]
-        assert web.last_download == ("https://example.com/a.zip", "/tmp/a.zip", True)
+        assert events == [
+            (
+                Download(
+                    url="https://example.com/a.zip",
+                    suggested_dest="/tmp/a.zip",
+                    dest="/tmp/a.zip",
+                    success=True,
+                ),
+                True,
+            )
+        ]
+        assert web.last_download == Download(
+            url="https://example.com/a.zip",
+            suggested_dest="/tmp/a.zip",
+            dest="/tmp/a.zip",
+            success=True,
+        )
     finally:
         web._webview = None
         web.destroy()
@@ -350,7 +380,12 @@ def test_download_complete_virtual_events_without_handler(tk_root) -> None:
         assert web.last_download is None
         web._deliver_download_complete_events()
         assert fired == ["ok"]
-        assert web.last_download == ("https://example.com/a.zip", "/tmp/a.zip", True)
+        assert web.last_download == Download(
+            url="https://example.com/a.zip",
+            suggested_dest="/tmp/a.zip",
+            dest="/tmp/a.zip",
+            success=True,
+        )
     finally:
         web._webview = None
         web.destroy()
@@ -368,7 +403,12 @@ def test_download_failed_virtual_event(tk_root) -> None:
     try:
         web._deliver_download_complete_events()
         assert fired == ["fail"]
-        assert web.last_download == ("https://example.com/a.zip", None, False)
+        assert web.last_download == Download(
+            url="https://example.com/a.zip",
+            suggested_dest="",
+            dest=None,
+            success=False,
+        )
     finally:
         web._webview = None
         web.destroy()
@@ -435,7 +475,12 @@ def test_in_flight_downloads_tracks_start_until_complete(
         )
         web._wake_async_events()
         assert web.in_flight_downloads == ()
-        assert web.last_download == ("https://example.com/a.zip", str(dest), True)
+        assert web.last_download == Download(
+            url="https://example.com/a.zip",
+            suggested_dest=str(dest),
+            dest=str(dest),
+            success=True,
+        )
     finally:
         web._webview = None
         web.destroy()
@@ -555,13 +600,20 @@ def test_download_failed_handler(tk_root) -> None:
         ("https://example.com/a.zip", "/tmp/a.zip", False)
     ]
     web._webview = native
-    failed: list[tuple[str, str | None]] = []
+    failed: list[Download] = []
     complete: list[bool] = []
-    web.set_on_download_failed(lambda url, dest: failed.append((url, dest)))
-    web.set_on_download_complete(lambda _url, _dest, success: complete.append(success))
+    web.set_on_download_failed(lambda download: failed.append(download))
+    web.set_on_download_complete(lambda _download, success: complete.append(success))
     try:
         web._deliver_download_complete_events()
-        assert failed == [("https://example.com/a.zip", "/tmp/a.zip")]
+        assert failed == [
+            Download(
+                url="https://example.com/a.zip",
+                suggested_dest="/tmp/a.zip",
+                dest="/tmp/a.zip",
+                success=False,
+            )
+        ]
         assert complete == [False]
     finally:
         web._webview = None

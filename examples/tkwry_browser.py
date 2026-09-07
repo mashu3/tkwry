@@ -4858,9 +4858,9 @@ class BrowserApp:
             self.status_var.set(f"Downloading → {Path(abs_path).name}")
             return abs_path
 
-        def on_download_complete(url: str, dest: str | None, success: bool) -> None:
+        def on_download_complete(download: Download, success: bool) -> None:
             if success:
-                name = Path(dest or url).name
+                name = Path(download.dest or download.url).name
                 self.status_var.set(f"Saved {name}")
                 self.content_session.emit_all("notice", {"text": f"Saved {name}"})
             else:
@@ -4949,8 +4949,8 @@ class BrowserApp:
                 f"Download started: {d.suggested_filename}"
             ),
             "on_download_complete": on_download_complete,
-            "on_download_failed": lambda u, _d: self.status_var.set(
-                f"Download failed: {u}"
+            "on_download_failed": lambda d: self.status_var.set(
+                f"Download failed: {d.url}"
             ),
             "drag_drop_handler": on_drop,
             "permission_handler": permission_handler,
