@@ -750,18 +750,14 @@ html, body {
   }
 
   function dragAfterTab(x) {
+    // Insert before the first tab whose midpoint is to the right of *x*
+    // (excluding the dragged tab). null → append before the "+" button.
     const tabs = tabEls().filter((t) => t.dataset.id !== draggingId);
-    let closest = null;
-    let closestOffset = Number.NEGATIVE_INFINITY;
     for (const tab of tabs) {
       const box = tab.getBoundingClientRect();
-      const offset = x - box.left - box.width / 2;
-      if (offset < 0 && offset > closestOffset) {
-        closestOffset = offset;
-        closest = tab;
-      }
+      if (x < box.left + box.width / 2) return tab;
     }
-    return closest;
+    return null;
   }
 
   function placeDraggingTab(clientX) {
@@ -890,6 +886,26 @@ html, body {
     tabsEl.appendChild(neu);
   }
 
+  function tabIdSet(tabsOrIds) {
+    return new Set(
+      (tabsOrIds || []).map((t) => (typeof t === "string" ? t : t.id)).filter(Boolean)
+    );
+  }
+
+  function sameTabIdSet(a, b) {
+    if (a.size !== b.size) return false;
+    for (const id of a) if (!b.has(id)) return false;
+    return true;
+  }
+
+  function paintTabsInPlace() {
+    const existing = tabEls();
+    for (const tab of state.tabs) {
+      const el = existing.find((t) => t.dataset.id === tab.id);
+      if (el) paintTabElement(el, tab);
+    }
+  }
+
   function syncTabs() {
     const nextKey = tabIdsKey(state.tabs);
     const existing = tabEls();
@@ -897,7 +913,15 @@ html, body {
     // Full rebuild only when the set/order changes — chrome state ticks every
     // ~350ms and must not wipe the strip mid click / drag.
     if (nextKey !== domKey) {
-      if (draggingId) abortTabDrag();
+      if (draggingId) {
+        // Live drag reorders the DOM ahead of Python. Keep that order; only
+        // abort if the tab *set* changed (open/close).
+        if (sameTabIdSet(tabIdSet(state.tabs), tabIdSet(existing.map((t) => t.dataset.id)))) {
+          paintTabsInPlace();
+          return;
+        }
+        abortTabDrag();
+      }
       renderTabs();
       return;
     }
@@ -984,10 +1008,15 @@ html, body {
     btnFav.classList.toggle("on", !!state.isFavorite);
     btnFav.title = state.isFavorite ? "Remove bookmark" : "Add bookmark";
     bindTabStripOnce();
-    const nextKey = tabIdsKey(state.tabs);
-    const domKey = tabEls().map((t) => t.dataset.id).join("\0");
-    // While dragging, leave the live DOM alone unless the tab set changed.
-    if (draggingId && nextKey === domKey) return;
+    // While dragging, never snap the strip back to Python order — that made
+    // multi-tab jumps impossible (~350ms chrome refresh). Update labels only.
+    if (draggingId) {
+      if (sameTabIdSet(tabIdSet(state.tabs), tabIdSet(tabEls().map((t) => t.dataset.id)))) {
+        paintTabsInPlace();
+        return;
+      }
+      abortTabDrag();
+    }
     syncTabs();
   }
 
