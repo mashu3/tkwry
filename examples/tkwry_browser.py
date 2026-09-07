@@ -207,6 +207,18 @@ def _design_px(value: int) -> int:
         return value
 
 
+def _webview_client_to_screen(frame: tk.Misc, x: int, y: int) -> tuple[int, int]:
+    """Map WebView CSS/client coords onto Tk screen pixels.
+
+    After Windows DPI awareness, ``winfo_root*`` are physical while
+    ``getBoundingClientRect`` / ``clientX/Y`` stay CSS (logical). Scale the
+    offset before adding it to the frame origin.
+    """
+    ox = int(frame.winfo_rootx())
+    oy = int(frame.winfo_rooty())
+    return ox + _design_px(int(x)), oy + _design_px(int(y))
+
+
 UI_BG_LIGHT = (244, 245, 247, 255)
 UI_BG_DARK = (28, 30, 34, 255)
 # Allow https favicons in chrome / side (default app CSP blocks them).
@@ -672,6 +684,11 @@ html, body {
   const btnHome = $("#btn-home");
   const btnFav = $("#btn-fav");
   const reloadGlyph = btnReload.querySelector(".glyph");
+
+  // Engine default menus stay on on macOS (no wry flag); suppress everywhere.
+  document.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+  });
 
   let state = {
     tabs: [],
@@ -3712,6 +3729,7 @@ class BrowserApp:
             background_color=ui_bg,
             csp=CHROME_CSP,
             clipboard=True,
+            default_context_menus=False,
             initialization_script=SHORTCUT_BRIDGE_JS,
             user_agent="tkwry-browser-chrome/1.0",
             on_creation_failed=lambda exc: messagebox.showerror(
@@ -4479,10 +4497,10 @@ class BrowserApp:
 
     def _side_menu_point(self, x: int, y: int) -> tuple[int, int]:
         try:
+            if x > 0 or y > 0:
+                return _webview_client_to_screen(self.side_frame, x, y)
             ox = self.side_frame.winfo_rootx()
             oy = self.side_frame.winfo_rooty()
-            if x > 0 or y > 0:
-                return ox + int(x), oy + int(y)
             return ox + 12, oy + 40
         except tk.TclError:
             return self.root.winfo_rootx() + 40, self.root.winfo_rooty() + 120
@@ -5159,12 +5177,11 @@ class BrowserApp:
         )
 
         try:
-            ox = self.chrome_frame.winfo_rootx()
-            oy = self.chrome_frame.winfo_rooty()
             if x > 0 or y > 0:
-                px = ox + int(x)
-                py = oy + int(y)
+                px, py = _webview_client_to_screen(self.chrome_frame, x, y)
             else:
+                ox = self.chrome_frame.winfo_rootx()
+                oy = self.chrome_frame.winfo_rooty()
                 px = ox + max(0, self.chrome_frame.winfo_width() - 40)
                 py = oy + self.chrome_frame.winfo_height()
         except tk.TclError:
@@ -5514,12 +5531,11 @@ class BrowserApp:
         menu.add_command(label="Help…", command=self.show_help)
 
         try:
-            ox = self.chrome_frame.winfo_rootx()
-            oy = self.chrome_frame.winfo_rooty()
             if x > 0 or y > 0:
-                px = ox + int(x)
-                py = oy + int(y)
+                px, py = _webview_client_to_screen(self.chrome_frame, x, y)
             else:
+                ox = self.chrome_frame.winfo_rootx()
+                oy = self.chrome_frame.winfo_rooty()
                 px = ox + max(0, self.chrome_frame.winfo_width() - 12)
                 py = oy + self.chrome_frame.winfo_height()
         except tk.TclError:
@@ -5593,7 +5609,8 @@ class BrowserApp:
         menu.add_separator()
         menu.add_command(label="DevTools", command=self.open_devtools)
         try:
-            menu.tk_popup(int(event.x), int(event.y))
+            # screenX/Y from the page are CSS pixels; Tk wants physical on Win DPI.
+            menu.tk_popup(_design_px(int(event.x)), _design_px(int(event.y)))
         finally:
             menu.grab_release()
 

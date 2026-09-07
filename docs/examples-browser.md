@@ -20,10 +20,16 @@ cut).
 
 **Windows DPI (optional):** install [tkface](https://pypi.org/project/tkface/)
 and the demo calls ``tkface.win.enable_dpi_awareness()`` before ``tk.Tk()``,
-then scales window / chrome sizes with ``design_to_physical``. Do **not** use
-``tkface.win.dpi(root)`` with tkwry embeds (see
+then scales window / chrome sizes with ``design_to_physical``. Popup menus
+that anchor on WebView CSS coordinates also scale those offsets before
+``tk_popup``. Do **not** use ``tkface.win.dpi(root)`` with tkwry embeds (see
 [Platform notes — DPI](platforms.md)). Without tkface the demo still runs
 (unaware / blurrier on high-DPI displays).
+
+The toolbar WebView suppresses engine context menus
+(``default_context_menus=False`` on Windows; ``preventDefault`` on
+``contextmenu`` on all platforms). Content tabs keep the custom Tk page
+menu.
 
 Single file: HTML/CSS/JS for the toolbar strip, side pane, and Settings are
 embedded and written to a temp tree at startup, then loaded with `app=`

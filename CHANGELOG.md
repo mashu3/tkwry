@@ -97,7 +97,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ~350ms)
 - Flagship ``tkwry_browser``: optional Windows DPI via ``tkface`` embed-safe
   path (``enable_dpi_awareness`` before ``Tk`` + ``design_to_physical`` for
-  geometry / chrome sizes; not ``tkface.win.dpi(root)``)
+  geometry / chrome sizes; not ``tkface.win.dpi(root)``); WebView CSS
+  anchors / ``screenX/Y`` are scaled before ``tk_popup`` so menus stay under
+  the toolbar / click point
+- Flagship chrome WebView: ``default_context_menus=False`` plus
+  ``contextmenu`` ``preventDefault`` so engine menus do not appear on
+  right-click (macOS has no wry suppress flag)
 - Flagship ``tkwry_browser`` best-effort UI/teardown paths log via traceback
   instead of silent ``except Exception: pass``
 - ``WebView`` teardown / snapshot paths no longer use silent

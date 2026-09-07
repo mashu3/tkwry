@@ -237,6 +237,22 @@ def test_design_px_noop_on_macos(browser, monkeypatch) -> None:
     assert browser._design_px(96) == 96
 
 
+def test_webview_client_to_screen_scales_css_offset(browser, monkeypatch) -> None:
+    monkeypatch.setattr(browser.sys, "platform", "win32")
+    fake_win = SimpleNamespace(design_to_physical=lambda v, **_k: int(v) * 2)
+    monkeypatch.setitem(sys.modules, "tkface", SimpleNamespace(win=fake_win))
+    monkeypatch.setitem(sys.modules, "tkface.win", fake_win)
+
+    class _Frame:
+        def winfo_rootx(self) -> int:
+            return 100
+
+        def winfo_rooty(self) -> int:
+            return 200
+
+    assert browser._webview_client_to_screen(_Frame(), 10, 20) == (120, 240)
+
+
 def test_enable_windows_dpi_awareness_noop_off_windows(browser, monkeypatch) -> None:
     monkeypatch.setattr(browser.sys, "platform", "darwin")
     assert browser._enable_windows_dpi_awareness() is False
