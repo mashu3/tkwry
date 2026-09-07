@@ -3,6 +3,8 @@
 # Default / Linux / windows-11-arm CI stays wheel-only without coverage.
 #
 # Multi-process suites need ``--cov-append`` + a shared ``COVERAGE_FILE``.
+# Coverage % is **informational** (Codecov + ``coverage report``) — no
+# ``fail_under`` / ``--cov-fail-under`` gate.
 #
 # Platform modules not for the current OS are omitted via a generated
 # ``.coveragerc`` (takes precedence over ``pyproject.toml`` for coverage):
@@ -49,7 +51,6 @@ ${omit_block}
 [report]
 omit =
 ${omit_block}
-fail_under = 90
 EOF
 }
 

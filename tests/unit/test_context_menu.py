@@ -52,33 +52,27 @@ def test_parse_context_menu_event_rejects_other() -> None:
         )
         is None
     )
-    assert (
-        parse_context_menu_event(
-            json.dumps(
-                {
-                    "__tkwry": "contextmenu",
-                    "x": 1,
-                    "y": 2,
-                    "link_url": 99,
-                    "selected_text": 3,
-                }
-            )
+    assert parse_context_menu_event(
+        json.dumps(
+            {
+                "__tkwry": "contextmenu",
+                "x": 1,
+                "y": 2,
+                "link_url": 99,
+                "selected_text": 3,
+            }
         )
-        == ContextMenuEvent(x=1, y=2, link_url=None, selected_text=None)
-    )
-    assert (
-        parse_context_menu_event(
-            json.dumps(
-                {
-                    "__tkwry": "contextmenu",
-                    "x": 1,
-                    "y": 2,
-                    "selected_text": "",
-                }
-            )
+    ) == ContextMenuEvent(x=1, y=2, link_url=None, selected_text=None)
+    assert parse_context_menu_event(
+        json.dumps(
+            {
+                "__tkwry": "contextmenu",
+                "x": 1,
+                "y": 2,
+                "selected_text": "",
+            }
         )
-        == ContextMenuEvent(x=1, y=2, selected_text=None)
-    )
+    ) == ContextMenuEvent(x=1, y=2, selected_text=None)
 
 
 def test_normalize_context_menu_items() -> None:

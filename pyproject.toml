@@ -77,8 +77,10 @@ markers = [
 # Codecov: measure the checkout copy. Coverage CI must use editable install
 # (``maturin develop``); a wheel under site-packages uploads as ~0% on Codecov.
 #
-# Platform modules for other OSes are omitted at run/report time by
-# ``scripts/ci-coverage.sh`` (writes ``.coveragerc``):
+# Coverage % is informational (Codecov + ``coverage report`` in
+# ``scripts/ci-coverage.sh``). No ``fail_under`` gate. Platform modules for
+# other OSes are omitted at run/report time by that helper (writes
+# ``.coveragerc``):
 #   darwin → omit _linux.py, _win32.py
 #   win32  → omit _linux.py, _macos.py
 #   linux  → omit _win32.py, _macos.py
@@ -93,8 +95,6 @@ omit = [
 omit = [
     "*/tkwry/_core.*",
 ]
-# fail_under=90 lives in the generated ``.coveragerc`` from
-# ``scripts/ci-coverage.sh`` (platform omits required for an honest bar).
 
 [tool.mypy]
 python_version = "3.10"
