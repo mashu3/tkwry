@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+import traceback
 
 import pytest
 from support.tk import bare_frame, host_frame, layout_bare_frame, wait_until
@@ -166,7 +167,7 @@ def test_devtools_open_close_roundtrip(tk_root) -> None:
             if web.ready and not web.destroyed:
                 web.close_devtools()
         except Exception:
-            pass
+            traceback.print_exc()
         web.destroy()
         frame.destroy()
 

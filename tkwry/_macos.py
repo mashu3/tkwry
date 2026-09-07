@@ -61,12 +61,23 @@ import os
 import sys
 import threading
 import tkinter as tk
+import traceback
 import weakref
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tkwry._core import WebView as NativeWebViewType
     from tkwry.webview import WebView
+
+
+def _ignore_best_effort_error() -> None:
+    """Log a best-effort macOS host failure without raising.
+
+    Used for layout sync / focus resign while a sibling view may already be
+    tearing down. Silent ``except Exception: pass`` hid these from maintainers.
+    """
+    traceback.print_exc()
+
 
 _MAC_TEXT_CLASSES = frozenset(
     {
@@ -233,12 +244,13 @@ def sync_mac_webview_layout(
         try:
             web.sync_bounds()
         except Exception:
-            pass
+            _ignore_best_effort_error()
     if devtools_web is None or devtools_web.destroyed or not devtools_web.ready:
         return
     try:
         devtools_web.sync_bounds()
     except Exception:
+        _ignore_best_effort_error()
         return
     native = devtools_web.native
     if native is None:
@@ -247,7 +259,7 @@ def sync_mac_webview_layout(
         if devtools_web.is_devtools_open():
             native.raise_to_front()
     except Exception:
-        pass
+        _ignore_best_effort_error()
 
 
 def prepare_mac_devtools_open(web: WebView) -> None:
@@ -571,7 +583,7 @@ def _release_web_input_for_tk_traversal(toplevel: tk.Misc) -> None:
         try:
             web.focus_parent()
         except Exception:
-            pass
+            _ignore_best_effort_error()
     _mac_service_wakeup(toplevel)
 
 

@@ -1,4 +1,5 @@
 import sys
+import traceback
 
 import pytest
 
@@ -12,5 +13,5 @@ def _linux_integration_teardown(tk_root) -> None:
         try:
             drain_gtk_with_tk(tk_root, rounds=16)
         except Exception:
-            pass
+            traceback.print_exc()
         GtkPump.reset_all()

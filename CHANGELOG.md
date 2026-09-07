@@ -65,6 +65,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ``WebView`` teardown / snapshot paths no longer use silent
   ``except Exception: pass`` — cleanup failures log via traceback; ``get_state``
   and poll probes set explicit defaults
+- macOS host best-effort layout / focus paths
+  (``tkwry/_macos.py``) log via traceback instead of silent
+  ``except Exception: pass``
+- Integration teardown helpers log cleanup failures instead of silent
+  ``except Exception: pass``
 - Clearing ``set_context_menu(None)`` / ``set_on_context_menu(None)`` also
   drops the page-load Started latch so listening does not stay on forever
 - Flagship ``tkwry_browser``: Cmd/Ctrl+L takes chrome focus (and releases
