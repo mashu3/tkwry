@@ -2396,10 +2396,9 @@ class WebView(WebViewRpcMixin):
     def set_on_navigation(self, handler: NavigationHandler | None) -> None:
         """Register a navigation allow/deny hook (Tk main thread; WebKit waits).
 
-        The handler receives a :class:`~tkwry.NavigationEvent` or, for legacy
-        code, the URL ``str``. Return ``True`` to allow or ``False`` to block.
-        When set, the handler replaces built-in ``navigation_allow`` /
-        ``open_external`` policy for navigations.
+        The handler receives a :class:`~tkwry.NavigationEvent`. Return ``True``
+        to allow or ``False`` to block. When set, the handler replaces built-in
+        ``navigation_allow`` / ``open_external`` policy for navigations.
         """
         self._require_not_destroyed("set_on_navigation")
         if handler is not None and self._creation_error is not None:
@@ -3220,7 +3219,7 @@ class WebView(WebViewRpcMixin):
         handler = self._on_navigation
         if handler is not None:
             try:
-                result = call_navigation_handler(handler, event, url=url)
+                result = call_navigation_handler(handler, event)
             except Exception:
                 traceback.print_exc()
                 return False

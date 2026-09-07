@@ -53,7 +53,7 @@ def _equivalence_case(
 @pytest.mark.parametrize(
     ("ctor_kw", "setter", "handler"),
     [
-        _equivalence_case("on_navigation", "set_on_navigation", lambda _url: True),
+        _equivalence_case("on_navigation", "set_on_navigation", lambda _event: True),
         _equivalence_case(
             "navigation_policy",
             "set_navigation_policy",
@@ -127,7 +127,7 @@ def test_handler_ctor_matches_setter(
 @pytest.mark.parametrize(
     ("setter", "register"),
     [
-        ("set_on_navigation", lambda w: w.set_on_navigation(lambda _u: True)),
+        ("set_on_navigation", lambda w: w.set_on_navigation(lambda _event: True)),
         (
             "set_navigation_policy",
             lambda w: w.set_navigation_policy(lambda _e: True),

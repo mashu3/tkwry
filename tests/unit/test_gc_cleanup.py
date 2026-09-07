@@ -518,7 +518,7 @@ def test_wakeup_pipe_setter_churn_does_not_inflate_users(tk_root) -> None:
     web = WebView(frame, width=400, height=300)
     web._ensure_tk_wakeup_pipe()
 
-    handler = lambda _url: True  # noqa: E731
+    handler = lambda _event: True  # noqa: E731
     for _ in range(5):
         web.set_on_navigation(handler)
 

@@ -13,7 +13,12 @@ from support.tk import (
     wait_until,
 )
 
-from tkwry import WebView, WebViewDestroyedError, WebViewNotReadyError
+from tkwry import (
+    NavigationEvent,
+    WebView,
+    WebViewDestroyedError,
+    WebViewNotReadyError,
+)
 
 
 def test_initial_size_creates_without_pack(tk_root) -> None:
@@ -239,8 +244,8 @@ def test_set_on_navigation_none_clears_handler(tk_root) -> None:
 
     calls: list[str] = []
 
-    def handler(url: str) -> bool:
-        calls.append(url)
+    def handler(event: NavigationEvent) -> bool:
+        calls.append(event.url)
         return False
 
     web.set_on_navigation(handler)
@@ -497,7 +502,7 @@ def test_navigation_callback_can_clear_handler(tk_root) -> None:
     layout_bare_frame(frame, width=400, height=300)
     assert web.wait_until_ready(timeout=10.0)
 
-    def handler(url: str) -> bool:
+    def handler(_event: NavigationEvent) -> bool:
         web.set_on_navigation(None)
         return True
 
@@ -515,7 +520,7 @@ def test_navigation_callback_can_destroy_without_deadlock(tk_root) -> None:
     layout_bare_frame(frame, width=400, height=300)
     assert web.wait_until_ready(timeout=10.0)
 
-    def handler(url: str) -> bool:
+    def handler(_event: NavigationEvent) -> bool:
         web.destroy()
         return False
 

@@ -9,7 +9,12 @@ from unittest.mock import MagicMock
 import pytest
 from support.linux import noop_linux_runtime
 
-from tkwry import NewWindowResponse, WebView, WebViewNavigationError
+from tkwry import (
+    NavigationEvent,
+    NewWindowResponse,
+    WebView,
+    WebViewNavigationError,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -34,9 +39,9 @@ def test_native_navigation_runs_handler_on_tk_thread(tk_root) -> None:
     _frame, web = _make_web(tk_root)
     seen: list[int] = []
 
-    def handler(url: str) -> bool:
+    def handler(event: NavigationEvent) -> bool:
         seen.append(threading.get_ident())
-        return url.startswith("https://")
+        return event.url.startswith("https://")
 
     web.set_on_navigation(handler)
     web._ensure_tk_wakeup_pipe()
@@ -103,7 +108,7 @@ def test_needs_event_poll_when_navigation_handler_set(tk_root) -> None:
     _frame, web = _make_web(tk_root)
     try:
         assert web._needs_event_poll() is False
-        web.set_on_navigation(lambda _url: True)
+        web.set_on_navigation(lambda _event: True)
         assert web._needs_event_poll() is True
     finally:
         web.destroy()
@@ -115,9 +120,9 @@ def test_sync_hook_timeout_skips_late_handler(tk_root, monkeypatch) -> None:
     _frame, web = _make_web(tk_root)
     seen: list[str] = []
 
-    def slow_handler(url: str) -> bool:
+    def slow_handler(event: NavigationEvent) -> bool:
         time.sleep(0.2)
-        seen.append(url)
+        seen.append(event.url)
         return True
 
     web.set_on_navigation(slow_handler)
@@ -177,7 +182,7 @@ def test_sync_hook_timeout_recycles_event_only_after_drain(
     monkeypatch.setattr(web, "_borrow_sync_hook_event", track_borrow)
     monkeypatch.setattr(web, "_return_sync_hook_event", track_return)
 
-    def slow_handler(url: str) -> bool:
+    def slow_handler(_event: NavigationEvent) -> bool:
         time.sleep(0.2)
         return True
 
@@ -218,7 +223,7 @@ def test_sync_hook_timeout_signals_navigation_error(tk_root, monkeypatch) -> Non
     fired: list[object] = []
     web.bind("<<WebViewNavigationFailed>>", lambda evt: fired.append(evt))
 
-    def slow_handler(url: str) -> bool:
+    def slow_handler(_event: NavigationEvent) -> bool:
         time.sleep(0.2)
         return True
 
@@ -326,7 +331,7 @@ def test_navigation_deferred_load_avoids_sync_hook_deadlock(
     web._webview = native
     monkeypatch.setattr(web, "_layout_ready", lambda: True, raising=False)
 
-    def handler(url: str) -> bool:
+    def handler(_event: NavigationEvent) -> bool:
         web.load_url("https://example.com/deferred")
         return True
 
@@ -349,7 +354,7 @@ def test_sync_hook_timeout_only_before_handler_starts(
     _frame, web = _make_web(tk_root)
     started = threading.Event()
 
-    def slow_handler(url: str) -> bool:
+    def slow_handler(_event: NavigationEvent) -> bool:
         started.set()
         time.sleep(0.35)
         return True

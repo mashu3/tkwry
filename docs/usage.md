@@ -471,9 +471,7 @@ web = WebView(
     url="https://example.com",
     on_page_load=lambda evt, url: print(evt, url),
     on_title_changed=lambda title: root.title(title),
-    # ``on_navigation`` / ``set_navigation_policy``: one-arg handlers named
-    # ``event`` (or annotated ``NavigationEvent``) receive the event object;
-    # legacy ``url: str`` handlers still get the URL string only.
+    # ``on_navigation`` / ``set_navigation_policy``: one-arg ``NavigationEvent``.
     on_navigation=lambda event: event.url.startswith("https://"),
     permission_handler=lambda kind: (
         PermissionResponse.Allow
@@ -735,9 +733,9 @@ Provisional callback exceptions: ``on_callback_error`` (see
 ## Canonical paths
 
 Short map of **preferred** call shapes, how to **observe** failures, and
-**intentional** asymmetries (not bugs). Prefer one style per app. Renames /
-Event unification that would break callers wait for a later cut — this
-section documents what to use **today**.
+**intentional** asymmetries (not bugs). Prefer one style per app. Remaining
+dual call shapes (download two-arg, ``on_new_window`` ``str``) will be removed
+later — this section documents what to use **today**.
 
 ### Recommended call shapes
 
@@ -745,7 +743,7 @@ section documents what to use **today**.
 |------|--------|---------|
 | JS → Python request/response | ``@web.expose`` / ``expose`` + ``window.tkwry.call`` | ``@web.rpc`` (alias); raw ``set_ipc_handler`` only for fire-and-forget strings |
 | Download allow / dest | One-arg ``Download``: ``on_download=lambda d: d.save("./downloads")`` | Legacy ``(url, suggested_dest)`` |
-| Navigation allow/deny | ``set_navigation_policy`` / one-arg ``NavigationEvent`` (``event.url``, …) | Legacy ``on_navigation`` ``str`` URL |
+| Navigation allow/deny | ``set_navigation_policy`` / ``on_navigation`` with one-arg ``NavigationEvent`` (``event.url``, …) | — |
 | Create failure | ``when_failed(cb)`` / ``<<WebViewCreateFailed>>`` | Constructor ``on_creation_failed=`` (same callback list) |
 
 Details: [IPC / RPC](rpc.md), [Navigation / lifecycle](#navigation--lifecycle-callbacks).

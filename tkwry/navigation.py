@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import TypeAlias
 
 NavigationPolicyHandler: TypeAlias = Callable[["NavigationEvent"], bool]
-NavigationHandler: TypeAlias = (
-    Callable[["NavigationEvent"], bool] | Callable[[str], bool]
-)
+NavigationHandler: TypeAlias = Callable[["NavigationEvent"], bool]
 
 
 class NavigationType(str, Enum):
@@ -55,12 +52,8 @@ class NavigationEvent:
 def call_navigation_handler(
     handler: NavigationHandler,
     event: NavigationEvent,
-    *,
-    url: str,
 ) -> bool:
-    """Invoke *handler* using ``NavigationEvent`` or legacy ``url`` form."""
-    if _navigation_handler_uses_url(handler):
-        return handler(url)
+    """Invoke *handler* with *event*."""
     return handler(event)
 
 
@@ -68,33 +61,4 @@ def coerce_navigation_result(result: object) -> bool:
     """Return *result* when it is a ``bool``; otherwise ``False``."""
     if type(result) is bool:
         return result
-    return False
-
-
-def _navigation_handler_uses_url(handler: NavigationHandler) -> bool:
-    try:
-        signature = inspect.signature(handler)
-    except (TypeError, ValueError):
-        return True
-    params = [
-        parameter
-        for parameter in signature.parameters.values()
-        if parameter.kind
-        in (
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        )
-    ]
-    if len(params) != 1:
-        return True
-    param = params[0]
-    if param.name == "event":
-        return False
-    annotation = param.annotation
-    if annotation is inspect.Parameter.empty:
-        return True
-    if annotation is str:
-        return True
-    if isinstance(annotation, str) and annotation in ("str", "builtins.str"):
-        return True
     return False

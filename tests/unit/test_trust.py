@@ -49,7 +49,7 @@ def test_app_locks_navigation_and_new_window(tk_root, tmp_path: Path) -> None:
         web._invoke_new_window_handler("https://evil.example/")
         is NewWindowResponse.Deny
     )
-    web.set_on_navigation(lambda url: url.startswith("https://"))
+    web.set_on_navigation(lambda event: event.url.startswith("https://"))
     assert web._invoke_navigation_handler("https://allowed.example/") is True
     web.destroy()
     frame.destroy()
@@ -128,7 +128,7 @@ def test_custom_navigation_handler_skips_open_external(
         frame,
         app=_app_dir(tmp_path),
         open_external=True,
-        on_navigation=lambda _url: False,
+        on_navigation=lambda _event: False,
     )
     assert web._invoke_navigation_handler("https://evil.example/") is False
     tk_root.update()

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- ``on_navigation`` / ``set_on_navigation`` handlers take
+  :class:`~tkwry.NavigationEvent` only (bare URL ``str`` form removed; no
+  signature sniffing)
+
 ### CI
 
 - Codecov uploads folded into the existing **macOS** / **Windows** CI test jobs
