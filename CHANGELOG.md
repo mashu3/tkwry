@@ -57,6 +57,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Dual ctor/setter equivalence covers ``on_ipc``, ``on_download_started``,
   and ``on_download_failed`` (including clear-to-default)
+- Unit / integration fixtures use pytest ``tmp_path`` (or non-``/tmp``
+  ``file://`` URLs) instead of hardcoded ``/tmp/...`` paths
 
 ### Fixed
 

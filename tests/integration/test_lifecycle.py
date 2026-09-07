@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import threading
+from pathlib import Path
 
 import pytest
 from support.tk import (
@@ -288,7 +289,7 @@ def test_set_on_title_changed_none_clears_handler(tk_root) -> None:
     frame.destroy()
 
 
-def test_set_on_drag_drop_none_clears_handler(tk_root) -> None:
+def test_set_on_drag_drop_none_clears_handler(tk_root, tmp_path: Path) -> None:
     from tkwry import DragDropEvent
 
     frame = bare_frame(tk_root)
@@ -297,17 +298,19 @@ def test_set_on_drag_drop_none_clears_handler(tk_root) -> None:
     assert web.wait_until_ready(timeout=10.0)
 
     received: list[tuple] = []
+    path_a = str(tmp_path / "a.txt")
+    path_b = str(tmp_path / "b.txt")
 
     def handler(evt, paths, pos) -> None:
         received.append((evt, paths, pos))
 
     web.set_on_drag_drop(handler)
-    web._native_drag_drop(DragDropEvent.Drop, ["/tmp/a.txt"], (1, 2))
+    web._native_drag_drop(DragDropEvent.Drop, [path_a], (1, 2))
     pump(tk_root, steps=10)
     assert len(received) == 1
 
     web.set_on_drag_drop(None)
-    web._native_drag_drop(DragDropEvent.Drop, ["/tmp/b.txt"], (3, 4))
+    web._native_drag_drop(DragDropEvent.Drop, [path_b], (3, 4))
     pump(tk_root, steps=10)
     assert len(received) == 1
     assert web.native is not None

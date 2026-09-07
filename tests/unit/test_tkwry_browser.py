@@ -39,21 +39,36 @@ def test_version_tuple_parses_and_rejects_garbage(browser) -> None:
     assert browser._version_tuple("nope") == (0, 0, 0)
 
 
-def test_require_tkwry_rejects_older_version(browser, monkeypatch) -> None:
-    fake = SimpleNamespace(__version__="0.1.7", __file__="/tmp/fake/tkwry")
+def test_require_tkwry_rejects_older_version(
+    browser, monkeypatch, tmp_path: Path
+) -> None:
+    fake = SimpleNamespace(
+        __version__="0.1.7",
+        __file__=str(tmp_path / "fake" / "tkwry"),
+    )
     monkeypatch.setitem(sys.modules, "tkwry", fake)
     with pytest.raises(SystemExit, match=r"tkwry >= 0\.1\.8"):
         browser._require_tkwry()
 
 
-def test_require_tkwry_skips_unknown_frozen_version(browser, monkeypatch) -> None:
-    fake = SimpleNamespace(__version__="0.0.0", __file__="/tmp/fake/tkwry")
+def test_require_tkwry_skips_unknown_frozen_version(
+    browser, monkeypatch, tmp_path: Path
+) -> None:
+    fake = SimpleNamespace(
+        __version__="0.0.0",
+        __file__=str(tmp_path / "fake" / "tkwry"),
+    )
     monkeypatch.setitem(sys.modules, "tkwry", fake)
     browser._require_tkwry()  # must not SystemExit
 
 
-def test_require_tkwry_skips_gate_when_frozen(browser, monkeypatch) -> None:
-    fake = SimpleNamespace(__version__="0.1.7", __file__="/tmp/fake/tkwry")
+def test_require_tkwry_skips_gate_when_frozen(
+    browser, monkeypatch, tmp_path: Path
+) -> None:
+    fake = SimpleNamespace(
+        __version__="0.1.7",
+        __file__=str(tmp_path / "fake" / "tkwry"),
+    )
     monkeypatch.setitem(sys.modules, "tkwry", fake)
     monkeypatch.setattr(browser.sys, "frozen", True, raising=False)
     browser._require_tkwry()  # bundled older metadata must not abort the exe
@@ -101,7 +116,7 @@ def test_normalize_input(browser) -> None:
 def test_security_indicator(browser) -> None:
     assert browser.security_indicator("https://x")[0] == "secure"
     assert browser.security_indicator("http://x")[0] == "insecure"
-    assert browser.security_indicator("file:///tmp/a")[0] == "local"
+    assert browser.security_indicator("file:///no-such-path/a")[0] == "local"
     assert browser.security_indicator("tkwry://localhost/")[0] == "local"
     assert browser.security_indicator("about:blank")[0] == "blank"
     assert browser.security_indicator(None)[0] == "unknown"

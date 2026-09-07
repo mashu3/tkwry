@@ -797,13 +797,14 @@ def test_title_changed_delivers_on_document_title_set(tk_root) -> None:
     frame.destroy()
 
 
-def test_drag_drop_native_queues_without_blocking(tk_root) -> None:
+def test_drag_drop_native_queues_without_blocking(tk_root, tmp_path: Path) -> None:
     """Queue Enter/Drop on the Tk thread (same queue OS drops use).
 
     Full Finder/Explorer drops cannot be synthesized reliably in CI; this
     covers enqueue -> poll -> Python handler on that path.
     """
     received: list[tuple] = []
+    drop_path = str(tmp_path / "a.txt")
 
     frame = host_frame(tk_root)
     web = WebView(frame, html="<p>dnd</p>")
@@ -815,9 +816,9 @@ def test_drag_drop_native_queues_without_blocking(tk_root) -> None:
 
     web.set_on_drag_drop(handler)
 
-    web._native_drag_drop(DragDropEvent.Enter, ["/tmp/a.txt"], (1, 2))
+    web._native_drag_drop(DragDropEvent.Enter, [drop_path], (1, 2))
     web._native_drag_drop(DragDropEvent.Over, [], (3, 4))
-    web._native_drag_drop(DragDropEvent.Drop, ["/tmp/a.txt"], (5, 6))
+    web._native_drag_drop(DragDropEvent.Drop, [drop_path], (5, 6))
 
     pump(tk_root, steps=30)
     assert wait_until(tk_root, lambda: len(received) >= 2, steps=100), (

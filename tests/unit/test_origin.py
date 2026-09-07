@@ -30,7 +30,7 @@ def test_origin_of_common_forms() -> None:
     assert origin_of("tkwry://localhost/index.html") == "tkwry://localhost"
     assert origin_of("https://tkwry.localhost/app.js") == "https://tkwry.localhost"
     assert origin_of("http://tkwry.localhost/app.js") == "http://tkwry.localhost"
-    assert origin_of("file:///tmp/index.html") == "file://"
+    assert origin_of("file:///no-such-path/index.html") == "file://"
     assert origin_of("data:text/html,hi") == "null"
     assert origin_of("about:srcdoc") == "about:srcdoc"
 
@@ -108,7 +108,7 @@ def test_app_and_untrusted_navigation_policy() -> None:
     assert app_navigation_allowed("http://tkwry.localhost/x")
     assert app_navigation_allowed("about:blank")
     assert not app_navigation_allowed("https://example.com/")
-    assert not app_navigation_allowed("file:///tmp/x")
+    assert not app_navigation_allowed("file:///no-such-path/x")
     assert not app_navigation_allowed("data:text/html,<p>x</p>")
     assert not app_navigation_allowed("blob:https://example.com/uuid")
 
@@ -118,14 +118,14 @@ def test_app_and_untrusted_navigation_policy() -> None:
     assert not untrusted_navigation_allowed("tkwry://localhost/")
     assert not untrusted_navigation_allowed("https://tkwry.localhost/")
     assert not untrusted_navigation_allowed("http://tkwry.localhost/")
-    assert not untrusted_navigation_allowed("file:///tmp/x")
+    assert not untrusted_navigation_allowed("file:///no-such-path/x")
     assert not untrusted_navigation_allowed("javascript:alert(1)")
 
 
 def test_is_external_http_url() -> None:
     assert is_external_http_url("https://example.com/x")
     assert is_external_http_url("http://localhost:8080/")
-    assert not is_external_http_url("file:///tmp/x")
+    assert not is_external_http_url("file:///no-such-path/x")
     assert not is_external_http_url("javascript:alert(1)")
     assert not is_external_http_url("https://tkwry.localhost/index.html")
     assert not is_external_http_url("http://tkwry.localhost/index.html")
@@ -155,6 +155,6 @@ def test_open_in_browser_http_only(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("tkwry._origin.webbrowser.open", fake_open)
     assert open_in_browser("https://example.com/x") is True
     assert opened == ["https://example.com/x"]
-    assert open_in_browser("file:///tmp/x") is False
+    assert open_in_browser("file:///no-such-path/x") is False
     assert open_in_browser("https://tkwry.localhost/x") is False
     assert opened == ["https://example.com/x"]

@@ -122,14 +122,14 @@ def test_webview_rejects_profile_with_session(tk_root, tmp_path: Path) -> None:
         WebView(frame, html="<p>x</p>", session=session, profile="a")
 
 
-def test_webview_rejects_profile_with_user_data_dir(tk_root) -> None:
+def test_webview_rejects_profile_with_user_data_dir(tk_root, tmp_path: Path) -> None:
     frame = tk.Frame(tk_root)
     with pytest.raises(ValueError, match="only one of"):
         WebView(
             frame,
             html="<p>x</p>",
             profile="a",
-            user_data_dir="/tmp/data",
+            user_data_dir=str(tmp_path / "data"),
         )
 
 

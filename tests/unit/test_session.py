@@ -74,11 +74,13 @@ def test_native_session_exposed() -> None:
 
 def test_session_bind_app_root_mismatch(tmp_path: Path) -> None:
     session = WebSession(data_directory=tmp_path / "profile")
-    session._bind_app_root("/tmp/app-a")
-    session._bind_app_root("/tmp/app-a")
-    assert session.app_root == Path("/tmp/app-a")
+    app_a = tmp_path / "app-a"
+    app_b = tmp_path / "app-b"
+    session._bind_app_root(str(app_a))
+    session._bind_app_root(str(app_a))
+    assert session.app_root == app_a
     with pytest.raises(ValueError, match="same app="):
-        session._bind_app_root("/tmp/app-b")
+        session._bind_app_root(str(app_b))
 
 
 def test_ephemeral_session_rejects_distinct_app_roots(tmp_path: Path) -> None:

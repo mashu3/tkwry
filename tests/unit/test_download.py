@@ -25,31 +25,36 @@ def _make_web(tk_root, **kwargs: object) -> WebView:
     return WebView(frame, **kwargs)
 
 
-def test_trusted_allows_download_by_default(tk_root) -> None:
+def _suggested(tmp_path: Path, name: str = "a.zip") -> str:
+    """Absolute download path under pytest's private temp dir (not /tmp)."""
+    return str(tmp_path / name)
+
+
+def test_trusted_allows_download_by_default(tk_root, tmp_path: Path) -> None:
     web = _make_web(tk_root)
     try:
         assert web._invoke_download_handler(
-            "https://example.com/a.zip", "/tmp/a.zip"
+            "https://example.com/a.zip", _suggested(tmp_path)
         ) == (True, None)
         assert web._native_download_started(
-            "https://example.com/a.zip", "/tmp/a.zip"
+            "https://example.com/a.zip", _suggested(tmp_path)
         ) == (True, None)
     finally:
         web.destroy()
 
 
-def test_untrusted_denies_download_by_default(tk_root) -> None:
+def test_untrusted_denies_download_by_default(tk_root, tmp_path: Path) -> None:
     web = _make_web(tk_root, untrusted=True, url="https://example.com")
     try:
         assert web.download_allow is None
         assert web._invoke_download_handler(
-            "https://example.com/a.zip", "/tmp/a.zip"
+            "https://example.com/a.zip", _suggested(tmp_path)
         ) == (False, None)
     finally:
         web.destroy()
 
 
-def test_download_allow_filters_urls(tk_root) -> None:
+def test_download_allow_filters_urls(tk_root, tmp_path: Path) -> None:
     web = _make_web(
         tk_root,
         download_allow=["https://cdn.example.com"],
@@ -57,10 +62,10 @@ def test_download_allow_filters_urls(tk_root) -> None:
     try:
         assert web.download_allow == frozenset({"https://cdn.example.com"})
         assert web._invoke_download_handler(
-            "https://cdn.example.com/a.zip", "/tmp/a.zip"
+            "https://cdn.example.com/a.zip", _suggested(tmp_path)
         ) == (True, None)
         assert web._invoke_download_handler(
-            "https://evil.example/a.zip", "/tmp/a.zip"
+            "https://evil.example/a.zip", _suggested(tmp_path)
         ) == (False, None)
     finally:
         web.destroy()
@@ -71,23 +76,23 @@ def test_on_download_can_set_absolute_dest(tk_root, tmp_path: Path) -> None:
     web = _make_web(tk_root, on_download=lambda _d: dest)
     try:
         assert web._invoke_download_handler(
-            "https://example.com/a.zip", "/tmp/a.zip"
+            "https://example.com/a.zip", _suggested(tmp_path)
         ) == (True, str(dest))
     finally:
         web.destroy()
 
 
-def test_on_download_false_cancels(tk_root) -> None:
+def test_on_download_false_cancels(tk_root, tmp_path: Path) -> None:
     web = _make_web(tk_root, on_download=lambda _d: False)
     try:
         assert web._invoke_download_handler(
-            "https://example.com/a.zip", "/tmp/a.zip"
+            "https://example.com/a.zip", _suggested(tmp_path)
         ) == (False, None)
     finally:
         web.destroy()
 
 
-def test_untrusted_on_download_can_allow(tk_root) -> None:
+def test_untrusted_on_download_can_allow(tk_root, tmp_path: Path) -> None:
     web = _make_web(
         tk_root,
         untrusted=True,
@@ -96,24 +101,24 @@ def test_untrusted_on_download_can_allow(tk_root) -> None:
     )
     try:
         assert web._invoke_download_handler(
-            "https://example.com/a.zip", "/tmp/a.zip"
+            "https://example.com/a.zip", _suggested(tmp_path)
         ) == (True, None)
     finally:
         web.destroy()
 
 
-def test_relative_download_dest_is_denied(tk_root) -> None:
+def test_relative_download_dest_is_denied(tk_root, tmp_path: Path) -> None:
     web = _make_web(tk_root, on_download=lambda _d: "relative.bin")
     try:
         assert web._invoke_download_handler(
-            "https://example.com/a.zip", "/tmp/a.zip"
+            "https://example.com/a.zip", _suggested(tmp_path)
         ) == (False, None)
     finally:
         web.destroy()
 
 
 def test_on_download_expands_user_home_dest(
-    tk_root, monkeypatch: pytest.MonkeyPatch
+    tk_root, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     expanded = "/Users/fake/Downloads/a.zip"
     monkeypatch.setattr(
@@ -123,20 +128,24 @@ def test_on_download_expands_user_home_dest(
     web = _make_web(tk_root, on_download=lambda _d: "~/Downloads/a.zip")
     try:
         assert web._invoke_download_handler(
-            "https://example.com/a.zip", "/tmp/a.zip"
+            "https://example.com/a.zip", _suggested(tmp_path)
         ) == (True, expanded)
     finally:
         web.destroy()
 
 
-def test_dangerous_download_schemes_denied(tk_root) -> None:
+def test_dangerous_download_schemes_denied(tk_root, tmp_path: Path) -> None:
     web = _make_web(tk_root)
     try:
-        assert web._invoke_download_handler("javascript:alert(1)", "/tmp/x") == (
+        assert web._invoke_download_handler(
+            "javascript:alert(1)", _suggested(tmp_path, "x")
+        ) == (
             False,
             None,
         )
-        assert web._invoke_download_handler("mailto:user@example.com", "/tmp/x") == (
+        assert web._invoke_download_handler(
+            "mailto:user@example.com", _suggested(tmp_path, "x")
+        ) == (
             False,
             None,
         )
@@ -180,12 +189,12 @@ def test_download_complete_handler_keeps_poll(tk_root) -> None:
         web.destroy()
 
 
-def test_download_complete_wakeup_without_handler(tk_root) -> None:
+def test_download_complete_wakeup_without_handler(tk_root, tmp_path: Path) -> None:
     """Complete arrives via wakeup; no idle ``_webview`` poll latch."""
     web = _make_web(tk_root)
     native = MagicMock()
     native.drain_download_complete_events.return_value = [
-        ("https://example.com/a.zip", "/tmp/a.zip", True)
+        ("https://example.com/a.zip", _suggested(tmp_path), True)
     ]
     web._webview = native
     fired: list[str] = []
@@ -199,8 +208,8 @@ def test_download_complete_wakeup_without_handler(tk_root) -> None:
         assert fired == ["ok"]
         assert web.last_download == Download(
             url="https://example.com/a.zip",
-            suggested_dest="/tmp/a.zip",
-            dest="/tmp/a.zip",
+            suggested_dest=_suggested(tmp_path),
+            dest=_suggested(tmp_path),
             success=True,
         )
         assert web._needs_event_poll() is False
@@ -211,7 +220,9 @@ def test_download_complete_wakeup_without_handler(tk_root) -> None:
         web.destroy()
 
 
-def test_download_complete_after_poll_without_createfilehandler(tk_root) -> None:
+def test_download_complete_after_poll_without_createfilehandler(
+    tk_root, tmp_path: Path
+) -> None:
     """No createfilehandler — after-poll + pipe wake still delivers."""
     import os
     import time
@@ -220,7 +231,7 @@ def test_download_complete_after_poll_without_createfilehandler(tk_root) -> None
 
     web = _make_web(tk_root)
     native = MagicMock()
-    pending = [[("https://example.com/a.zip", "/tmp/a.zip", True)]]
+    pending = [[("https://example.com/a.zip", _suggested(tmp_path), True)]]
 
     def drain_complete() -> list[tuple[str, str | None, bool]]:
         return pending.pop(0) if pending else []
@@ -250,8 +261,8 @@ def test_download_complete_after_poll_without_createfilehandler(tk_root) -> None
         assert fired == ["ok"]
         assert web.last_download == Download(
             url="https://example.com/a.zip",
-            suggested_dest="/tmp/a.zip",
-            dest="/tmp/a.zip",
+            suggested_dest=_suggested(tmp_path),
+            dest=_suggested(tmp_path),
             success=True,
         )
         assert web._needs_event_poll() is False
@@ -286,7 +297,7 @@ def test_ensure_tk_wakeup_fileevent_falls_back_without_createfilehandler(
 
 
 def test_download_complete_poll_path_without_handler(
-    tk_root, monkeypatch: pytest.MonkeyPatch
+    tk_root, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Handler-less complete still drains when an unrelated poll is already active."""
     web = _make_web(tk_root)
@@ -305,7 +316,7 @@ def test_download_complete_poll_path_without_handler(
     monkeypatch.setattr(web._frame, "after", after)
     native = MagicMock()
     # macOS poll also wakes → ``_wake_async_events`` then poll deliver; one batch.
-    pending = [[("https://example.com/b.zip", "/tmp/b.zip", True)]]
+    pending = [[("https://example.com/b.zip", _suggested(tmp_path, "b.zip"), True)]]
 
     def drain_complete() -> list[tuple[str, str | None, bool]]:
         return pending.pop(0) if pending else []
@@ -321,8 +332,8 @@ def test_download_complete_poll_path_without_handler(
         assert fired == ["ok"]
         assert web.last_download == Download(
             url="https://example.com/b.zip",
-            suggested_dest="/tmp/b.zip",
-            dest="/tmp/b.zip",
+            suggested_dest=_suggested(tmp_path, "b.zip"),
+            dest=_suggested(tmp_path, "b.zip"),
             success=True,
         )
         assert web._event_poll_active is False
@@ -331,12 +342,12 @@ def test_download_complete_poll_path_without_handler(
         web.destroy()
 
 
-def test_download_complete_delivery(tk_root) -> None:
+def test_download_complete_delivery(tk_root, tmp_path: Path) -> None:
     web = _make_web(tk_root)
     events: list[tuple[Download, bool]] = []
     native = MagicMock()
     native.drain_download_complete_events.return_value = [
-        ("https://example.com/a.zip", "/tmp/a.zip", True)
+        ("https://example.com/a.zip", _suggested(tmp_path), True)
     ]
     web._webview = native
     web.set_on_download_complete(
@@ -348,8 +359,8 @@ def test_download_complete_delivery(tk_root) -> None:
             (
                 Download(
                     url="https://example.com/a.zip",
-                    suggested_dest="/tmp/a.zip",
-                    dest="/tmp/a.zip",
+                    suggested_dest=_suggested(tmp_path),
+                    dest=_suggested(tmp_path),
                     success=True,
                 ),
                 True,
@@ -357,8 +368,8 @@ def test_download_complete_delivery(tk_root) -> None:
         ]
         assert web.last_download == Download(
             url="https://example.com/a.zip",
-            suggested_dest="/tmp/a.zip",
-            dest="/tmp/a.zip",
+            suggested_dest=_suggested(tmp_path),
+            dest=_suggested(tmp_path),
             success=True,
         )
     finally:
@@ -366,11 +377,13 @@ def test_download_complete_delivery(tk_root) -> None:
         web.destroy()
 
 
-def test_download_complete_virtual_events_without_handler(tk_root) -> None:
+def test_download_complete_virtual_events_without_handler(
+    tk_root, tmp_path: Path
+) -> None:
     web = _make_web(tk_root)
     native = MagicMock()
     native.drain_download_complete_events.return_value = [
-        ("https://example.com/a.zip", "/tmp/a.zip", True)
+        ("https://example.com/a.zip", _suggested(tmp_path), True)
     ]
     web._webview = native
     fired: list[str] = []
@@ -382,8 +395,8 @@ def test_download_complete_virtual_events_without_handler(tk_root) -> None:
         assert fired == ["ok"]
         assert web.last_download == Download(
             url="https://example.com/a.zip",
-            suggested_dest="/tmp/a.zip",
-            dest="/tmp/a.zip",
+            suggested_dest=_suggested(tmp_path),
+            dest=_suggested(tmp_path),
             success=True,
         )
     finally:
@@ -468,7 +481,7 @@ def test_in_flight_downloads_tracks_start_until_complete(
     try:
         assert web.in_flight_downloads == ()
         assert web._native_download_started(
-            "https://example.com/a.zip", "/tmp/suggested.zip"
+            "https://example.com/a.zip", _suggested(tmp_path, "suggested.zip")
         ) == (True, str(dest))
         assert web.in_flight_downloads == (
             InFlightDownload("https://example.com/a.zip", str(dest)),
@@ -486,11 +499,11 @@ def test_in_flight_downloads_tracks_start_until_complete(
         web.destroy()
 
 
-def test_in_flight_downloads_omits_denied_start(tk_root) -> None:
+def test_in_flight_downloads_omits_denied_start(tk_root, tmp_path: Path) -> None:
     web = _make_web(tk_root, on_download=lambda _d: False)
     try:
         assert web._native_download_started(
-            "https://example.com/a.zip", "/tmp/a.zip"
+            "https://example.com/a.zip", _suggested(tmp_path)
         ) == (False, None)
         assert web.in_flight_downloads == ()
     finally:
@@ -501,7 +514,7 @@ def test_in_flight_downloads_cleared_on_destroy(tk_root, tmp_path: Path) -> None
     dest = tmp_path / "file.bin"
     web = _make_web(tk_root, on_download=lambda _d: dest)
     try:
-        web._native_download_started("https://example.com/a.zip", "/tmp/a.zip")
+        web._native_download_started("https://example.com/a.zip", _suggested(tmp_path))
         assert web.in_flight_downloads
         web.destroy()
         assert web.in_flight_downloads == ()
@@ -513,7 +526,7 @@ def test_in_flight_downloads_cleared_on_destroy(tk_root, tmp_path: Path) -> None
 def test_download_save_returns_absolute_path(tmp_path: Path) -> None:
     download = Download(
         url="https://example.com/report.pdf",
-        suggested_dest="/tmp/report.pdf",
+        suggested_dest=_suggested(tmp_path, "report.pdf"),
     )
     saved = download.save(tmp_path / "downloads")
     assert saved == str((tmp_path / "downloads" / "report.pdf").resolve())
@@ -541,7 +554,7 @@ def test_on_download_accepts_download_object(tk_root, tmp_path: Path) -> None:
     web = _make_web(tk_root, on_download=handler)
     try:
         allowed, path = web._invoke_download_handler(
-            "https://example.com/a.zip", "/tmp/a.zip"
+            "https://example.com/a.zip", _suggested(tmp_path)
         )
         assert allowed is True
         assert path == str((tmp_path / "out" / "a.zip").resolve())
@@ -561,7 +574,7 @@ def test_download_started_event_and_handler(tk_root, tmp_path: Path) -> None:
     fired: list[str] = []
     web.bind("<<WebViewDownloadStarted>>", lambda _evt: fired.append("started"))
     try:
-        web._native_download_started("https://example.com/a.zip", "/tmp/a.zip")
+        web._native_download_started("https://example.com/a.zip", _suggested(tmp_path))
         assert fired == ["started"]
         assert started[0].dest == str(dest)
         assert web.last_started_download == started[0]
@@ -569,7 +582,9 @@ def test_download_started_event_and_handler(tk_root, tmp_path: Path) -> None:
         web.destroy()
 
 
-def test_download_started_notify_only_wires_native_and_fires(tk_root) -> None:
+def test_download_started_notify_only_wires_native_and_fires(
+    tk_root, tmp_path: Path
+) -> None:
     started: list[Download] = []
     web = _make_web(tk_root)
     native = MagicMock()
@@ -580,7 +595,7 @@ def test_download_started_notify_only_wires_native_and_fires(tk_root) -> None:
         web.set_on_download_started(lambda item: started.append(item))
         native.set_on_download_started.assert_called_once()
         allowed, path = web._native_download_started(
-            "https://example.com/a.zip", "/tmp/a.zip"
+            "https://example.com/a.zip", _suggested(tmp_path)
         )
         assert allowed is True
         assert path is None
@@ -593,11 +608,11 @@ def test_download_started_notify_only_wires_native_and_fires(tk_root) -> None:
         web.destroy()
 
 
-def test_download_failed_handler(tk_root) -> None:
+def test_download_failed_handler(tk_root, tmp_path: Path) -> None:
     web = _make_web(tk_root)
     native = MagicMock()
     native.drain_download_complete_events.return_value = [
-        ("https://example.com/a.zip", "/tmp/a.zip", False)
+        ("https://example.com/a.zip", _suggested(tmp_path), False)
     ]
     web._webview = native
     failed: list[Download] = []
@@ -609,8 +624,8 @@ def test_download_failed_handler(tk_root) -> None:
         assert failed == [
             Download(
                 url="https://example.com/a.zip",
-                suggested_dest="/tmp/a.zip",
-                dest="/tmp/a.zip",
+                suggested_dest=_suggested(tmp_path),
+                dest=_suggested(tmp_path),
                 success=False,
             )
         ]
@@ -620,13 +635,13 @@ def test_download_failed_handler(tk_root) -> None:
         web.destroy()
 
 
-def test_call_download_handler_passes_download() -> None:
+def test_call_download_handler_passes_download(tmp_path: Path) -> None:
     seen: list[Download] = []
 
     def handler(download: Download) -> bool:
         seen.append(download)
         return download.url.endswith(".zip")
 
-    download = Download(url="https://x/a.zip", suggested_dest="/tmp/a.zip")
+    download = Download(url="https://x/a.zip", suggested_dest=_suggested(tmp_path))
     assert call_download_handler(handler, download) is True
     assert seen == [download]
