@@ -12,7 +12,8 @@ first (assert native ``tkwry._core`` on disk), then **onefile** (build +
 binary present; separate output name so paths do not clash). macOS onedir
 uses ``--windowed`` (``.app``); macOS onefile **omits** ``--windowed``
 because PyInstaller deprecates windowed+onefile on macOS (error in v7).
-Pinned ``pyinstaller==6.22.2``. Runs **only** via **workflow_dispatch**
+Pinned ``pyinstaller==6.22.2`` and ``tkface==0.2.3`` (flagship Windows DPI;
+``--collect-submodules tkface``). Runs **only** via **workflow_dispatch**
 (Actions → Freeze → Run workflow) — not on push/tags. No GUI launch.
 Nuitka / non-flagship recipes stay unverified by that workflow.
 

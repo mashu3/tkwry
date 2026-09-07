@@ -47,7 +47,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Manual **Freeze** workflow (``.github/workflows/freeze.yml``):
   ``workflow_dispatch`` only; Win + macOS PyInstaller **onedir then
   onefile** (serial; distinct onefile output name). macOS onefile omits
-  ``--windowed`` (PyInstaller deprecation). Pin ``pyinstaller==6.22.2``.
+  ``--windowed`` (PyInstaller deprecation). Pin ``pyinstaller==6.22.2`` and
+  ``tkface==0.2.3`` (``--collect-submodules tkface`` for flagship DPI).
   Onedir asserts ``tkwry._core``; no GUI
   (``scripts/check_freeze_artifact.py``)
 
@@ -94,6 +95,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Flagship tab strip: keep live drag order across chrome state ticks so
   tabs can jump multiple positions in one drag (was snapping back every
   ~350ms)
+- Flagship ``tkwry_browser``: optional Windows DPI via ``tkface`` embed-safe
+  path (``enable_dpi_awareness`` before ``Tk`` + ``design_to_physical`` for
+  geometry / chrome sizes; not ``tkface.win.dpi(root)``)
 - Flagship ``tkwry_browser`` best-effort UI/teardown paths log via traceback
   instead of silent ``except Exception: pass``
 - ``WebView`` teardown / snapshot paths no longer use silent

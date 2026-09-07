@@ -209,6 +209,39 @@ def test_shortcut_bind_skips_unsupported_keysym(browser) -> None:
         root.destroy()
 
 
+def test_design_px_passthrough_without_tkface(browser, monkeypatch) -> None:
+    monkeypatch.setattr(browser.sys, "platform", "win32")
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):  # noqa: ANN001
+        if name == "tkface" or name.startswith("tkface."):
+            raise ImportError("no tkface")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    assert browser._design_px(1100) == 1100
+
+
+def test_design_px_scales_when_tkface_present(browser, monkeypatch) -> None:
+    monkeypatch.setattr(browser.sys, "platform", "win32")
+    fake_win = SimpleNamespace(design_to_physical=lambda v, **_k: int(v) * 2)
+    monkeypatch.setitem(sys.modules, "tkface", SimpleNamespace(win=fake_win))
+    monkeypatch.setitem(sys.modules, "tkface.win", fake_win)
+    assert browser._design_px(100) == 200
+
+
+def test_design_px_noop_on_macos(browser, monkeypatch) -> None:
+    monkeypatch.setattr(browser.sys, "platform", "darwin")
+    assert browser._design_px(96) == 96
+
+
+def test_enable_windows_dpi_awareness_noop_off_windows(browser, monkeypatch) -> None:
+    monkeypatch.setattr(browser.sys, "platform", "darwin")
+    assert browser._enable_windows_dpi_awareness() is False
+
+
 def test_history_day_label(browser) -> None:
     from datetime import date, timedelta
 

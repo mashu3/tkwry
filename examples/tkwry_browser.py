@@ -168,6 +168,43 @@ MAX_CLOSED_TABS = 25
 MUTED = "#666666"
 CHROME_HEIGHT = 96
 SIDE_PANE_WIDTH = 220
+WINDOW_DESIGN_SIZE = (1100, 720)
+WINDOW_DESIGN_MINSIZE = (720, 480)
+
+
+def _enable_windows_dpi_awareness() -> bool:
+    """Turn on process DPI awareness (embed-safe). Requires optional ``tkface``.
+
+    Must run before the first ``tk.Tk()``. Do **not** call ``tkface.win.dpi(root)``
+    — that path patches layout and desyncs native WebView HWNDs. See
+    ``docs/platforms.md`` (DPI) and tkface embed-safe docs.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        from tkface.win import enable_dpi_awareness
+    except ImportError:
+        return False
+    try:
+        enable_dpi_awareness()
+        return True
+    except Exception:
+        traceback.print_exc()
+        return False
+
+
+def _design_px(value: int) -> int:
+    """Map design pixels → Tk physical pixels when Windows DPI awareness is on."""
+    if sys.platform != "win32":
+        return value
+    try:
+        from tkface.win import design_to_physical
+    except ImportError:
+        return value
+    try:
+        return int(design_to_physical(value))
+    except Exception:
+        return value
 UI_BG_LIGHT = (244, 245, 247, 255)
 UI_BG_DARK = (28, 30, 34, 255)
 # Allow https favicons in chrome / side (default app CSP blocks them).
@@ -3555,6 +3592,7 @@ class BrowserApp:
     _chrome_after: str | None = None
     _zoom: float = 1.0
     _side_visible: bool = True
+    _side_pane_width: int = SIDE_PANE_WIDTH
     _ui_dark: bool = False
     _settings_active_section: str = "general-section"
     _ui_epoch: int = 0
@@ -3620,7 +3658,16 @@ class BrowserApp:
         if not self.ephemeral and profile_name != DEFAULT_PROFILE:
             title = f"{title} — {profile_name}"
         configure_window(
-            self.root, title=title, geometry="1100x720", minsize=(720, 480)
+            self.root,
+            title=title,
+            geometry=(
+                f"{_design_px(WINDOW_DESIGN_SIZE[0])}x"
+                f"{_design_px(WINDOW_DESIGN_SIZE[1])}"
+            ),
+            minsize=(
+                _design_px(WINDOW_DESIGN_MINSIZE[0]),
+                _design_px(WINDOW_DESIGN_MINSIZE[1]),
+            ),
         )
 
         # Native menubar on macOS/Linux; Windows relies on the in-app toolbar menu.
@@ -3630,7 +3677,10 @@ class BrowserApp:
         self.outer = ttk.Frame(self.root)
         self.outer.pack(fill="both", expand=True, padx=6, pady=6)
 
-        self.chrome_frame = tk.Frame(self.outer, height=CHROME_HEIGHT)
+        chrome_h = _design_px(CHROME_HEIGHT)
+        self._side_pane_width = _design_px(SIDE_PANE_WIDTH)
+
+        self.chrome_frame = tk.Frame(self.outer, height=chrome_h)
         self.chrome_frame.pack(fill="x")
         self.chrome_frame.pack_propagate(False)
 
@@ -3640,7 +3690,7 @@ class BrowserApp:
             "<Configure>", self._on_content_split_configure, add="+"
         )
 
-        self.side_frame = tk.Frame(self.content_split, width=SIDE_PANE_WIDTH)
+        self.side_frame = tk.Frame(self.content_split, width=self._side_pane_width)
         self.side_frame.pack_propagate(False)
         self.content_host = tk.Frame(self.content_split)
         self.content_split.add(self.side_frame, weight=0)
@@ -3691,7 +3741,7 @@ class BrowserApp:
         self._safe_when_ready(self.chrome, self.push_chrome_state)
         self._safe_when_ready(self.side, self.push_side_state)
         self._schedule_chrome_refresh()
-        self._schedule_after(50, lambda: self.content_split.sashpos(0, SIDE_PANE_WIDTH))
+        self._schedule_after(50, lambda: self.content_split.sashpos(0, self._side_pane_width))
         self._schedule_after(80, self._sync_side_webview)
         self._schedule_after(120, self.push_side_state)
 
@@ -4363,7 +4413,7 @@ class BrowserApp:
             self.content_split.add(self.side_frame, weight=0)
             self.content_split.add(self.content_host, weight=1)
         self._side_visible = True
-        self._schedule_after(20, lambda: self.content_split.sashpos(0, SIDE_PANE_WIDTH))
+        self._schedule_after(20, lambda: self.content_split.sashpos(0, self._side_pane_width))
         self._schedule_after(40, self._sync_side_webview)
         self._schedule_after(60, self.push_side_state)
 
@@ -4383,8 +4433,8 @@ class BrowserApp:
         if not self._side_pane_attached():
             return
         try:
-            if self.side_frame.winfo_width() < SIDE_PANE_WIDTH // 2:
-                self.content_split.sashpos(0, SIDE_PANE_WIDTH)
+            if self.side_frame.winfo_width() < self._side_pane_width // 2:
+                self.content_split.sashpos(0, self._side_pane_width)
                 self._schedule_after(0, self._sync_side_webview)
         except tk.TclError:
             pass
@@ -5655,6 +5705,9 @@ def main() -> None:
         content_session = WebSession(data_directory=profile / "webview")
 
     store = BrowserStore(profile)
+    # Embed-safe Windows DPI (optional tkface). Before first Tk window; do not
+    # use tkface.win.dpi(root) with native WebView embeds.
+    _enable_windows_dpi_awareness()
     root = tk.Tk()
     BrowserApp(
         root=root,

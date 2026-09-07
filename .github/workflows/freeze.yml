@@ -6,7 +6,8 @@
 # Serial per OS: onedir (assert native tkwry._core on disk) then onefile
 # (build succeeds; binary present). No GUI launch.
 #
-# macOS: onedir uses --windowed (.app). onefile omits --windowed —
+# Includes tkface (pinned) so Windows flagship DPI awareness is in the
+# bundle. macOS: onedir uses --windowed (.app). onefile omits --windowed —
 # PyInstaller deprecates windowed+onefile on macOS (error in v7).
 name: Freeze
 
@@ -60,10 +61,14 @@ jobs:
           cd "${RUNNER_TEMP}"
           python -c "import tkwry, tkwry._core; print(tkwry.__version__, tkwry._core)"
 
-      - name: Install PyInstaller
+      - name: Install PyInstaller + tkface
         shell: bash
-        # Pin to the version that passed Freeze smoke (bump deliberately).
-        run: pip install "pyinstaller==6.22.2"
+        # PyInstaller pin: version that passed Freeze smoke (bump deliberately).
+        # tkface: optional at runtime, but Freeze includes it so Windows DPI
+        # (embed-safe enable_dpi_awareness) is present in the flagship bundle.
+        run: |
+          pip install "pyinstaller==6.22.2" "tkface==0.2.3"
+          python -c "import tkface.win; print('tkface', tkface.__version__)"
 
       - name: Freeze flagship (onedir)
         shell: bash
@@ -79,6 +84,7 @@ jobs:
             --noconfirm \
             --onedir \
             --collect-submodules tkwry \
+            --collect-submodules tkface \
             --name tkwry-browser \
             --distpath "${GITHUB_WORKSPACE}/dist" \
             --workpath "${GITHUB_WORKSPACE}/build-onedir" \
@@ -103,6 +109,7 @@ jobs:
             --noconfirm \
             --onefile \
             --collect-submodules tkwry \
+            --collect-submodules tkface \
             --name tkwry-browser-onefile \
             --distpath "${GITHUB_WORKSPACE}/dist" \
             --workpath "${GITHUB_WORKSPACE}/build-onefile" \
