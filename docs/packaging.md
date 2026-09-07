@@ -1,9 +1,17 @@
 # Packaging notes
 
 How to ship a **tkwry** app as a standalone desktop bundle (Windows `.exe` /
-macOS `.app`). These are **maintainer notes** for v0.1.x — not a confirmed
-matrix. Treat every recipe as **best-effort** until your target OS is
-verified.
+macOS `.app`). These are **maintainer notes** for v0.1.x — not a full
+confirmed matrix. Treat every recipe as **best-effort** until your target
+OS / freezer / mode is verified.
+
+**CI smoke (manual):** GitHub Actions workflow **Freeze**
+(``.github/workflows/freeze.yml``) builds the flagship
+``examples/tkwry_browser.py`` with **PyInstaller onedir** on Windows and
+macOS, then asserts the artifact contains native ``tkwry._core``. It runs
+**only** via **workflow_dispatch** (Actions → Freeze → Run workflow) — not
+on push and not on tags. It does **not** launch the GUI. Nuitka and
+one-file / non-flagship recipes stay unverified by that workflow.
 
 Recipes here cover **Windows and macOS** (PyPI wheels). Linux is source-only
 and out of scope for these freeze samples — see [Platform notes](platforms.md).
@@ -73,7 +81,7 @@ root.mainloop()
 
 ## PyInstaller
 
-Not CI-verified in 0.1.x. Install once:
+Install once:
 
 ```bash
 pip install pyinstaller tkwry

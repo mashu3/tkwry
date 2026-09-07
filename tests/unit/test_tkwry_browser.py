@@ -1,9 +1,9 @@
 """Unit tests for ``examples/tkwry_browser.py`` (no live WebView).
 
-**v0.1.9 release gate (before freeze CI):** this module must stay green on
-the normal unit job. It covers the flagship version requirement
+**v0.1.9 release gate:** this module must stay green on the normal unit
+job. It covers the flagship version requirement
 (``REQUIRED_TKWRY >= 0.1.9``), New Tab / toolbar helpers, and related
-pure-Python paths — run before packaging smoke (**L13** / freeze).
+pure-Python paths.
 """
 
 from __future__ import annotations

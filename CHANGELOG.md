@@ -44,6 +44,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   map to the checkout (wheel installs under site-packages report ~0%). Linux and
   ``windows-11-arm`` stay wheel-only. ``TKWRY_COVERAGE=1`` still enables append
   coverage in the split CI test scripts
+- Manual **Freeze** workflow (``.github/workflows/freeze.yml``):
+  ``workflow_dispatch`` only (not push, not tags). Win + macOS PyInstaller
+  onedir smoke for ``examples/tkwry_browser.py``; asserts native
+  ``tkwry._core`` in the artifact; no GUI launch
+  (``scripts/check_freeze_artifact.py``)
 
 ### Docs
 
@@ -60,6 +65,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stay the only engine wraps; no dedicated Storage / selective-clear APIs
   (documented in README Known limitations, ``docs/platforms.md``,
   ``docs/usage.md``)
+- Packaging: flagship PyInstaller onedir Win/mac smoked via manual Freeze
+  workflow; Nuitka / one-file remain best-effort
+  (``docs/packaging.md``, ``docs/examples-browser.md``, README)
 
 ### Tests
 
@@ -74,7 +82,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   via ``scripts/ci-coverage.sh``; extra unit cases in
   ``tests/unit/test_coverage_boost.py`` and helpers
 - Flagship ``examples/tkwry_browser.py`` requires tkwry ``>= 0.1.9``;
-  ``tests/unit/test_tkwry_browser.py`` is a 0.1.9 gate (before freeze CI)
+  ``tests/unit/test_tkwry_browser.py`` is a 0.1.9 gate (before freeze smoke)
 
 ### Fixed
 

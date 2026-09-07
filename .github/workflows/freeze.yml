@@ -1,0 +1,75 @@
+# Flagship freeze smoke (packaging).
+#
+# Manual only — not on push, not on tags. Run from Actions → Freeze →
+# "Run workflow" when you want a Win/mac PyInstaller onedir check.
+name: Freeze
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pyinstaller:
+    name: PyInstaller onedir (${{ matrix.id }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: windows-x86_64
+            os: windows-latest
+            pyinstaller_args: >-
+              --noconsole --onedir --collect-submodules tkwry
+              --name tkwry-browser examples/tkwry_browser.py
+          - id: macos-arm64
+            os: macos-latest
+            pyinstaller_args: >-
+              --windowed --onedir --collect-submodules tkwry
+              --name tkwry-browser examples/tkwry_browser.py
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build and install tkwry (wheel)
+        shell: bash
+        env:
+          PKG_CONFIG_PATH: ""
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin
+          maturin build --profile ci --out dist-wheel
+          pip install dist-wheel/*.whl
+          python -c "import tkwry, tkwry._core; print(tkwry.__version__, tkwry._core)"
+
+      - name: Install PyInstaller
+        shell: bash
+        run: pip install pyinstaller
+
+      - name: Freeze flagship (onedir)
+        shell: bash
+        run: pyinstaller ${{ matrix.pyinstaller_args }}
+
+      - name: Assert native tkwry._core in artifact
+        shell: bash
+        run: python scripts/check_freeze_artifact.py dist
+
+      - uses: actions/upload-artifact@v6
+        if: success()
+        with:
+          name: freeze-${{ matrix.id }}
+          path: |
+            dist/tkwry-browser/
+            dist/tkwry-browser.app/
+          if-no-files-found: warn
+          retention-days: 14

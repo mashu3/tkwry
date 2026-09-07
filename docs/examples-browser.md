@@ -16,7 +16,7 @@ python examples/tkwry_browser.py --private   # ephemeral content session
 Requires **tkwry >= 0.1.9** (rebuild with `pip install -e .` if import or
 version checks fail — a stale `_core.pyd` / `.so` is a common cause).
 Unit coverage: ``tests/unit/test_tkwry_browser.py`` (required on the 0.1.9
-cut before freeze CI).
+cut).
 
 Single file: HTML/CSS/JS for the toolbar strip, side pane, and Settings are
 embedded and written to a temp tree at startup, then loaded with `app=`
@@ -69,8 +69,12 @@ because WKWebView pasteboard access is unreliable for this demo.
 ## Packaging (best-effort)
 
 UI assets are embedded in the script (no separate `web/` folder). From a
-clone with tkwry installed (`pip install -e .`). Not CI-verified in 0.1.x —
-see [Packaging notes](packaging.md) for general tips and troubleshooting.
+clone with tkwry installed (`pip install -e .`).
+
+**PyInstaller onedir** for this flagship script is smoked by the manual
+**Freeze** GitHub Actions workflow (Windows + macOS build only; no GUI
+launch; not on push/tags). One-file and Nuitka recipes below stay
+best-effort — see [Packaging notes](packaging.md).
 
 ### PyInstaller
 

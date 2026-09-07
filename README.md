@@ -284,7 +284,10 @@ See [CHANGELOG.md](https://github.com/mashu3/tkwry/blob/main/CHANGELOG.md) for r
 ## 📤 Packaging (best-effort)
 
 Freeze a tkwry app to a Windows ``.exe`` or macOS ``.app`` with PyInstaller or
-Nuitka. **Not CI-verified in 0.1.x** — verify on your target OS. Full notes:
+Nuitka. Flagship **PyInstaller onedir** (Windows + macOS) is smoked by a
+**manual** GitHub Actions **Freeze** workflow (not on push/tags; no GUI
+launch). Other freezer modes stay best-effort — verify on your target OS.
+Full notes:
 [docs/packaging.md](https://github.com/mashu3/tkwry/blob/main/docs/packaging.md).
 
 ```bash
