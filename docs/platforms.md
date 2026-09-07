@@ -123,38 +123,14 @@ macOS/Windows, `focused=True` waits for `<<WebViewReady>>`, then calls
 `focus()` (create-time focus breaks child WKWebView / WebView2). Call
 `focus()` yourself after later layout changes.
 
-**IME:** composition stays with the current first responder. Switching Tk ↔
-WebView mid-composition (or fighting the system candidate window) can cancel
-or mis-deliver input vs Safari. **Not** a v0.1 goal — finish composition
-before changing focus, or keep IME editing in one surface.
+**IME:** keep composition on one surface — finish converting before switching
+Tk ↔ WebView (mid-composition focus changes can cancel or mis-route input).
+Not a Known-limitations checklist item; ordinary first-responder behavior.
 
-### Input / IME metrics (declared)
-
-Pinned numbers for the macOS CI job (``scripts/run-macos-ci-tests.sh`` →
-``tests/macos/``). These are **ownership / routing** budgets, not Safari
-keystroke or IME composition parity.
-
-**Local sample** (2026-09-07, Apple Silicon Mac, ``python scripts/measure_macos_input.py``,
-n=20 rounds):
-
-| Metric | Local median | Local p95 | Local max |
-|--------|-------------:|----------:|----------:|
-| ``focus()`` → ``mac_web_input_active()`` true | **2.0 ms** | **5.7 ms** | **5.9 ms** |
-| ``focus_parent()`` → inactive | **10.2 ms** | **14.3 ms** | **14.5 ms** |
-| Tcl focus leave after ``mac_request_tk_unfocus`` | **0.8 ms** | **1.6 ms** | **1.9 ms** |
-
-**CI / gate budgets** (must stay honest on GHA VMs — slower than local):
-
-| Metric | Budget | Where |
-|--------|--------|-------|
-| ``focus()`` / ``focus_parent()`` handoff | ≤ **1000 ms** each | ``tests/macos/test_input_ci.py`` (CI) |
-| Chrome Entry vs WebView hit-test | must separate | same |
-| Tcl focus leave after ``mac_request_tk_unfocus`` | ≤ **50 ms** | ``tests/macos/test_input.py`` (**local Mac** only; skipped on GHA) |
-| IME composition latency | **not measured** | first-responder contract above |
-
-Re-measure locally with ``python scripts/measure_macos_input.py``. CGEvent click /
-key injection stays **local Mac** (Accessibility). Do not treat GHA skips
-there as a regression of the CI probe.
+**Ownership probe (CI):** ``tests/macos/test_input_ci.py`` checks
+``focus()`` / ``focus_parent()`` handoff and chrome Entry vs WebView
+hit-testing. Routing correctness only — not a latency SLA. Local timing
+samples stay maintainer-only under ``.bench/``.
 
 **Import order / double titlebar:** import `tkwry` **before** anything that
 starts `AppKit` / `NSApplication`. On import, tkwry disables process-level

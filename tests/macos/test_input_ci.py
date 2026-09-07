@@ -5,14 +5,9 @@ reliably. This module is the **non-CGEvent** probe that stays on the
 ``tests/macos/`` CI job: API ``focus`` / ``focus_parent`` handoff timing plus
 hit-test separation of chrome vs WebView.
 
-Declared budgets (documented in ``docs/platforms.md``):
-
-- CI gate: focus / focus_parent handoff ≤ 1000 ms (GHA VM)
-- Local sample (``scripts/measure_macos_input.py``): focus median ~2 ms,
-  focus_parent median ~10 ms, Tcl unfocus median ~1 ms
-
-IME composition latency is **not** measured here (OS / first-responder
-contract only — not Safari parity).
+CI gate: focus / focus_parent handoff ≤ 1000 ms (GHA VM). Local timing
+samples are maintainer-only under ``.bench/`` (gitignored) — not a
+published latency SLA. IME composition is not measured here.
 """
 
 from __future__ import annotations

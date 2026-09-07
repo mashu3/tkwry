@@ -26,6 +26,7 @@ docs/MAINTAINERS.md
 *.local
 *競合*
 *conflicted copy*
+.bench/
 
 # Demo CDN cache (plotly Local mode)
 examples/.vendor/
