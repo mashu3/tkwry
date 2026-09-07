@@ -668,14 +668,14 @@ def test_rpc_unknown_method_rejects(tk_root) -> None:
 
 
 def test_rpc_worker_thread_does_not_block_handler_thread_flag(tk_root) -> None:
-    """``thread=True`` runs the handler off the Tk thread."""
+    """``run_in="worker"`` runs the handler off the Tk thread."""
     import threading
 
     frame = host_frame(tk_root)
     web = WebView(frame, html="<title>rpc</title><p>rpc</p>")
     caller_ids: list[int] = []
 
-    @web.expose(thread=True)
+    @web.expose(run_in="worker")
     def whoami() -> int:
         caller_ids.append(threading.get_ident())
         return threading.get_ident()
@@ -1144,7 +1144,7 @@ def test_rpc_worker_timeout_rejects(tk_root) -> None:
     frame = host_frame(tk_root)
     web = WebView(frame, html="<title>rpc</title><p>rpc</p>")
 
-    @web.expose(thread=True, timeout=0.2)
+    @web.expose(run_in="worker", timeout=0.2)
     def slow() -> str:
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
@@ -1183,7 +1183,7 @@ def test_rpc_destroy_during_worker_call(tk_root) -> None:
     web = WebView(frame, html="<title>rpc</title><p>rpc</p>")
     started = threading.Event()
 
-    @web.expose(thread=True)
+    @web.expose(run_in="worker")
     def slow() -> str:
         started.set()
         deadline = time.monotonic() + 1.5
@@ -1296,7 +1296,7 @@ def test_rpc_js_cancel_rejects_worker(tk_root) -> None:
     started = threading.Event()
     saw_cancel = threading.Event()
 
-    @web.expose(thread=True)
+    @web.expose(run_in="worker")
     def slow() -> str:
         started.set()
         deadline = time.monotonic() + 4.0

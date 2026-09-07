@@ -86,7 +86,7 @@ yet; **Upstream gap** = wry lacks it (see [platforms.md](platforms.md)).
 |-----|-------|-------|
 | `with_url` / `with_html` / `load_url` / `load_html` | `url=` / `html=` / `load_*` | `html=` wins over `app=` for content; see trust docs |
 | `with_initialization_script` | `add_init_script` / create scripts | Post-create inject is best-effort re-run on page Started |
-| `evaluate_script` | `eval_js` / `execute_script` / `inject_script` | Coalescing rules documented in README |
+| `evaluate_script` | `eval_js` / `inject_script` | Coalescing rules documented in README |
 | Navigation / page-load / title / new-window handlers | Matching `on_*` / events | Sync hooks may block WebKit briefly by design |
 | `go_back` / `go_forward` | Wrapped | |
 | Custom protocol | `app=` → `tkwry://` | Product path; not generic multi-scheme |

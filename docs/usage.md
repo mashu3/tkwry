@@ -244,7 +244,6 @@ See also [`examples/tkwry_browser.py`](../examples/tkwry_browser.py).
 ```python
 web.load_html("<h1>Hello</h1>")
 web.eval_js("document.title = 'Hi'")  # fire-and-forget (Tk idle, no return value)
-web.execute_script("document.body.dataset.x = '1'")  # alias of eval_js (one-shot)
 web.eval_js("bad()", on_error=lambda exc: print("eval failed:", exc))
 web.eval_js_with_callback("document.title", print)  # async; callback on Tk main thread
 web.load_url("https://example.com")
@@ -268,7 +267,7 @@ web.focus()
 |--------|------|-------------|
 | `add_init_script(js)` | Before native create only | Engine init script (every navigation) |
 | `initialization_script=` / `set_initialization_script` | Create-only primary script | Same engine path; merged with `add_init_script` |
-| `execute_script(js)` | After ready | One-shot (`eval_js` alias) |
+| `eval_js(js)` | After ready | One-shot (this document only) |
 | `inject_script(js)` | Before create → like `add_init_script`; after ready → `eval_js` now | After ready: best-effort re-run on each `PageLoadEvent.Started` (wry cannot add true init scripts post-create) |
 
 ```python
@@ -276,7 +275,7 @@ web = WebView(frame, html="<h1>Hi</h1>", initialization_script="window.__boot = 
 web.add_init_script("window.__extra = 2;")  # before create
 # after ready:
 web.inject_script("window.__sticky = 3;")  # re-runs on later navigations
-web.execute_script("window.__once = 4;")  # this document only
+web.eval_js("window.__once = 4;")  # this document only
 ```
 
 DevTools — unified surface (`devtools=` create flag + three methods):
@@ -539,7 +538,7 @@ happened before `set_on_page_load` / constructor `on_page_load`.
 
 **Callback threads:** lifecycle / IPC / page-load / title / DnD handlers run
 on the **Tk main thread**. RPC handlers default to the same thread; use
-`@web.expose(thread=True)` for background work. `on_navigation`,
+`@web.expose(run_in="worker")` for background work. `on_navigation`,
 `on_new_window`, and create-time `permission_handler` are also invoked on Tk,
 but WebKit **blocks** until they return a value — keep them fast (heavy work
 → return deny/default and defer with `root.after`). Do **not** create another
@@ -560,10 +559,7 @@ pending items each; further events are compacted or dropped. Worker→Tk
 RPC **stream** chunks and download-complete events also cap at 2048.
 Each IPC/RPC **message** also caps at **10 MiB**. RPC is a separate queue
 from IPC. Prefer `take_queue_drop_stats()` → `QueueDropCounts` (named
-fields including `download_complete` and `rpc_stream`). The deprecated
-`take_queue_drop_counts()` 6-tuple
-`(ipc, page_load, title, drag_drop, eval, rpc)` remains for 0.1.x
-(emits ``DeprecationWarning``).
+fields including `download_complete` and `rpc_stream`).
 
 Callback exceptions are printed to stderr and do not stop event delivery.
 Optional provisional ``on_callback_error=(exc, kind) -> None`` (or
@@ -713,14 +709,12 @@ if any(
 ```
 
 Call periodically from a Tk timer or after heavy bursts (IPC storms, stream
-chunks, download-complete without handler). Each call **resets** counters
-(``take_queue_drop_stats`` and the deprecated six-field
-``take_queue_drop_counts`` share the first six buckets — prefer stats).
+chunks, download-complete without handler). Each call **resets** counters.
 
 **Interpretation:**
 
 - **`eval` / `rpc` spikes** — Python handlers or ``eval_js_with_callback`` too
-  slow; shorten work or move to ``@expose(thread=True)``.
+  slow; shorten work or move to ``@expose(run_in="worker")``.
 - **`download_complete`** — complete events arrived faster than Tk drained them
   (rare unless the main loop is blocked).
 - **`rpc_stream`** — generator ``@expose`` yields faster than JS consumes;
@@ -741,7 +735,7 @@ Short map of **preferred** call shapes, how to **observe** failures, and
 
 | Goal | Prefer | Also OK |
 |------|--------|---------|
-| JS → Python request/response | ``@web.expose`` / ``expose`` + ``window.tkwry.call`` | ``@web.rpc`` (alias); raw ``set_ipc_handler`` only for fire-and-forget strings |
+| JS → Python request/response | ``@web.rpc`` + ``window.tkwry.invoke`` (named kwargs sugar); ``@web.expose`` + ``window.tkwry.call`` for full options | raw ``set_ipc_handler`` only for fire-and-forget strings |
 | Download allow / dest | One-arg ``Download``: ``on_download=lambda d: d.save("./downloads")`` | — |
 | Navigation allow/deny | ``set_navigation_policy`` / ``on_navigation`` with one-arg ``NavigationEvent`` (``event.url``, …) | — |
 | New window | ``on_new_window`` with one-arg ``NavigationEvent`` → ``NewWindowResponse`` | — |
@@ -816,14 +810,14 @@ after; prefer one style per app.
 |----------|---------|
 | Content | `load_url` (`headers=` this request only, http(s)), `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `print`, `print_with_options` (macOS margins), `url` |
 | Cookies / browsing data | `cookies`, `cookies_for_url`, `set_cookie`, `delete_cookie` (`Cookie` or `name` + page `url`), `clear_all_browsing_data`, `Cookie` |
-| JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `execute_script` (alias), `inject_script`, `add_init_script`, `last_eval_error`, `<<WebViewEvalFailed>>` |
-| IPC / RPC / emit | `set_ipc_handler`, `expose` / `rpc` / `unexpose` (`allow_any_origin=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `invoke` / `stream` / `cancel`) |
+| JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `inject_script`, `add_init_script`, `last_eval_error`, `<<WebViewEvalFailed>>` |
+| IPC / RPC / emit | `set_ipc_handler`, `expose` / `rpc` / `unexpose` (`allow_any_origin=`, `run_in=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `invoke` / `stream` / `cancel`) |
 | Callbacks | `set_on_navigation`, `set_navigation_policy`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_started`, `set_on_download_complete`, `set_on_download_failed`, `set_context_menu`, `set_context_menu_handler`; create-only `permission_handler=` |
 | Appearance | `set_background_color`, `set_zoom` / `reset_zoom`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script`, `add_init_script` (raise after native create); `devtools=`, `clipboard=`, `javascript_enabled=`, `autoplay=`, `hotkeys_zoom=`, `back_forward_gestures=`, `default_context_menus=`, `https_scheme=`, `proxy=`, `permission_handler=` |
 | Layout | `pack`, `grid`, `place`, `sync_bounds`, `bounds` (native geometry in ``set_bounds`` space) |
 | Lifecycle | `ready`, `phase` / `WebViewPhase`, `get_state` / `WebViewState`, `when_ready`, `when_failed`, `wait_until_ready`, `bind` (`<<WebViewReady>>` / `<<WebViewCreateFailed>>` / `<<WebViewEvalFailed>>` / `<<WebViewNavigationFailed>>` / `<<WebViewDownloadStarted>>` / `<<WebViewDownloadComplete>>` / `<<WebViewDownloadFailed>>`), `destroy`, `destroyed`, `native`, `creation_failed`, `creation_error`, `last_eval_error`, `last_navigation_error`, `last_download`, `last_started_download`, `in_flight_downloads`, `profile`, `untrusted`, `clipboard`, `javascript_enabled`, `autoplay`, `hotkeys_zoom`, `back_forward_gestures`, `default_context_menus`, `https_scheme`, `proxy`, `navigation_allow`, `open_external`, `download_allow`, `csp` / `coop` / `corp`, `bridge_origins`, `bridge_allow` |
-| Diagnostics | `take_queue_drop_stats` / `QueueDropCounts`; deprecated `take_queue_drop_counts` |
+| Diagnostics | `take_queue_drop_stats` / `QueueDropCounts` |
 
 Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
 `app_dev`, `csp` / `coop` / `corp`, `session` / `profile` / `user_data_dir` /

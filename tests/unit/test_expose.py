@@ -38,13 +38,13 @@ def test_expose_rejects_duplicate_names(tk_root) -> None:
     frame.destroy()
 
 
-def test_expose_thread_conflicts_with_main(tk_root) -> None:
+def test_expose_rejects_invalid_run_in(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>rpc</p>")
 
-    with pytest.raises(ValueError, match="conflicts"):
+    with pytest.raises(ValueError, match="run_in must be"):
 
-        @web.expose(thread=True, run_in="main")
+        @web.expose(run_in="sideways")  # type: ignore[arg-type]
         def bad() -> None:
             return None
 
@@ -62,7 +62,7 @@ def test_expose_rejects_non_finite_timeout(tk_root, bad_timeout: float | bool) -
 
     with pytest.raises(ValueError, match="timeout must be a finite positive"):
 
-        @web.expose(thread=True, timeout=bad_timeout)  # type: ignore[arg-type]
+        @web.expose(run_in="worker", timeout=bad_timeout)  # type: ignore[arg-type]
         def slow() -> None:
             return None
 
@@ -152,7 +152,7 @@ def test_rpc_stream_cancel_envelope_stops_generator(tk_root) -> None:
     first = threading.Event()
     saw_cancel = threading.Event()
 
-    @web.expose(thread=True)
+    @web.expose(run_in="worker")
     def ticks() -> object:
         started.set()
         yield 1
@@ -221,7 +221,7 @@ def test_rpc_stream_destroy_cancels_open_stream(tk_root) -> None:
     saw_cancel = threading.Event()
     finished = threading.Event()
 
-    @web.expose(thread=True)
+    @web.expose(run_in="worker")
     def ticks() -> object:
         started.set()
         yield 1
@@ -346,7 +346,7 @@ def test_rpc_worker_stream_hops_to_tk(tk_root) -> None:
     web._cancel_deferred_callbacks()
     started = threading.Event()
 
-    @web.expose(thread=True)
+    @web.expose(run_in="worker")
     def ticks() -> object:
         started.set()
         yield 1
@@ -441,7 +441,7 @@ def test_rpc_stream_drop_rejects_open_stream(tk_root) -> None:
     started = threading.Event()
     gate = threading.Event()
 
-    @web.expose(thread=True)
+    @web.expose(run_in="worker")
     def ticks() -> object:
         started.set()
         yield 1
@@ -487,7 +487,7 @@ def test_rpc_timeout_sets_cancel_flag(tk_root) -> None:
     started = threading.Event()
     saw_cancel = threading.Event()
 
-    @web.expose(thread=True, timeout=0.15)
+    @web.expose(run_in="worker", timeout=0.15)
     def slow() -> str:
         started.set()
         deadline = time.monotonic() + 3.0
@@ -525,7 +525,7 @@ def test_rpc_cancel_envelope_sets_flag_and_rejects(tk_root) -> None:
     started = threading.Event()
     saw_cancel = threading.Event()
 
-    @web.expose(thread=True)
+    @web.expose(run_in="worker")
     def slow() -> str:
         started.set()
         deadline = time.monotonic() + 3.0
@@ -569,7 +569,7 @@ def test_rpc_cancel_from_other_document_is_ignored(tk_root) -> None:
     started = threading.Event()
     saw_cancel = threading.Event()
 
-    @web.expose(thread=True, allow_any_origin=True)
+    @web.expose(run_in="worker", allow_any_origin=True)
     def slow() -> str:
         started.set()
         deadline = time.monotonic() + 1.5
@@ -629,7 +629,7 @@ def test_rpc_worker_done_after_destroy_skips_tk(tk_root) -> None:
     release = threading.Event()
     finished = threading.Event()
 
-    @web.expose(thread=True)
+    @web.expose(run_in="worker")
     def slow() -> str:
         started.set()
         while not release.wait(timeout=0.05):
@@ -661,7 +661,7 @@ def test_rpc_worker_settles_on_poll(tk_root) -> None:
     web._cancel_deferred_callbacks()
     done = threading.Event()
 
-    @web.expose(thread=True)
+    @web.expose(run_in="worker")
     def ping() -> str:
         done.set()
         return "pong"

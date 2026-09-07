@@ -290,7 +290,7 @@ def main() -> None:
     def greet(message: str, times: int = 1) -> str:
         return str(message) * int(times)
 
-    @web.expose(thread=True, timeout=15.0)
+    @web.expose(run_in="worker", timeout=15.0)
     def heavy() -> int:
         deadline = time.monotonic() + 0.4
         while time.monotonic() < deadline:
@@ -299,7 +299,7 @@ def main() -> None:
             time.sleep(0.05)
         return threading.get_ident()
 
-    @web.expose(thread=True)
+    @web.expose(run_in="worker")
     def ticks(count: int = 8) -> object:
         for i in range(int(count)):
             if rpc_cancelled():

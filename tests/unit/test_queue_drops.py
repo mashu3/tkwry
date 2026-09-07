@@ -20,44 +20,41 @@ def _noop_linux_gtk_pump(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_take_queue_drop_counts_before_native_returns_zeros(tk_root) -> None:
+def test_take_queue_drop_stats_before_native_returns_zeros(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)
 
-    with pytest.warns(DeprecationWarning, match="take_queue_drop_stats"):
-        assert web.take_queue_drop_counts() == (0, 0, 0, 0, 0, 0)
+    assert web.take_queue_drop_stats() == QueueDropCounts(0, 0, 0, 0, 0, 0, 0, 0)
 
     web.destroy()
     frame.destroy()
 
 
-def test_take_queue_drop_counts_delegates_to_native(tk_root) -> None:
+def test_take_queue_drop_stats_delegates_to_native(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)
     native = MagicMock()
-    native.take_queue_drop_counts.return_value = (1, 2, 3, 4, 5, 6)
+    native.take_queue_drop_stats.return_value = (1, 2, 3, 4, 5, 6, 7)
     web._webview = native
 
-    with pytest.warns(DeprecationWarning, match="take_queue_drop_stats"):
-        assert web.take_queue_drop_counts() == (1, 2, 3, 4, 5, 6)
-    native.take_queue_drop_counts.assert_called_once_with()
+    assert web.take_queue_drop_stats() == QueueDropCounts(1, 2, 3, 4, 5, 6, 7, 0)
+    native.take_queue_drop_stats.assert_called_once_with()
 
     web.destroy()
     frame.destroy()
 
 
-def test_take_queue_drop_counts_after_destroy_returns_zeros(tk_root) -> None:
+def test_take_queue_drop_stats_after_destroy_returns_zeros(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)
     web.destroy()
 
-    with pytest.warns(DeprecationWarning, match="take_queue_drop_stats"):
-        assert web.take_queue_drop_counts() == (0, 0, 0, 0, 0, 0)
+    assert web.take_queue_drop_stats() == QueueDropCounts(0, 0, 0, 0, 0, 0, 0, 0)
 
     frame.destroy()
 
 
-def test_take_queue_drop_counts_reports_local_eval_drops_on_destroy(tk_root) -> None:
+def test_take_queue_drop_stats_reports_local_eval_drops_on_destroy(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, width=400, height=300)
     web._register_pending_eval(lambda _r: None, None)
@@ -65,8 +62,7 @@ def test_take_queue_drop_counts_reports_local_eval_drops_on_destroy(tk_root) -> 
 
     web.destroy()
 
-    with pytest.warns(DeprecationWarning, match="take_queue_drop_stats"):
-        assert web.take_queue_drop_counts() == (0, 0, 0, 0, 2, 0)
+    assert web.take_queue_drop_stats() == QueueDropCounts(0, 0, 0, 0, 2, 0, 0, 0)
 
     frame.destroy()
 
@@ -117,19 +113,4 @@ def test_take_queue_drop_stats_after_destroy_keeps_local_stream_drops(
     assert stats == QueueDropCounts(0, 0, 0, 0, 0, 0, 0, 1)
     assert web.take_queue_drop_stats().rpc_stream == 0
 
-    frame.destroy()
-
-
-def test_take_queue_drop_counts_does_not_clear_rpc_stream(tk_root) -> None:
-    frame = tk.Frame(tk_root)
-    web = WebView(frame, width=400, height=300)
-    for i in range(MAX_RPC_STREAM_PENDING):
-        web._enqueue_rpc_stream_chunk("s1", i)
-    web._enqueue_rpc_stream_chunk("s1", "overflow")
-
-    with pytest.warns(DeprecationWarning, match="take_queue_drop_stats"):
-        assert web.take_queue_drop_counts() == (0, 0, 0, 0, 0, 0)
-    assert web.take_queue_drop_stats().rpc_stream == 1
-
-    web.destroy()
     frame.destroy()

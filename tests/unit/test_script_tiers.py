@@ -1,4 +1,4 @@
-"""inject_script / execute_script / add_init_script tiers."""
+"""inject_script / eval_js / add_init_script tiers."""
 
 from __future__ import annotations
 
@@ -46,23 +46,6 @@ def test_add_init_script_rejects_empty_and_after_create(tk_root) -> None:
     web._webview = object()  # type: ignore[assignment]
     with pytest.raises(ValueError, match="after the native"):
         web.add_init_script("void 0")
-    web.destroy()
-    frame.destroy()
-
-
-def test_execute_script_aliases_eval_js(
-    tk_root, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    frame = tk.Frame(tk_root)
-    web = WebView(frame, html="<p>x</p>")
-    calls: list[tuple[str, object]] = []
-
-    def fake_eval(script: str, *, on_error=None) -> None:
-        calls.append((script, on_error))
-
-    monkeypatch.setattr(web, "eval_js", fake_eval)
-    web.execute_script("1+1")
-    assert calls == [("1+1", None)]
     web.destroy()
     frame.destroy()
 
@@ -162,6 +145,6 @@ def test_script_tiers_raise_after_destroy(tk_root) -> None:
         web.add_init_script("void 0")
     with pytest.raises(WebViewDestroyedError, match="inject_script"):
         web.inject_script("void 0")
-    with pytest.raises(WebViewDestroyedError, match="execute_script"):
-        web.execute_script("1")
+    with pytest.raises(WebViewDestroyedError, match="eval_js"):
+        web.eval_js("1")
     frame.destroy()

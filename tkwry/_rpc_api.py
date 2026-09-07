@@ -128,8 +128,7 @@ class WebViewRpcMixin:
         /,
         *,
         name: str | None = None,
-        thread: bool = False,
-        run_in: RpcRunIn | None = None,
+        run_in: RpcRunIn = "main",
         timeout: float | None = None,
         replace: bool = False,
         allow_any_origin: bool = False,
@@ -142,16 +141,16 @@ class WebViewRpcMixin:
         must be JSON-serializable. A **sync generator** is streamed via
         ``window.tkwry.stream`` (``call`` rejects it); each yield is one
         JSON chunk, then the iterator completes. Async generators are not
-        supported. Prefer ``thread=True`` so cancel can interrupt between
+        supported. Prefer ``run_in="worker"`` so cancel can interrupt between
         yields (main-thread generators block Tk until they finish).
 
         Execution model:
 
         - Default / ``run_in="main"`` — handler runs on the **Tk main thread**
           (keeps UI APIs safe; heavy work blocks the UI).
-        - ``thread=True`` or ``run_in="worker"`` — handler runs on a background
-          thread pool; settle returns on the Tk event poll (never ``after``
-          from the worker thread).
+        - ``run_in="worker"`` — handler runs on a background thread pool;
+          settle returns on the Tk event poll (never ``after`` from the worker
+          thread).
 
         Optional *timeout* (seconds) applies to ``run_in="worker"`` handlers
         and handlers that return a ``Future``. It rejects the Promise if work
@@ -181,10 +180,8 @@ class WebViewRpcMixin:
             raise WebViewCreationError(
                 "WebView native creation failed; cannot call expose()"
             ) from self._creation_error
-        if run_in is None:
-            run_in = "worker" if thread else "main"
-        elif thread and run_in == "main":
-            raise ValueError("expose: thread=True conflicts with run_in='main'")
+        if run_in not in ("main", "worker"):
+            raise ValueError("expose: run_in must be 'main' or 'worker'")
         validate_rpc_timeout(timeout)
         if self._bridge_origins == "*" and not allow_any_origin:
             raise ValueError(
@@ -220,18 +217,19 @@ class WebViewRpcMixin:
         /,
         *,
         name: str | None = None,
-        thread: bool = False,
-        run_in: RpcRunIn | None = None,
+        run_in: RpcRunIn = "main",
         timeout: float | None = None,
         replace: bool = False,
         allow_any_origin: bool = False,
     ) -> RpcHandler | Callable[[RpcHandler], RpcHandler]:
         """Register an RPC handler under an explicit method name.
 
-        Sugar for :meth:`expose` — use ``@web.rpc("get_data")`` or ``@web.rpc``
-        (method name defaults to the function name). From JavaScript, prefer
+        Documented app-facing sugar for :meth:`expose` — use
+        ``@web.rpc("get_data")`` or ``@web.rpc`` (method name defaults to the
+        function name). From JavaScript, prefer
         ``await window.tkwry.invoke("get_data", {id: 123})`` to pass a single
-        object as Python keyword arguments.
+        object as Python keyword arguments. Use :meth:`expose` when you need
+        the same options without the naming sugar.
         """
         self._require_not_destroyed("rpc")
         if self._untrusted:
@@ -241,7 +239,6 @@ class WebViewRpcMixin:
                 "WebView native creation failed; cannot call rpc()"
             ) from self._creation_error
         expose_kwargs = {
-            "thread": thread,
             "run_in": run_in,
             "timeout": timeout,
             "replace": replace,

@@ -295,9 +295,9 @@ class InFlightDownload(NamedTuple):
 class QueueDropCounts(NamedTuple):
     """Overflow drops since the last :meth:`~WebView.take_queue_drop_stats` call.
 
-    The first six fields match :meth:`~WebView.take_queue_drop_counts`.
-    ``download_complete`` and ``rpc_stream`` are only on this named view
-    (kept out of the legacy 6-tuple through 0.1.x).
+    The first six fields match the shared overflow counters reset by
+    :meth:`~WebView.take_queue_drop_stats`.
+    ``download_complete`` and ``rpc_stream`` are only on this named view.
     """
 
     ipc: int
@@ -1580,7 +1580,7 @@ class WebView(WebViewRpcMixin):
         :exc:`~tkwry.WebViewDestroyedError` except snapshot properties
         (``destroyed``, ``phase``, ``last_*``, …),
         :meth:`get_state`,
-        :meth:`take_queue_drop_counts` / :meth:`take_queue_drop_stats`, and a
+        :meth:`take_queue_drop_stats`, and a
         second ``destroy()``
         (idempotent). :meth:`wait_until_ready` after destroy raises; if
         destroy happens during a wait, that wait returns ``False``.
@@ -2249,7 +2249,7 @@ class WebView(WebViewRpcMixin):
         """Set the primary initialization script for native create.
 
         Create-only. Prefer :meth:`add_init_script` to append additional
-        pre-load scripts, or :meth:`inject_script` / :meth:`execute_script`
+        pre-load scripts, or :meth:`inject_script` / :meth:`eval_js`
         for the named injection tiers.
         """
         self._require_not_destroyed("set_initialization_script")
@@ -2281,18 +2281,6 @@ class WebView(WebViewRpcMixin):
                 "created; use inject_script() for post-create injection"
             )
         self._init_scripts.append(script)
-
-    def execute_script(
-        self, script: str, *, on_error: EvalErrorHandler | None = None
-    ) -> None:
-        """Run JavaScript once in the current document (alias of :meth:`eval_js`).
-
-        Does not re-run on later navigations. For pre-load scripts use
-        :meth:`add_init_script`; for best-effort re-injection after create use
-        :meth:`inject_script`.
-        """
-        self._require_not_destroyed("execute_script")
-        self.eval_js(script, on_error=on_error)
 
     def inject_script(self, script: str) -> None:
         """Inject a script intended to persist across navigations.
@@ -2475,52 +2463,13 @@ class WebView(WebViewRpcMixin):
         """Native view bounds in ``set_bounds`` space: ``(x, y, width, height)``."""
         return self._require_ready("bounds").bounds()
 
-    def take_queue_drop_counts(self) -> tuple[int, int, int, int, int, int]:
-        """Return overflow drop counts since the last call.
-
-        .. deprecated::
-            Prefer :meth:`take_queue_drop_stats` → :class:`QueueDropCounts`.
-            This six-tuple remains in 0.1.x for compatibility.
-
-        Returns ``(ipc, page_load, title, drag_drop, eval, rpc)``. Each internal
-        queue caps at 2048 pending items; additional events are compacted or
-        discarded and counted here so applications can detect handler backlogs.
-        RPC uses a dedicated queue so IPC overflow cannot drop ``tkwry.call``.
-        Readable after :meth:`destroy` so local drops counted during teardown
-        (for example pending evals) are not lost.
-
-        Does **not** include ``download_complete`` or ``rpc_stream`` overflows —
-        use :meth:`take_queue_drop_stats` for the full named snapshot. Calling
-        either method resets the shared six counters.
-        """
-        warnings.warn(
-            "WebView.take_queue_drop_counts() is deprecated; use "
-            "take_queue_drop_stats() → QueueDropCounts instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self._require_tk_thread()
-        local = self._take_local_queue_drop_counts()
-        if self._destroyed or self._webview is None:
-            return local
-        native = self._webview.take_queue_drop_counts()
-        return (
-            local[0] + native[0],
-            local[1] + native[1],
-            local[2] + native[2],
-            local[3] + native[3],
-            local[4] + native[4],
-            local[5] + native[5],
-        )
-
     def take_queue_drop_stats(self) -> QueueDropCounts:
-        """Return named queue overflow counts since the last stats (or counts) take.
+        """Return named queue overflow counts since the last take.
 
-        Includes the legacy six fields plus ``download_complete`` (native
-        download-complete queue) and ``rpc_stream`` (worker→Tk stream chunk
-        queue). Resets those counters (and the shared six). Readable after
-        :meth:`destroy`. Prefer this over :meth:`take_queue_drop_counts` for
-        new code.
+        Includes ``ipc``, ``page_load``, ``title``, ``drag_drop``, ``eval``,
+        ``rpc``, plus ``download_complete`` (native download-complete queue)
+        and ``rpc_stream`` (worker→Tk stream chunk queue). Resets those
+        counters. Readable after :meth:`destroy`.
         """
         self._require_tk_thread()
         local = self._take_local_queue_drop_counts()

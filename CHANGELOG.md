@@ -19,6 +19,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``success`` set — raw ``(url, dest, success)`` tuple removed)
 - ``on_new_window`` / ``set_on_new_window`` handlers take
   :class:`~tkwry.NavigationEvent` only (bare URL ``str`` form removed)
+- RPC workers use ``run_in="worker"`` only (``thread=`` removed); ``@web.rpc``
+  + ``window.tkwry.invoke`` stay the documented naming sugar for ``expose`` /
+  ``call``
+
+### Removed
+
+- ``WebView.execute_script`` (use ``eval_js``)
+- ``WebView.take_queue_drop_counts`` (use ``take_queue_drop_stats`` →
+  ``QueueDropCounts``)
 
 ### CI
 
@@ -28,12 +37,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   map to the checkout (wheel installs under site-packages report ~0%). Linux and
   ``windows-11-arm`` stay wheel-only. ``TKWRY_COVERAGE=1`` still enables append
   coverage in the split CI test scripts
-
-### Deprecated
-
-- ``WebView.take_queue_drop_counts()`` emits ``DeprecationWarning``; prefer
-  ``take_queue_drop_stats()`` → ``QueueDropCounts`` (method still works in
-  0.1.x)
 
 ### Docs
 

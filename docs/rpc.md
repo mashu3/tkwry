@@ -7,8 +7,8 @@ execution model, cancel contract, streaming, and limits.
 | Direction | Role | Python | JavaScript |
 |-----------|------|--------|------------|
 | JS → Python | IPC (event) | `set_ipc_handler` / `ipc_handler=` | `window.ipc.postMessage(str)` |
-| JS → Python | RPC (call) | `@web.expose` | `await window.tkwry.call(name, ...)` |
-| JS → Python | RPC (invoke) | `@web.rpc("name")` | `await window.tkwry.invoke(name, { ... })` |
+| JS → Python | RPC (call) | `@web.expose` / `@web.rpc` | `await window.tkwry.call(name, ...)` |
+| JS → Python | RPC (invoke) | `@web.rpc("name")` (preferred sugar) | `await window.tkwry.invoke(name, { ... })` |
 | JS → Python | RPC (stream) | sync generator `@web.expose` | `for await (const x of window.tkwry.stream(name, ...))` |
 | Python → JS | Emit (event) | `web.emit(event, data)` | `window.tkwry.on(event, handler)` |
 
@@ -47,7 +47,7 @@ def get_data(*, id: int) -> dict:
     return {"id": id}
 
 # Heavy I/O / CPU — run off the Tk thread so the UI stays responsive
-@web.expose(thread=True, timeout=30.0)
+@web.expose(run_in="worker", timeout=30.0)
 def heavy_task(data: dict) -> dict:
     from tkwry import rpc_cancelled
 
@@ -71,18 +71,19 @@ const pending = window.tkwry.call("heavy_task", payload);
 pending.cancel();
 ```
 
-``@web.rpc("name")`` is sugar for ``@web.expose(name="name")``.
+``@web.rpc("name")`` is the documented naming sugar for
+``@web.expose(name="name")`` (same options: ``run_in=``, ``timeout=``, …).
 ``window.tkwry.invoke(method, data)`` is sugar for
 ``window.tkwry.call(method, { kwargs: data })`` when *data* is a plain
 object (including ``{ timeout: N }`` — that key is kwargs, not a JS
 timeout). Pass ``invoke(method, data, { timeout: ms })`` when you need a
-JS-side timeout. ``call`` remains the full positional / kwargs / timeout
-surface.
+JS-side timeout. ``call`` / ``expose`` remain the full positional / kwargs /
+timeout surface.
 
 ### Execution model
 
 Default handlers run on the **Tk main thread** (safe for Tk APIs; long work
-blocks the UI). Pass `thread=True` / `run_in="worker"` to use a background
+blocks the UI). Pass `run_in="worker"` to use a background
 pool. Handlers may also return a `concurrent.futures.Future` (on the main
 thread the RPC settles when that future completes; on a worker thread the
 future is awaited before settle). Return values
@@ -123,7 +124,7 @@ A **sync generator** handler is consumed as a chunked stream. Protocol stays
 `version: 1` with an additive `"stream": true` flag — `call` is unchanged.
 
 ```python
-@web.expose(thread=True)
+@web.expose(run_in="worker")
 def ticks(count: int = 5):
     from tkwry import rpc_cancelled
 
@@ -148,7 +149,7 @@ iterator then completes. `call()` on a generator rejects with `TypeError`
 (do not collect into an array). A non-generator `stream()` yields the
 return value as a single chunk. Async generators and full-duplex RPC are
 not supported.
-Prefer `thread=True` so `cancel` / timeout can stop between yields;
+Prefer `run_in="worker"` so `cancel` / timeout can stop between yields;
 a main-thread generator blocks Tk until it finishes. Breaking a
 `for await` loop calls the iterator `return()` and sends cancel.
 `stream.cancel()` / `window.tkwry.cancel(id)` uses the same cancel
@@ -169,9 +170,7 @@ overflow cannot drop `tkwry.call`. Worker→Tk **stream** chunks also cap
 at 2048 pending; further chunks are dropped (``rpc_stream``).
 
 Prefer `take_queue_drop_stats()` → `QueueDropCounts` (includes
-`download_complete` and `rpc_stream`). Deprecated `take_queue_drop_counts()`
-still returns `(ipc, page_load, title, drag_drop, eval, rpc)` (emits
-``DeprecationWarning``).
+`download_complete` and `rpc_stream`).
 
 ## Python to JS events (emit)
 

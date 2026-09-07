@@ -6,10 +6,10 @@
 # Linux (see run-linux-ci-tests.sh) and tkipw's Windows e2e isolation.
 # Run unit first, then each integration module in its own pytest process.
 #
-# Long-lived ``thread=True`` RPC workers abort the process on Windows
+# Long-lived ``run_in="worker"`` RPC handlers abort the process on Windows
 # (0x80000003 / STATUS_BREAKPOINT) while ThreadPoolExecutor + GC run after a
-# long ``test_content`` create/destroy streak. Isolate every ``thread=True``
-# case in that file — not only timeout / destroy / JS cancel.
+# long ``test_content`` create/destroy streak. Isolate every worker RPC
+# stress case in that file — not only timeout / destroy / JS cancel.
 #
 # Off-thread sync-hook unit tests similarly abort under GC after a long
 # ``tests/unit/`` streak (Linux Aborted / Windows 0x80000003). Isolate them.

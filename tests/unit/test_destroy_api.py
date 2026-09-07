@@ -43,7 +43,6 @@ POST_DESTROY_ACTIONS: dict[str, Callable[[WebView], object]] = {
     "clear_all_browsing_data": lambda w: w.clear_all_browsing_data(),
     "eval_js": lambda w: w.eval_js("1"),
     "eval_js_with_callback": lambda w: w.eval_js_with_callback("1", lambda _r: None),
-    "execute_script": lambda w: w.execute_script("1"),
     "inject_script": lambda w: w.inject_script("void 0"),
     "add_init_script": lambda w: w.add_init_script("void 0"),
     "emit": lambda w: w.emit("x"),
@@ -87,9 +86,7 @@ POST_DESTROY_ACTIONS: dict[str, Callable[[WebView], object]] = {
     "wait_until_ready": lambda w: w.wait_until_ready(timeout=0.05),
 }
 
-POST_DESTROY_ALLOWED = frozenset(
-    {"destroy", "get_state", "take_queue_drop_counts", "take_queue_drop_stats"}
-)
+POST_DESTROY_ALLOWED = frozenset({"destroy", "get_state", "take_queue_drop_stats"})
 
 POST_DESTROY_READABLE_PROPERTIES = frozenset(
     {
@@ -147,8 +144,6 @@ def test_destroy_is_idempotent_and_drop_counts_readable(tk_root) -> None:
     web.destroy()
     web.destroy()
     assert web.destroyed is True
-    with pytest.warns(DeprecationWarning, match="take_queue_drop_stats"):
-        assert web.take_queue_drop_counts() == (0, 0, 0, 0, 0, 0)
     assert web.take_queue_drop_stats() == (
         0,
         0,
