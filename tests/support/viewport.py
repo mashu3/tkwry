@@ -65,7 +65,7 @@ def read_viewport_via_callback(
 def read_viewport(web: WebView, root, *, steps: int = 200) -> tuple[int, int] | None:
     """Return ``(innerWidth, innerHeight)`` from the loaded document via JS IPC."""
     results: list[tuple[int, int]] = []
-    previous_handler = web._ipc_handler
+    previous_handler = web._on_ipc
 
     def capture(message: str) -> None:
         try:
@@ -77,7 +77,7 @@ def read_viewport(web: WebView, root, *, steps: int = 200) -> tuple[int, int] | 
         if previous_handler is not None:
             previous_handler(message)
 
-    web.set_ipc_handler(capture)
+    web.set_on_ipc(capture)
     query = (
         "window.ipc.postMessage(JSON.stringify({"
         "w: Math.round(window.innerWidth), "

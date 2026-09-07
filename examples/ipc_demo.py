@@ -275,7 +275,7 @@ def main() -> None:
     web = WebView(
         web_frame,
         html=HTML,
-        ipc_handler=on_ipc,
+        on_ipc=on_ipc,
         rpc_traceback=True,
         on_creation_failed=lambda exc: messagebox.showerror(
             "WebView failed", str(exc), parent=root

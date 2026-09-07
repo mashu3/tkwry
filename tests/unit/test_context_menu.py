@@ -76,11 +76,11 @@ def test_merge_context_menu_script() -> None:
     assert CONTEXT_MENU_JS in merged
 
 
-def test_set_context_menu_handler_delivers(tk_root) -> None:
+def test_set_on_context_menu_delivers(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>x</p>", default_context_menus=False)
     seen: list[ContextMenuEvent] = []
-    web.set_context_menu_handler(seen.append)
+    web.set_on_context_menu(seen.append)
     web._deliver_context_menu_event(
         ContextMenuEvent(x=5, y=6, link_url="https://a.example/")
     )
@@ -96,7 +96,7 @@ def test_handler_takes_priority_over_items(tk_root) -> None:
     web = WebView(frame, html="<p>x</p>", default_context_menus=False)
     clicks: list[str] = []
     web.set_context_menu([("Back", lambda: clicks.append("item"))])
-    web.set_context_menu_handler(lambda _e: clicks.append("handler"))
+    web.set_on_context_menu(lambda _e: clicks.append("handler"))
     web._deliver_context_menu_event(ContextMenuEvent(x=1, y=1))
     assert clicks == ["handler"]
     web.destroy()
@@ -208,7 +208,7 @@ def test_clearing_context_menu_removes_bridge(tk_root) -> None:
     frame.destroy()
 
 
-def test_clearing_context_menu_handler_removes_bridge_when_no_items(
+def test_clearing_on_context_menu_removes_bridge_when_no_items(
     tk_root,
 ) -> None:
     frame = tk.Frame(tk_root)
@@ -229,11 +229,11 @@ def test_clearing_context_menu_handler_removes_bridge_when_no_items(
             pass
 
     web._webview = _Native()  # type: ignore[assignment]
-    web.set_context_menu_handler(lambda _e: None)
+    web.set_on_context_menu(lambda _e: None)
     web._context_menu_bridge_injected = True
     evals.clear()
 
-    web.set_context_menu_handler(None)
+    web.set_on_context_menu(None)
 
     assert evals == [CONTEXT_MENU_DISABLE_JS]
     assert web._context_menu_bridge_injected is False
@@ -288,7 +288,7 @@ def test_deliver_via_ipc_message_path(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>x</p>", default_context_menus=False)
     seen: list[ContextMenuEvent] = []
-    web.set_context_menu_handler(seen.append)
+    web.set_on_context_menu(seen.append)
     payload = json.dumps(
         {
             "__tkwry": "contextmenu",

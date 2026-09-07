@@ -1548,8 +1548,8 @@ def test_creation_failure_raises_on_handler_setters(
     tk_root, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _frame, web = _web_with_creation_failure(tk_root, monkeypatch)
-    with pytest.raises(WebViewCreationError, match="set_ipc_handler"):
-        web.set_ipc_handler(lambda _msg: None)
+    with pytest.raises(WebViewCreationError, match="set_on_ipc"):
+        web.set_on_ipc(lambda _msg: None)
     with pytest.raises(WebViewCreationError, match="set_on_navigation"):
         web.set_on_navigation(lambda _event: True)
     with pytest.raises(WebViewCreationError, match="set_navigation_policy"):
@@ -1560,13 +1560,13 @@ def test_creation_failure_raises_on_handler_setters(
         web.set_on_title_changed(lambda _title: None)
     with pytest.raises(WebViewCreationError, match="set_on_new_window"):
         web.set_on_new_window(lambda _event: None)
-    with pytest.raises(WebViewCreationError, match="set_drag_drop_handler"):
-        web.set_drag_drop_handler(lambda *_args: None)
+    with pytest.raises(WebViewCreationError, match="set_on_drag_drop"):
+        web.set_on_drag_drop(lambda *_args: None)
     with pytest.raises(WebViewCreationError, match="set_on_download"):
         web.set_on_download(lambda _d: True)
     with pytest.raises(WebViewCreationError, match="set_on_download_complete"):
         web.set_on_download_complete(lambda *_args: None)
-    web.set_ipc_handler(None)
+    web.set_on_ipc(None)
     web.set_on_navigation(None)
 
 

@@ -59,15 +59,15 @@ def test_set_on_callback_error(tk_root) -> None:
         web.set_on_callback_error(lambda _exc, kind: seen.append(kind))
         web._invoke_callback(
             lambda: (_ for _ in ()).throw(RuntimeError("x")),
-            kind="ipc_handler",
+            kind="on_ipc",
         )
-        assert seen == ["ipc_handler"]
+        assert seen == ["on_ipc"]
         web.set_on_callback_error(None)
         web._invoke_callback(
             lambda: (_ for _ in ()).throw(RuntimeError("y")),
-            kind="ipc_handler",
+            kind="on_ipc",
         )
-        assert seen == ["ipc_handler"]
+        assert seen == ["on_ipc"]
     finally:
         web.destroy()
 

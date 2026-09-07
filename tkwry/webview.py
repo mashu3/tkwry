@@ -522,7 +522,7 @@ class WebView(WebViewRpcMixin):
     are logged to stderr and do not stop event delivery. Optional provisional
     ``on_callback_error=(exc, kind) -> None`` (and :meth:`set_on_callback_error`)
     routes those failures to app code instead; ``kind`` names the hook
-    (e.g. ``"on_page_load"``, ``"ipc_handler"``). Not in ``__all__`` — may
+    (e.g. ``"on_page_load"``, ``"on_ipc"``). Not in ``__all__`` — may
     change without notice while Alpha.
 
     **JavaScript** (``eval_js`` / ``eval_js_with_callback``): ``eval_js`` is
@@ -588,7 +588,7 @@ class WebView(WebViewRpcMixin):
         navigation_allow: Collection[str] | None = None,
         open_external: bool = False,
         download_allow: Collection[str] | None = None,
-        ipc_handler: IpcHandler | None = None,
+        on_ipc: IpcHandler | None = None,
         spa_fallback: bool = False,
         app_dev: bool = False,
         csp: bool | str | None = None,
@@ -614,7 +614,7 @@ class WebView(WebViewRpcMixin):
         on_title_changed: TitleChangedHandler | None = None,
         on_new_window: NewWindowHandler | None = None,
         permission_handler: PermissionHandler | None = None,
-        drag_drop_handler: DragDropHandler | None = None,
+        on_drag_drop: DragDropHandler | None = None,
         on_download: DownloadHandler | None = None,
         on_download_started: DownloadStartedHandler | None = None,
         on_download_complete: DownloadCompleteHandler | None = None,
@@ -669,9 +669,9 @@ class WebView(WebViewRpcMixin):
         if untrusted:
             if app is not None:
                 raise ValueError("WebView: untrusted=True cannot be combined with app=")
-            if ipc_handler is not None:
+            if on_ipc is not None:
                 raise ValueError(
-                    "WebView: untrusted=True cannot be combined with ipc_handler="
+                    "WebView: untrusted=True cannot be combined with on_ipc="
                 )
             if bridge_origins is not None:
                 raise ValueError(
@@ -734,7 +734,7 @@ class WebView(WebViewRpcMixin):
         self._webview: NativeWebView | None = None
         self._native_gc_companion: NativeGcCompanion | None = None
         self._init_rpc_state(
-            ipc_handler=ipc_handler,
+            on_ipc=on_ipc,
             rpc_traceback=rpc_traceback,
         )
         self._untrusted = untrusted
@@ -758,14 +758,14 @@ class WebView(WebViewRpcMixin):
         self._on_title_changed = on_title_changed
         self._on_new_window = on_new_window
         self._permission_handler = permission_handler
-        self._drag_drop_handler = drag_drop_handler
+        self._on_drag_drop = on_drag_drop
         self._on_download = on_download
         self._on_download_started = on_download_started
         self._on_download_complete = on_download_complete
         self._on_download_failed = on_download_failed
         self._on_callback_error = on_callback_error
         self._context_menu_items = normalize_context_menu_items(context_menu)
-        self._context_menu_handler = on_context_menu
+        self._on_context_menu = on_context_menu
         self._context_menu_bridge_injected = False
         self._context_menu_started_hook = (
             context_menu is not None or on_context_menu is not None
@@ -1595,7 +1595,7 @@ class WebView(WebViewRpcMixin):
         self._destroyed = True
         self._dispose_context_menu_tk()
         self._context_menu_items = None
-        self._context_menu_handler = None
+        self._on_context_menu = None
         self._context_menu_started_hook = False
         self._inject_scripts.clear()
         if self._session is not None:
@@ -2524,18 +2524,18 @@ class WebView(WebViewRpcMixin):
             self._ensure_tk_wakeup_pipe()
             self._ensure_event_poll()
 
-    def set_drag_drop_handler(self, handler: DragDropHandler | None) -> None:
+    def set_on_drag_drop(self, handler: DragDropHandler | None) -> None:
         """Register a notify-only drop handler (runs on the Tk main thread).
 
         Events are queued from the WebKit thread; the handler cannot accept or
         deny the OS drop. Clearing with ``None`` stops native collection.
         """
-        self._require_not_destroyed("set_drag_drop_handler")
+        self._require_not_destroyed("set_on_drag_drop")
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
-                "WebView native creation failed; cannot call set_drag_drop_handler()"
+                "WebView native creation failed; cannot call set_on_drag_drop()"
             ) from self._creation_error
-        self._drag_drop_handler = handler
+        self._on_drag_drop = handler
         if self._webview is not None:
             self._webview.set_drag_drop_listening(handler is not None)
         if handler is not None:
@@ -2618,7 +2618,7 @@ class WebView(WebViewRpcMixin):
         (``preventDefault`` + IPC). On Windows, requires
         ``default_context_menus=False`` (auto-forced before native create).
 
-        Ignored when :meth:`set_context_menu_handler` is set — the handler
+        Ignored when :meth:`set_on_context_menu` is set — the handler
         takes priority.
         """
         self._require_not_destroyed("set_context_menu")
@@ -2645,29 +2645,27 @@ class WebView(WebViewRpcMixin):
             self._remove_context_menu_bridge()
         self._sync_page_load_listening()
 
-    def set_context_menu_handler(self, handler: ContextMenuHandler | None) -> None:
+    def set_on_context_menu(self, handler: ContextMenuHandler | None) -> None:
         """Register a host handler for page context-menu events.
 
         *handler* receives a :class:`~tkwry.ContextMenuEvent`. When set, it
         takes priority over :meth:`set_context_menu`. Pass ``None`` to clear.
         """
-        self._require_not_destroyed("set_context_menu_handler")
+        self._require_not_destroyed("set_on_context_menu")
         if self._untrusted:
-            raise ValueError(
-                "WebView: untrusted=True cannot use set_context_menu_handler"
-            )
+            raise ValueError("WebView: untrusted=True cannot use set_on_context_menu")
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
-                "WebView native creation failed; cannot call set_context_menu_handler()"
+                "WebView native creation failed; cannot call set_on_context_menu()"
             ) from self._creation_error
-        self._context_menu_handler = handler
+        self._on_context_menu = handler
         self._dispose_context_menu_tk()
         if handler is not None:
             self._context_menu_started_hook = True
         elif not self._context_menu_active():
             self._context_menu_started_hook = False
         if self._context_menu_active():
-            self._require_windows_context_menu_ready("set_context_menu_handler")
+            self._require_windows_context_menu_ready("set_on_context_menu")
             self._enable_context_menu_bridge()
         else:
             if self._webview is not None:
@@ -2706,7 +2704,7 @@ class WebView(WebViewRpcMixin):
     def _deliver_context_menu_event(self, event: ContextMenuEvent) -> None:
         if self._destroyed:
             return
-        handler = self._context_menu_handler
+        handler = self._on_context_menu
         if handler is not None:
             self._invoke_callback(handler, event, kind="on_context_menu")
             return
@@ -2748,7 +2746,7 @@ class WebView(WebViewRpcMixin):
         """Register a provisional hook for exceptions in user callbacks.
 
         *handler* receives ``(exc, kind)`` where ``kind`` names the failing
-        hook (e.g. ``"on_page_load"``, ``"ipc_handler"``). When unset,
+        hook (e.g. ``"on_page_load"``, ``"on_ipc"``). When unset,
         failures are logged to stderr (default). Not part of the stable
         public contract — may change without notice while Alpha.
         """
@@ -3067,7 +3065,7 @@ class WebView(WebViewRpcMixin):
                 self._rpc_bridge_wanted,
                 bool(self._rpc_methods),
                 self._on_title_changed is not None,
-                self._drag_drop_handler is not None,
+                self._on_drag_drop is not None,
                 self._download_policy_active(),
                 self._on_download_started is not None,
                 self._on_download_complete is not None,
@@ -3161,7 +3159,7 @@ class WebView(WebViewRpcMixin):
     ) -> None:
         """Inject a drag-drop event into the same queue OS drops use (tests)."""
         native = self._webview
-        if native is None or self._drag_drop_handler is None:
+        if native is None or self._on_drag_drop is None:
             return
         # Python handlers are authoritative for async queues.
         native.set_drag_drop_listening(True)
@@ -3480,7 +3478,7 @@ class WebView(WebViewRpcMixin):
         native.set_ipc_listening(self._ipc_listening_wanted())
         native.set_page_load_listening(self._page_load_listening_wanted())
         native.set_title_listening(self._title_listening_wanted())
-        native.set_drag_drop_listening(self._drag_drop_handler is not None)
+        native.set_drag_drop_listening(self._on_drag_drop is not None)
         native.set_download_complete_listening(True)
 
     def _invoke_callback(
@@ -3792,14 +3790,12 @@ class WebView(WebViewRpcMixin):
                 self._invoke_callback(handler, title, kind="on_title_changed")
 
     def _deliver_drag_drop_events(self) -> None:
-        handler = self._drag_drop_handler
+        handler = self._on_drag_drop
         native = self._webview
         if handler is None or native is None:
             return
         for event, paths, position in native.drain_drag_drop_events():
-            self._invoke_callback(
-                handler, event, paths, position, kind="drag_drop_handler"
-            )
+            self._invoke_callback(handler, event, paths, position, kind="on_drag_drop")
 
     def _deliver_page_load_events(self) -> None:
         page_load = self._on_page_load
@@ -3859,7 +3855,7 @@ class WebView(WebViewRpcMixin):
         self._deliver_page_load_events()
         if self._title_listening_wanted():
             self._deliver_title_events()
-        if self._drag_drop_handler is not None:
+        if self._on_drag_drop is not None:
             self._deliver_drag_drop_events()
         self._deliver_download_complete_events()
 
@@ -4073,7 +4069,7 @@ class WebView(WebViewRpcMixin):
         if self._title_listening_wanted():
             self._deliver_title_events()
 
-        if self._drag_drop_handler is not None:
+        if self._on_drag_drop is not None:
             self._deliver_drag_drop_events()
 
         self._deliver_download_complete_events()
@@ -4186,7 +4182,7 @@ class WebView(WebViewRpcMixin):
         kwargs["page_load_listening"] = self._page_load_listening_wanted()
         kwargs["ipc_listening"] = self._ipc_listening_wanted()
         kwargs["title_listening"] = self._title_listening_wanted()
-        kwargs["drag_drop_listening"] = self._drag_drop_handler is not None
+        kwargs["drag_drop_listening"] = self._on_drag_drop is not None
         if self._download_started_native_wanted():
             kwargs["on_download_started"] = self._native_download_started
         kwargs["download_complete_listening"] = True

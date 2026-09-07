@@ -124,7 +124,7 @@ def main() -> None:
         frame,
         html=HTML,
         background_color=(26, 26, 46, 255),
-        drag_drop_handler=on_drag_drop,
+        on_drag_drop=on_drag_drop,
         on_creation_failed=lambda exc: messagebox.showerror(
             "WebView failed", str(exc), parent=root
         ),

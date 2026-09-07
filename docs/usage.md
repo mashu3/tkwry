@@ -509,7 +509,7 @@ web.set_context_menu(
     ]
 )
 # Or handle yourself (takes priority over set_context_menu):
-# web.set_context_menu_handler(lambda e: print(e.link_url, e.x, e.y))
+# web.set_on_context_menu(lambda e: print(e.link_url, e.x, e.y))
 
 # Downloads: untrusted=True denies unless on_download / download_allow permits.
 # on_download takes one-arg Download; return download.save("./downloads"),
@@ -564,7 +564,7 @@ fields including `download_complete` and `rpc_stream`).
 Callback exceptions are printed to stderr and do not stop event delivery.
 Optional provisional ``on_callback_error=(exc, kind) -> None`` (or
 :meth:`WebView.set_on_callback_error`) routes those failures to app code;
-``kind`` names the hook (e.g. ``"on_page_load"``, ``"ipc_handler"``). Not
+``kind`` names the hook (e.g. ``"on_page_load"``, ``"on_ipc"``). Not
 in ``tkwry.__all__`` — may change without notice while Alpha.
 
 Trust / download policy: [Trust boundaries](trust.md).
@@ -583,7 +583,7 @@ def on_drop(event, paths, position):
     if event == DragDropEvent.Drop:
         print("files:", paths)
 
-web = WebView(frame, html="...", drag_drop_handler=on_drop)
+web = WebView(frame, html="...", on_drag_drop=on_drop)
 ```
 
 See [`examples/dnd_demo.py`](../examples/dnd_demo.py).
@@ -735,7 +735,7 @@ Short map of **preferred** call shapes, how to **observe** failures, and
 
 | Goal | Prefer | Also OK |
 |------|--------|---------|
-| JS → Python request/response | ``@web.rpc`` + ``window.tkwry.invoke`` (named kwargs sugar); ``@web.expose`` + ``window.tkwry.call`` for full options | raw ``set_ipc_handler`` only for fire-and-forget strings |
+| JS → Python request/response | ``@web.rpc`` + ``window.tkwry.invoke`` (named kwargs sugar); ``@web.expose`` + ``window.tkwry.call`` for full options | raw ``set_on_ipc`` only for fire-and-forget strings |
 | Download allow / dest | One-arg ``Download``: ``on_download=lambda d: d.save("./downloads")`` | — |
 | Navigation allow/deny | ``set_navigation_policy`` / ``on_navigation`` with one-arg ``NavigationEvent`` (``event.url``, …) | — |
 | New window | ``on_new_window`` with one-arg ``NavigationEvent`` → ``NewWindowResponse`` | — |
@@ -765,8 +765,6 @@ Queue overflow is separate — [Observability](#observability)
 | Topic | Behavior (keep as-is in 0.1.x) |
 |-------|--------------------------------|
 | ``permission_handler=`` | Create-only; no ``set_permission_handler`` |
-| Context menu | ``on_context_menu=`` ↔ ``set_context_menu_handler`` (not ``set_on_context_menu``) |
-| DnD / raw IPC | ``drag_drop_handler=`` / ``ipc_handler=`` (no ``on_`` prefix) |
 | Background color | ``background_color=(r,g,b,a)`` at create; ``set_background_color(r, g, b, a=255)`` after ready |
 | Create-failed hook | ``on_creation_failed=`` vs ``when_failed()`` — both register; prefer ``when_failed`` / bind for late listeners |
 | Download cancel | Return ``False`` or ``None`` from ``on_download`` (equivalent start-deny) |
@@ -811,8 +809,8 @@ after; prefer one style per app.
 | Content | `load_url` (`headers=` this request only, http(s)), `load_html`, `reload`, `go_back` / `go_forward` / `can_go_back` / `can_go_forward`, `print`, `print_with_options` (macOS margins), `url` |
 | Cookies / browsing data | `cookies`, `cookies_for_url`, `set_cookie`, `delete_cookie` (`Cookie` or `name` + page `url`), `clear_all_browsing_data`, `Cookie` |
 | JavaScript | `eval_js` (`on_error`), `eval_js_with_callback`, `inject_script`, `add_init_script`, `last_eval_error`, `<<WebViewEvalFailed>>` |
-| IPC / RPC / emit | `set_ipc_handler`, `expose` / `rpc` / `unexpose` (`allow_any_origin=`, `run_in=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `invoke` / `stream` / `cancel`) |
-| Callbacks | `set_on_navigation`, `set_navigation_policy`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_drag_drop_handler`, `set_on_download`, `set_on_download_started`, `set_on_download_complete`, `set_on_download_failed`, `set_context_menu`, `set_context_menu_handler`; create-only `permission_handler=` |
+| IPC / RPC / emit | `set_on_ipc`, `expose` / `rpc` / `unexpose` (`allow_any_origin=`, `run_in=`), `emit`, `WebSession.emit_all`, `watch_app`, `set_bridge_origins`, `set_bridge_allow` (JS: `window.tkwry.call` / `invoke` / `stream` / `cancel`) |
+| Callbacks | `set_on_navigation`, `set_navigation_policy`, `set_on_page_load`, `set_on_title_changed`, `set_on_new_window`, `set_on_drag_drop`, `set_on_download`, `set_on_download_started`, `set_on_download_complete`, `set_on_download_failed`, `set_context_menu`, `set_on_context_menu`; create-only `permission_handler=` |
 | Appearance | `set_background_color`, `set_zoom` / `reset_zoom`, `focus`, `focus_parent`, `open_devtools`, `close_devtools`, `is_devtools_open` |
 | Create-only | `set_user_agent`, `set_initialization_script`, `add_init_script` (raise after native create); `devtools=`, `clipboard=`, `javascript_enabled=`, `autoplay=`, `hotkeys_zoom=`, `back_forward_gestures=`, `default_context_menus=`, `https_scheme=`, `proxy=`, `permission_handler=` |
 | Layout | `pack`, `grid`, `place`, `sync_bounds`, `bounds` (native geometry in ``set_bounds`` space) |
@@ -823,7 +821,7 @@ Constructor options: `width` / `height`, `url`, `html`, `app`, `spa_fallback`,
 `app_dev`, `csp` / `coop` / `corp`, `session` / `profile` / `user_data_dir` /
 `data_directory` / `ephemeral` / `incognito` (alias of `ephemeral`),
 `untrusted`, `bridge_origins`, `bridge_allow`, `navigation_allow`,
-`open_external`, `download_allow`, `ipc_handler`, `rpc_traceback`, `devtools`,
+`open_external`, `download_allow`, `on_ipc`, `rpc_traceback`, `devtools`,
 `clipboard`, `javascript_enabled`, `autoplay`, `hotkeys_zoom`,
 `back_forward_gestures`, `default_context_menus`, `https_scheme`, `proxy`,
 `background_color`, `user_agent`,

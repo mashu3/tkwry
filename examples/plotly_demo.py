@@ -255,7 +255,7 @@ def main() -> None:
                 web_frame,
                 app=app_dir,
                 app_dev=True,
-                ipc_handler=on_ipc,
+                on_ipc=on_ipc,
                 on_creation_failed=lambda exc: messagebox.showerror(
                     "WebView failed", str(exc), parent=root
                 ),
@@ -266,7 +266,7 @@ def main() -> None:
             web = WebView(
                 web_frame,
                 html=page_html(PLOTLY_CDN),
-                ipc_handler=on_ipc,
+                on_ipc=on_ipc,
                 on_creation_failed=lambda exc: messagebox.showerror(
                     "WebView failed", str(exc), parent=root
                 ),

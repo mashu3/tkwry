@@ -4936,7 +4936,7 @@ class BrowserApp:
             "session": self.content_session,
             "focused": False,
             "bridge_origins": "*",
-            "ipc_handler": on_ipc,
+            "on_ipc": on_ipc,
             "initialization_script": LINK_HELPER_JS,
             "on_title_changed": on_title,
             "on_page_load": on_page_load,
@@ -4952,7 +4952,7 @@ class BrowserApp:
             "on_download_failed": lambda d: self.status_var.set(
                 f"Download failed: {d.url}"
             ),
-            "drag_drop_handler": on_drop,
+            "on_drag_drop": on_drop,
             "permission_handler": permission_handler,
             "on_context_menu": self._popup_context_menu,
             "default_context_menus": False,

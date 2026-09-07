@@ -299,7 +299,7 @@ def test_page_load_discards_backlog_before_handler_attach(tk_root) -> None:
     frame.destroy()
 
 
-def test_ipc_handler_exception_does_not_stop_poll(tk_root) -> None:
+def test_on_ipc_exception_does_not_stop_poll(tk_root) -> None:
     received: list[str] = []
 
     frame = host_frame(tk_root)
@@ -312,7 +312,7 @@ def test_ipc_handler_exception_does_not_stop_poll(tk_root) -> None:
             raise ValueError("boom")
         received.append(msg)
 
-    web.set_ipc_handler(handler)
+    web.set_on_ipc(handler)
     web._enqueue_ipc("bad")
     web._enqueue_ipc("ok")
     pump(tk_root, steps=50)
@@ -332,7 +332,7 @@ def test_ipc_post_message_reaches_handler(tk_root) -> None:
     web = WebView(
         frame,
         html="<p>ipc-e2e</p>",
-        ipc_handler=lambda msg: received.append(msg),
+        on_ipc=lambda msg: received.append(msg),
         on_page_load=lambda evt, _url: loaded.append(evt),
     )
     assert web.wait_until_ready(timeout=10.0)
@@ -813,7 +813,7 @@ def test_drag_drop_native_queues_without_blocking(tk_root) -> None:
     def handler(evt, paths, pos) -> None:
         received.append((evt, paths, pos))
 
-    web.set_drag_drop_handler(handler)
+    web.set_on_drag_drop(handler)
 
     web._native_drag_drop(DragDropEvent.Enter, ["/tmp/a.txt"], (1, 2))
     web._native_drag_drop(DragDropEvent.Over, [], (3, 4))
@@ -1092,7 +1092,7 @@ def test_rpc_concurrent_calls_and_ipc_mix(tk_root) -> None:
     web = WebView(
         frame,
         html="<title>rpc</title><p>rpc</p>",
-        ipc_handler=received.append,
+        on_ipc=received.append,
     )
 
     @web.expose

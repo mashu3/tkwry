@@ -54,7 +54,7 @@ POST_DESTROY_ACTIONS: dict[str, Callable[[WebView], object]] = {
     "open_devtools": lambda w: w.open_devtools(),
     "close_devtools": lambda w: w.close_devtools(),
     "is_devtools_open": lambda w: w.is_devtools_open(),
-    "set_ipc_handler": lambda w: w.set_ipc_handler(lambda _m: None),
+    "set_on_ipc": lambda w: w.set_on_ipc(lambda _m: None),
     "set_bridge_origins": lambda w: w.set_bridge_origins(["https://example.com"]),
     "set_bridge_allow": lambda w: w.set_bridge_allow(lambda _u: True),
     "expose": lambda w: w.expose(_ping),
@@ -68,7 +68,7 @@ POST_DESTROY_ACTIONS: dict[str, Callable[[WebView], object]] = {
     "set_on_new_window": lambda w: w.set_on_new_window(
         lambda _event: NewWindowResponse.Deny
     ),
-    "set_drag_drop_handler": lambda w: w.set_drag_drop_handler(lambda *_a: None),
+    "set_on_drag_drop": lambda w: w.set_on_drag_drop(lambda *_a: None),
     "set_on_download": lambda w: w.set_on_download(lambda *_a: True),
     "set_on_download_complete": lambda w: w.set_on_download_complete(
         lambda _d, _ok: None
@@ -76,7 +76,7 @@ POST_DESTROY_ACTIONS: dict[str, Callable[[WebView], object]] = {
     "set_on_download_started": lambda w: w.set_on_download_started(lambda _d: None),
     "set_on_download_failed": lambda w: w.set_on_download_failed(lambda _d: None),
     "set_context_menu": lambda w: w.set_context_menu([("X", lambda: None)]),
-    "set_context_menu_handler": lambda w: w.set_context_menu_handler(lambda _e: None),
+    "set_on_context_menu": lambda w: w.set_on_context_menu(lambda _e: None),
     "sync_bounds": lambda w: w.sync_bounds(),
     "pack": lambda w: w.pack(),
     "grid": lambda w: w.grid(),

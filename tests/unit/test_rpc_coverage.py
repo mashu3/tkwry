@@ -128,11 +128,11 @@ def test_watch_app_requires_app(tk_root) -> None:
     frame.destroy()
 
 
-def test_set_ipc_handler_rejects_untrusted(tk_root) -> None:
+def test_set_on_ipc_rejects_untrusted(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>x</p>", untrusted=True)
     with pytest.raises(ValueError, match="untrusted"):
-        web.set_ipc_handler(lambda _m: None)
+        web.set_on_ipc(lambda _m: None)
     web.destroy()
     frame.destroy()
 

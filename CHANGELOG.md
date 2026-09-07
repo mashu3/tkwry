@@ -22,12 +22,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - RPC workers use ``run_in="worker"`` only (``thread=`` removed); ``@web.rpc``
   + ``window.tkwry.invoke`` stay the documented naming sugar for ``expose`` /
   ``call``
+- IPC / drag-drop / context-menu host hooks use ``on_*`` / ``set_on_*`` names
+  (``on_ipc`` / ``set_on_ipc``, ``on_drag_drop`` / ``set_on_drag_drop``,
+  ``on_context_menu`` / ``set_on_context_menu``). ``set_context_menu`` (menu
+  items) is unchanged
 
 ### Removed
 
 - ``WebView.execute_script`` (use ``eval_js``)
 - ``WebView.take_queue_drop_counts`` (use ``take_queue_drop_stats`` →
   ``QueueDropCounts``)
+- ``ipc_handler`` / ``set_ipc_handler``, ``drag_drop_handler`` /
+  ``set_drag_drop_handler``, and ``set_context_menu_handler`` (use the
+  ``on_*`` / ``set_on_*`` names above)
 
 ### CI
 
@@ -48,7 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Tests
 
-- Dual ctor/setter equivalence covers ``ipc_handler``, ``on_download_started``,
+- Dual ctor/setter equivalence covers ``on_ipc``, ``on_download_started``,
   and ``on_download_failed`` (including clear-to-default)
 
 ### Fixed
@@ -58,7 +65,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ``WebView`` teardown / snapshot paths no longer use silent
   ``except Exception: pass`` — cleanup failures log via traceback; ``get_state``
   and poll probes set explicit defaults
-- Clearing ``set_context_menu(None)`` / ``set_context_menu_handler(None)`` also
+- Clearing ``set_context_menu(None)`` / ``set_on_context_menu(None)`` also
   drops the page-load Started latch so listening does not stay on forever
 - Flagship ``tkwry_browser``: Cmd/Ctrl+L takes chrome focus (and releases
   content) before focusing the URL field; URL-bar cut requires a selection so

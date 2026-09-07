@@ -35,10 +35,10 @@ def _snapshot(web: WebView) -> dict[str, Any]:
         "on_download_started": web._on_download_started is not None,
         "on_download_complete": web._on_download_complete is not None,
         "on_download_failed": web._on_download_failed is not None,
-        "ipc_handler": web._ipc_handler is not None,
-        "drag_drop": web._drag_drop_handler is not None,
+        "on_ipc": web._on_ipc is not None,
+        "on_drag_drop": web._on_drag_drop is not None,
         "context_menu": web._context_menu_items is not None,
-        "on_context_menu": web._context_menu_handler is not None,
+        "on_context_menu": web._on_context_menu is not None,
     }
 
 
@@ -88,10 +88,10 @@ def _equivalence_case(
             "set_on_download_failed",
             lambda _download: None,
         ),
-        _equivalence_case("ipc_handler", "set_ipc_handler", lambda _msg: None),
+        _equivalence_case("on_ipc", "set_on_ipc", lambda _msg: None),
         _equivalence_case(
-            "drag_drop_handler",
-            "set_drag_drop_handler",
+            "on_drag_drop",
+            "set_on_drag_drop",
             lambda _evt, _paths, _pos: None,
         ),
         _equivalence_case(
@@ -101,7 +101,7 @@ def _equivalence_case(
         ),
         _equivalence_case(
             "on_context_menu",
-            "set_context_menu_handler",
+            "set_on_context_menu",
             lambda _e: None,
         ),
     ],
@@ -157,18 +157,18 @@ def test_handler_ctor_matches_setter(
             "set_on_download_failed",
             lambda w: w.set_on_download_failed(lambda _d: None),
         ),
-        ("set_ipc_handler", lambda w: w.set_ipc_handler(lambda _m: None)),
+        ("set_on_ipc", lambda w: w.set_on_ipc(lambda _m: None)),
         (
-            "set_drag_drop_handler",
-            lambda w: w.set_drag_drop_handler(lambda *_a: None),
+            "set_on_drag_drop",
+            lambda w: w.set_on_drag_drop(lambda *_a: None),
         ),
         (
             "set_context_menu",
             lambda w: w.set_context_menu([("X", lambda: None)]),
         ),
         (
-            "set_context_menu_handler",
-            lambda w: w.set_context_menu_handler(lambda _e: None),
+            "set_on_context_menu",
+            lambda w: w.set_on_context_menu(lambda _e: None),
         ),
     ],
 )

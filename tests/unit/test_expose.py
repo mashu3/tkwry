@@ -82,7 +82,7 @@ def test_rpc_delivered_from_dedicated_queue(tk_root) -> None:
         sums.append(total)
         return total
 
-    web.set_ipc_handler(ipc_seen.append)
+    web.set_on_ipc(ipc_seen.append)
     native = MagicMock()
     native.drain_window_ipc_messages.return_value = [
         (
@@ -397,7 +397,7 @@ def test_ipc_and_rpc_delivered_in_enqueue_order(tk_root) -> None:
         order.append("rpc")
         return "ok"
 
-    web.set_ipc_handler(lambda msg: order.append(f"ipc:{msg}"))
+    web.set_on_ipc(lambda msg: order.append(f"ipc:{msg}"))
     native = MagicMock()
     native.drain_window_ipc_messages.return_value = [
         ("about:blank", "first"),

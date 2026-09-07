@@ -3,7 +3,7 @@
 Roles:
 
 - **IPC** — fire-and-forget JS → Python via ``window.ipc.postMessage`` /
-  :meth:`~tkwry.WebView.set_ipc_handler` (raw string).
+  :meth:`~tkwry.WebView.set_on_ipc` (raw string).
 - **RPC** — request/response JS → Python via ``window.tkwry.call`` /
   ``window.tkwry.invoke`` / :meth:`~tkwry.WebView.expose` (Promise + JSON
   result or structured error).

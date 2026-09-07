@@ -288,7 +288,7 @@ def test_set_on_title_changed_none_clears_handler(tk_root) -> None:
     frame.destroy()
 
 
-def test_set_drag_drop_handler_none_clears_handler(tk_root) -> None:
+def test_set_on_drag_drop_none_clears_handler(tk_root) -> None:
     from tkwry import DragDropEvent
 
     frame = bare_frame(tk_root)
@@ -301,12 +301,12 @@ def test_set_drag_drop_handler_none_clears_handler(tk_root) -> None:
     def handler(evt, paths, pos) -> None:
         received.append((evt, paths, pos))
 
-    web.set_drag_drop_handler(handler)
+    web.set_on_drag_drop(handler)
     web._native_drag_drop(DragDropEvent.Drop, ["/tmp/a.txt"], (1, 2))
     pump(tk_root, steps=10)
     assert len(received) == 1
 
-    web.set_drag_drop_handler(None)
+    web.set_on_drag_drop(None)
     web._native_drag_drop(DragDropEvent.Drop, ["/tmp/b.txt"], (3, 4))
     pump(tk_root, steps=10)
     assert len(received) == 1
@@ -317,19 +317,19 @@ def test_set_drag_drop_handler_none_clears_handler(tk_root) -> None:
     frame.destroy()
 
 
-def test_set_ipc_handler_none_stops_collecting(tk_root) -> None:
+def test_set_on_ipc_none_stops_collecting(tk_root) -> None:
     frame = bare_frame(tk_root)
     web = WebView(frame, width=400, height=300, html="<p>ipc</p>")
     layout_bare_frame(frame, width=400, height=300)
     assert web.wait_until_ready(timeout=10.0)
 
     received: list[str] = []
-    web.set_ipc_handler(lambda msg: received.append(msg))
+    web.set_on_ipc(lambda msg: received.append(msg))
     web._enqueue_ipc("one")
     pump(tk_root, steps=10)
     assert received == ["one"]
 
-    web.set_ipc_handler(None)
+    web.set_on_ipc(None)
     web._enqueue_ipc("two")
     pump(tk_root, steps=10)
     assert received == ["one"]

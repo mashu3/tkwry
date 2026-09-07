@@ -42,7 +42,7 @@ on first launch. Offline, the WebViews open but the editor and preview stay blan
 ```python
 from tkwry import WebView
 
-editor = WebView(left_frame, html=EDITOR_HTML, ipc_handler=on_ipc)
+editor = WebView(left_frame, html=EDITOR_HTML, on_ipc=on_ipc)
 preview = WebView(right_frame, html=PREVIEW_HTML)
 ```
 
@@ -2231,7 +2231,7 @@ class MarkdownEditorDemo:
         self._editor_web = WebView(
             editor_frame,
             html=HtmlPages.editor(initial_tabs),
-            ipc_handler=self._on_editor_ipc,
+            on_ipc=self._on_editor_ipc,
             on_creation_failed=lambda exc: messagebox.showerror(
                 "WebView failed", str(exc), parent=self.root
             ),

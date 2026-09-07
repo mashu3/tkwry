@@ -6,7 +6,7 @@ execution model, cancel contract, streaming, and limits.
 
 | Direction | Role | Python | JavaScript |
 |-----------|------|--------|------------|
-| JS → Python | IPC (event) | `set_ipc_handler` / `ipc_handler=` | `window.ipc.postMessage(str)` |
+| JS → Python | IPC (event) | `set_on_ipc` / `on_ipc=` | `window.ipc.postMessage(str)` |
 | JS → Python | RPC (call) | `@web.expose` / `@web.rpc` | `await window.tkwry.call(name, ...)` |
 | JS → Python | RPC (invoke) | `@web.rpc("name")` (preferred sugar) | `await window.tkwry.invoke(name, { ... })` |
 | JS → Python | RPC (stream) | sync generator `@web.expose` | `for await (const x of window.tkwry.stream(name, ...))` |
@@ -18,7 +18,7 @@ foreign IPC is dropped. See [Trust boundaries](trust.md).
 
 ## IPC (`window.ipc.postMessage`)
 
-Keep raw `ipc_handler` + `window.ipc.postMessage` for free-form events:
+Keep raw `on_ipc` + `window.ipc.postMessage` for free-form events:
 
 ```python
 def on_message(msg: str) -> None:
@@ -27,7 +27,7 @@ def on_message(msg: str) -> None:
 web = WebView(
     frame,
     html='<button onclick="window.ipc.postMessage(\'hi\')">send</button>',
-    ipc_handler=on_message,
+    on_ipc=on_message,
 )
 ```
 

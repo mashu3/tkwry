@@ -69,10 +69,10 @@ class WebViewRpcMixin:
     def _init_rpc_state(
         self,
         *,
-        ipc_handler: Callable[[str], None] | None,
+        on_ipc: Callable[[str], None] | None,
         rpc_traceback: bool,
     ) -> None:
-        self._ipc_handler = ipc_handler
+        self._on_ipc = on_ipc
         self._rpc_methods: dict[str, RpcRegistration] = {}
         self._rpc_bootstrap_injected = False
         self._rpc_bridge_wanted = False
@@ -102,21 +102,21 @@ class WebViewRpcMixin:
         self._app_watch_max_files = WATCH_DEFAULT_MAX_FILES
         self._app_watch_limit_warned = False
 
-    def set_ipc_handler(self, handler: Callable[[str], None] | None) -> None:
+    def set_on_ipc(self, handler: Callable[[str], None] | None) -> None:
         """Register or clear the JS → Python IPC handler (Tk main thread).
 
         IPC is **event notification** (fire-and-forget string messages via
         ``window.ipc.postMessage``). For request/response, use
         :meth:`expose` / ``window.tkwry.call`` instead.
         """
-        self._require_not_destroyed("set_ipc_handler")
+        self._require_not_destroyed("set_on_ipc")
         if handler is not None and self._creation_error is not None:
             raise WebViewCreationError(
-                "WebView native creation failed; cannot call set_ipc_handler()"
+                "WebView native creation failed; cannot call set_on_ipc()"
             ) from self._creation_error
         if handler is not None and self._untrusted:
-            raise ValueError("WebView: untrusted=True cannot use ipc_handler")
-        self._ipc_handler = handler
+            raise ValueError("WebView: untrusted=True cannot use on_ipc")
+        self._on_ipc = handler
         if self._webview is not None:
             self._webview.set_ipc_listening(self._ipc_listening_wanted())
         if self._ipc_listening_wanted():
@@ -168,7 +168,7 @@ class WebViewRpcMixin:
         can call this method. ``set_bridge_origins("*")`` is refused if any
         exposed method lacks that flag.
 
-        The low-level ``ipc_handler`` remains available for raw
+        The low-level ``on_ipc`` remains available for raw
         ``window.ipc.postMessage`` traffic (IPC = events; RPC = request/response).
         Calls are accepted only from :attr:`~tkwry.WebView.bridge_origins`
         (and :attr:`~tkwry.WebView.bridge_allow`, if set).
@@ -368,14 +368,14 @@ class WebViewRpcMixin:
 
     def _ipc_listening_wanted(self) -> bool:
         return (
-            self._ipc_handler is not None
+            self._on_ipc is not None
             or bool(self._rpc_methods)
             or self._context_menu_active()
         )
 
     def _context_menu_active(self) -> bool:
         return (
-            getattr(self, "_context_menu_handler", None) is not None
+            getattr(self, "_on_context_menu", None) is not None
             or getattr(self, "_context_menu_items", None) is not None
         )
 
@@ -737,9 +737,9 @@ class WebViewRpcMixin:
                 oversized = True
             if oversized:
                 continue
-            handler = self._ipc_handler
+            handler = self._on_ipc
             if handler is not None:
-                self._invoke_callback(handler, message, kind="ipc_handler")
+                self._invoke_callback(handler, message, kind="on_ipc")
 
     def _handle_rpc_cancel(self, req_id: str, bridge_url: str) -> None:
         # Same-document only: ignore foreign / speculative cancels so a

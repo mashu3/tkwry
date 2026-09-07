@@ -91,10 +91,10 @@ class TestConstructorDimensionValidation:
 
 
 class TestDestroyedSetterValidation:
-    def test_set_ipc_handler_raises_after_destroy(self, tk_root) -> None:
+    def test_set_on_ipc_raises_after_destroy(self, tk_root) -> None:
         frame = tk.Frame(tk_root)
         web = WebView(frame)
         web.destroy()
         with pytest.raises(WebViewDestroyedError):
-            web.set_ipc_handler(lambda _msg: None)
+            web.set_on_ipc(lambda _msg: None)
         frame.destroy()

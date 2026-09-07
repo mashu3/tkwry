@@ -160,7 +160,7 @@ def test_untrusted_rejects_bridge_and_forces_ephemeral(tk_root) -> None:
     assert web._session is not None
     assert web._session.ephemeral is True
     with pytest.raises(ValueError, match="untrusted"):
-        web.set_ipc_handler(lambda _msg: None)
+        web.set_on_ipc(lambda _msg: None)
     with pytest.raises(ValueError, match="untrusted"):
 
         @web.expose
@@ -188,7 +188,7 @@ def test_untrusted_rejects_conflicting_constructor_args(
 ) -> None:
     frame = tk.Frame(tk_root)
     with pytest.raises(ValueError, match="untrusted"):
-        WebView(frame, html="<p>x</p>", untrusted=True, ipc_handler=lambda _m: None)
+        WebView(frame, html="<p>x</p>", untrusted=True, on_ipc=lambda _m: None)
     with pytest.raises(ValueError, match="untrusted"):
         WebView(frame, app=_app_dir(tmp_path), untrusted=True)
     with pytest.raises(ValueError, match="untrusted"):
@@ -309,7 +309,7 @@ def test_bridge_origins_star_allows_any_page(tk_root) -> None:
         web = WebView(frame, url="https://example.com/", bridge_origins="*")
     assert web.bridge_origins == "*"
     called: list[str] = []
-    web.set_ipc_handler(called.append)
+    web.set_on_ipc(called.append)
     native = MagicMock()
     native.drain_window_ipc_messages.return_value = [
         ("https://other.example/", "hello"),
@@ -355,7 +355,7 @@ def test_ipc_empty_source_normalizes_for_html_bridge(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, html="<p>x</p>")
     called: list[str] = []
-    web.set_ipc_handler(called.append)
+    web.set_on_ipc(called.append)
     native = MagicMock()
     native.drain_window_ipc_messages.return_value = [("", "hello")]
     web._webview = native
@@ -369,7 +369,7 @@ def test_ipc_empty_source_stays_denied_for_url_bridge(tk_root) -> None:
     frame = tk.Frame(tk_root)
     web = WebView(frame, url="https://example.com/")
     called: list[str] = []
-    web.set_ipc_handler(called.append)
+    web.set_on_ipc(called.append)
     native = MagicMock()
     native.drain_window_ipc_messages.return_value = [("", "hello")]
     web._webview = native
