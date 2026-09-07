@@ -73,6 +73,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (informational; no ``fail_under``). OS-foreign platform modules omitted
   via ``scripts/ci-coverage.sh``; extra unit cases in
   ``tests/unit/test_coverage_boost.py`` and helpers
+- Flagship ``examples/tkwry_browser.py`` requires tkwry ``>= 0.1.9``;
+  ``tests/unit/test_tkwry_browser.py`` is a 0.1.9 gate (before freeze CI)
 
 ### Fixed
 

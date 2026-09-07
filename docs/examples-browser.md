@@ -13,8 +13,10 @@ python examples/tkwry_browser.py
 python examples/tkwry_browser.py --private   # ephemeral content session
 ```
 
-Requires **tkwry >= 0.1.8** (rebuild with `pip install -e .` if import or
+Requires **tkwry >= 0.1.9** (rebuild with `pip install -e .` if import or
 version checks fail — a stale `_core.pyd` / `.so` is a common cause).
+Unit coverage: ``tests/unit/test_tkwry_browser.py`` (required on the 0.1.9
+cut before freeze CI).
 
 Single file: HTML/CSS/JS for the toolbar strip, side pane, and Settings are
 embedded and written to a temp tree at startup, then loaded with `app=`

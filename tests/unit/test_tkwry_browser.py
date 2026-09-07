@@ -1,4 +1,10 @@
-"""Unit tests for ``examples/tkwry_browser.py`` (no live WebView)."""
+"""Unit tests for ``examples/tkwry_browser.py`` (no live WebView).
+
+**v0.1.9 release gate (before freeze CI):** this module must stay green on
+the normal unit job. It covers the flagship version requirement
+(``REQUIRED_TKWRY >= 0.1.9``), New Tab / toolbar helpers, and related
+pure-Python paths — run before packaging smoke (**L13** / freeze).
+"""
 
 from __future__ import annotations
 
@@ -28,11 +34,13 @@ def browser():
     return mod
 
 
-def test_required_version_is_at_least_0_1_8(browser) -> None:
-    assert browser._version_tuple(browser.REQUIRED_TKWRY) >= (0, 1, 8)
+def test_required_version_is_at_least_0_1_9(browser) -> None:
+    assert browser._version_tuple(browser.REQUIRED_TKWRY) >= (0, 1, 9)
+    assert browser.REQUIRED_TKWRY == "0.1.9"
 
 
 def test_version_tuple_parses_and_rejects_garbage(browser) -> None:
+    assert browser._version_tuple("0.1.9") == (0, 1, 9)
     assert browser._version_tuple("0.1.8") == (0, 1, 8)
     assert browser._version_tuple("1.2.3.dev0") == (1, 2, 3)
     assert browser._version_tuple("") == (0, 0, 0)
@@ -43,11 +51,11 @@ def test_require_tkwry_rejects_older_version(
     browser, monkeypatch, tmp_path: Path
 ) -> None:
     fake = SimpleNamespace(
-        __version__="0.1.7",
+        __version__="0.1.8",
         __file__=str(tmp_path / "fake" / "tkwry"),
     )
     monkeypatch.setitem(sys.modules, "tkwry", fake)
-    with pytest.raises(SystemExit, match=r"tkwry >= 0\.1\.8"):
+    with pytest.raises(SystemExit, match=r"tkwry >= 0\.1\.9"):
         browser._require_tkwry()
 
 

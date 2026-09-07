@@ -6,7 +6,7 @@ local ``app=`` WebViews with RPC. Each uses its own UI ``WebSession`` (shared
 **separate** ``WebSession`` and ``bridge_origins="*"`` for link interception
 plus a small clipboard RPC surface (Tk pasteboard bridge).
 
-Requires tkwry ``>= 0.1.8``. Architecture notes: ``docs/examples-browser.md``.
+Requires tkwry ``>= 0.1.9``. Architecture notes: ``docs/examples-browser.md``.
 
 Run::
 
@@ -35,7 +35,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 
-REQUIRED_TKWRY = "0.1.8"
+REQUIRED_TKWRY = "0.1.9"
 
 
 def _ignore_best_effort_error() -> None:
