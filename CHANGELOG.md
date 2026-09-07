@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ``on_navigation`` / ``set_on_navigation`` handlers take
   :class:`~tkwry.NavigationEvent` only (bare URL ``str`` form removed; no
   signature sniffing)
+- ``on_download`` / ``set_on_download`` handlers take :class:`~tkwry.Download`
+  only (legacy ``(url, suggested_dest)`` form removed; no arity sniffing)
 
 ### CI
 

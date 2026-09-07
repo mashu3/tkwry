@@ -72,7 +72,7 @@ def _equivalence_case(
             "set_on_new_window",
             lambda _url: NewWindowResponse.Deny,
         ),
-        _equivalence_case("on_download", "set_on_download", lambda _url, _dest: True),
+        _equivalence_case("on_download", "set_on_download", lambda _d: True),
         _equivalence_case(
             "on_download_started",
             "set_on_download_started",
@@ -144,7 +144,7 @@ def test_handler_ctor_matches_setter(
             "set_on_new_window",
             lambda w: w.set_on_new_window(lambda _u: NewWindowResponse.Deny),
         ),
-        ("set_on_download", lambda w: w.set_on_download(lambda _u, _d: True)),
+        ("set_on_download", lambda w: w.set_on_download(lambda _d: True)),
         (
             "set_on_download_started",
             lambda w: w.set_on_download_started(lambda _d: None),

@@ -1563,7 +1563,7 @@ def test_creation_failure_raises_on_handler_setters(
     with pytest.raises(WebViewCreationError, match="set_drag_drop_handler"):
         web.set_drag_drop_handler(lambda *_args: None)
     with pytest.raises(WebViewCreationError, match="set_on_download"):
-        web.set_on_download(lambda _url, _dest: True)
+        web.set_on_download(lambda _d: True)
     with pytest.raises(WebViewCreationError, match="set_on_download_complete"):
         web.set_on_download_complete(lambda *_args: None)
     web.set_ipc_handler(None)

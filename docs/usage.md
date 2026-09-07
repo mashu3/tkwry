@@ -512,8 +512,8 @@ web.set_context_menu(
 # web.set_context_menu_handler(lambda e: print(e.link_url, e.x, e.y))
 
 # Downloads: untrusted=True denies unless on_download / download_allow permits.
-# on_download accepts Download (one arg) or legacy (url, suggested_dest).
-# Return download.save("./downloads"), an absolute path, True, or False.
+# on_download takes one-arg Download; return download.save("./downloads"),
+# an absolute path, True, or False.
 # Same-name files: unique_download_path(dest) — tkwry does not overwrite.
 # Cancel = start-deny only. No mid-flight abort / progress % — Platform notes.
 web = WebView(
@@ -734,15 +734,15 @@ Provisional callback exceptions: ``on_callback_error`` (see
 
 Short map of **preferred** call shapes, how to **observe** failures, and
 **intentional** asymmetries (not bugs). Prefer one style per app. Remaining
-dual call shapes (download two-arg, ``on_new_window`` ``str``) will be removed
-later — this section documents what to use **today**.
+dual call shapes (``on_new_window`` ``str``, complete/failed download tuples)
+will be removed later — this section documents what to use **today**.
 
 ### Recommended call shapes
 
 | Goal | Prefer | Also OK |
 |------|--------|---------|
 | JS → Python request/response | ``@web.expose`` / ``expose`` + ``window.tkwry.call`` | ``@web.rpc`` (alias); raw ``set_ipc_handler`` only for fire-and-forget strings |
-| Download allow / dest | One-arg ``Download``: ``on_download=lambda d: d.save("./downloads")`` | Legacy ``(url, suggested_dest)`` |
+| Download allow / dest | One-arg ``Download``: ``on_download=lambda d: d.save("./downloads")`` | — |
 | Navigation allow/deny | ``set_navigation_policy`` / ``on_navigation`` with one-arg ``NavigationEvent`` (``event.url``, …) | — |
 | Create failure | ``when_failed(cb)`` / ``<<WebViewCreateFailed>>`` | Constructor ``on_creation_failed=`` (same callback list) |
 

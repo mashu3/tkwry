@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,9 +10,7 @@ from typing import TypeAlias
 from tkwry._origin import unique_download_path
 
 DownloadDecision: TypeAlias = str | Path | bool | None
-DownloadHandler: TypeAlias = (
-    Callable[["Download"], DownloadDecision] | Callable[[str, str], DownloadDecision]
-)
+DownloadHandler: TypeAlias = Callable[["Download"], DownloadDecision]
 DownloadStartedHandler: TypeAlias = Callable[["Download"], None]
 DownloadFailedHandler: TypeAlias = Callable[[str, str | None], None]
 
@@ -63,31 +60,6 @@ class Download:
 def call_download_handler(
     handler: DownloadHandler,
     download: Download,
-    *,
-    url: str,
-    suggested_dest: str,
 ) -> DownloadDecision:
-    """Invoke *handler* using the one-arg ``Download`` or legacy two-arg form."""
-    positional = _positional_arity(handler)
-    if positional <= 1:
-        return handler(download)
-    return handler(url, suggested_dest)
-
-
-def _positional_arity(func: object) -> int:
-    sig = inspect.signature(func)
-    count = 0
-    for param in sig.parameters.values():
-        if param.kind == inspect.Parameter.VAR_POSITIONAL:
-            return 2
-        if param.kind in (
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        ):
-            if param.default is inspect.Parameter.empty:
-                count += 1
-            else:
-                break
-        elif param.kind == inspect.Parameter.KEYWORD_ONLY:
-            break
-    return count
+    """Invoke *handler* with *download*."""
+    return handler(download)

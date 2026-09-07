@@ -2588,8 +2588,7 @@ class WebView(WebViewRpcMixin):
     def set_on_download(self, handler: DownloadHandler | None) -> None:
         """Register a download start hook (Tk main thread; WebKit waits).
 
-        *handler* receives a :class:`~tkwry.Download` when it accepts one
-        argument, or legacy ``(url, suggested_dest)``. It may return ``True``
+        *handler* receives a :class:`~tkwry.Download`. It may return ``True``
         (allow suggested path), ``False`` / ``None`` (cancel), an **absolute**
         ``str`` / ``Path`` save location, or ``download.save(directory)``.
         Relative dests are denied. Use :func:`~tkwry.unique_download_path`
@@ -3373,9 +3372,7 @@ class WebView(WebViewRpcMixin):
             return self._default_download_allowed(url), None
         download = Download(url=url, suggested_dest=dest)
         try:
-            result = call_download_handler(
-                handler, download, url=url, suggested_dest=dest
-            )
+            result = call_download_handler(handler, download)
         except Exception:
             traceback.print_exc()
             return False, None

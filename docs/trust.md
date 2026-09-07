@@ -135,9 +135,10 @@ See [Usage — Shared session](usage.md#shared-session-websession).
   of the WebView2 page context menu (Inspect / Back / …);
   `untrusted=True` does **not** hide it.
 - **Downloads (trusted)** — wry default is allow-all. `download_allow`
-  restricts by origin / path prefix; `on_download(url, dest)` runs on the Tk
-  thread (WebKit waits) and may return `True`, `False`/`None`, or an **absolute**
-  save path (relative dests are denied). Use `unique_download_path(dest)` to
+  restricts by origin / path prefix; `on_download(download)` runs on the Tk
+  thread (WebKit waits) with a `Download` and may return `True`,
+  `False`/`None`, an **absolute** save path, or `download.save(directory)`
+  (relative dests are denied). Use `unique_download_path(dest)` to
   pick a free name (`report.pdf` → `report (1).pdf`); tkwry does not overwrite.
   `on_download_complete(url, dest, success)` is notify-only.
   Completions also set `last_download` and generate

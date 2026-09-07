@@ -68,7 +68,7 @@ def test_download_allow_filters_urls(tk_root) -> None:
 
 def test_on_download_can_set_absolute_dest(tk_root, tmp_path: Path) -> None:
     dest = tmp_path / "file.bin"
-    web = _make_web(tk_root, on_download=lambda _url, _suggested: dest)
+    web = _make_web(tk_root, on_download=lambda _d: dest)
     try:
         assert web._invoke_download_handler(
             "https://example.com/a.zip", "/tmp/a.zip"
@@ -78,7 +78,7 @@ def test_on_download_can_set_absolute_dest(tk_root, tmp_path: Path) -> None:
 
 
 def test_on_download_false_cancels(tk_root) -> None:
-    web = _make_web(tk_root, on_download=lambda _url, _dest: False)
+    web = _make_web(tk_root, on_download=lambda _d: False)
     try:
         assert web._invoke_download_handler(
             "https://example.com/a.zip", "/tmp/a.zip"
@@ -92,7 +92,7 @@ def test_untrusted_on_download_can_allow(tk_root) -> None:
         tk_root,
         untrusted=True,
         url="https://example.com",
-        on_download=lambda _url, _dest: True,
+        on_download=lambda _d: True,
     )
     try:
         assert web._invoke_download_handler(
@@ -103,7 +103,7 @@ def test_untrusted_on_download_can_allow(tk_root) -> None:
 
 
 def test_relative_download_dest_is_denied(tk_root) -> None:
-    web = _make_web(tk_root, on_download=lambda _url, _dest: "relative.bin")
+    web = _make_web(tk_root, on_download=lambda _d: "relative.bin")
     try:
         assert web._invoke_download_handler(
             "https://example.com/a.zip", "/tmp/a.zip"
@@ -120,7 +120,7 @@ def test_on_download_expands_user_home_dest(
         "tkwry.webview.os.path.expanduser",
         lambda path: expanded if str(path).startswith("~") else str(path),
     )
-    web = _make_web(tk_root, on_download=lambda _url, _suggested: "~/Downloads/a.zip")
+    web = _make_web(tk_root, on_download=lambda _d: "~/Downloads/a.zip")
     try:
         assert web._invoke_download_handler(
             "https://example.com/a.zip", "/tmp/a.zip"
@@ -158,7 +158,7 @@ def test_set_on_download_toggles_poll(tk_root) -> None:
     web = _make_web(tk_root)
     try:
         assert web._needs_event_poll() is False
-        web.set_on_download(lambda _url, _dest: True)
+        web.set_on_download(lambda _d: True)
         assert web._needs_event_poll() is True
         web.set_on_download(None)
         assert web._needs_event_poll() is False
@@ -403,7 +403,7 @@ def test_on_download_can_use_unique_download_path(tk_root, tmp_path: Path) -> No
     dest.write_bytes(b"x")
     web = _make_web(
         tk_root,
-        on_download=lambda _url, suggested: unique_download_path(suggested),
+        on_download=lambda d: unique_download_path(d.suggested_dest),
     )
     try:
         allowed, path = web._invoke_download_handler(
@@ -419,7 +419,7 @@ def test_in_flight_downloads_tracks_start_until_complete(
     tk_root, tmp_path: Path
 ) -> None:
     dest = tmp_path / "file.bin"
-    web = _make_web(tk_root, on_download=lambda _url, _suggested: dest)
+    web = _make_web(tk_root, on_download=lambda _d: dest)
     native = MagicMock()
     native.drain_download_complete_events.return_value = [
         ("https://example.com/a.zip", str(dest), True)
@@ -442,7 +442,7 @@ def test_in_flight_downloads_tracks_start_until_complete(
 
 
 def test_in_flight_downloads_omits_denied_start(tk_root) -> None:
-    web = _make_web(tk_root, on_download=lambda _url, _dest: False)
+    web = _make_web(tk_root, on_download=lambda _d: False)
     try:
         assert web._native_download_started(
             "https://example.com/a.zip", "/tmp/a.zip"
@@ -454,7 +454,7 @@ def test_in_flight_downloads_omits_denied_start(tk_root) -> None:
 
 def test_in_flight_downloads_cleared_on_destroy(tk_root, tmp_path: Path) -> None:
     dest = tmp_path / "file.bin"
-    web = _make_web(tk_root, on_download=lambda _url, _suggested: dest)
+    web = _make_web(tk_root, on_download=lambda _d: dest)
     try:
         web._native_download_started("https://example.com/a.zip", "/tmp/a.zip")
         assert web.in_flight_downloads
@@ -510,7 +510,7 @@ def test_download_started_event_and_handler(tk_root, tmp_path: Path) -> None:
     started: list[Download] = []
     web = _make_web(
         tk_root,
-        on_download=lambda _url, _suggested: dest,
+        on_download=lambda _d: dest,
         on_download_started=lambda item: started.append(item),
     )
     fired: list[str] = []
@@ -568,17 +568,13 @@ def test_download_failed_handler(tk_root) -> None:
         web.destroy()
 
 
-def test_call_download_handler_legacy_two_arg() -> None:
-    def legacy(url: str, suggested: str) -> bool:
-        return url.endswith(".zip") and suggested.endswith(".zip")
+def test_call_download_handler_passes_download() -> None:
+    seen: list[Download] = []
+
+    def handler(download: Download) -> bool:
+        seen.append(download)
+        return download.url.endswith(".zip")
 
     download = Download(url="https://x/a.zip", suggested_dest="/tmp/a.zip")
-    assert (
-        call_download_handler(
-            legacy,
-            download,
-            url=download.url,
-            suggested_dest=download.suggested_dest,
-        )
-        is True
-    )
+    assert call_download_handler(handler, download) is True
+    assert seen == [download]
