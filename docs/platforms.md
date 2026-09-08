@@ -126,11 +126,15 @@ macOS/Windows, `focused=True` waits for `<<WebViewReady>>`, then calls
 **IME:** keep composition on one surface — finish converting before switching
 Tk ↔ WebView (mid-composition focus changes can cancel or mis-route input).
 Not a Known-limitations checklist item; ordinary first-responder behavior.
+While the web surface already owns first responder, tkwry does not re-call
+``makeFirstResponder`` on every key (that path was costly under Japanese IME
+delete / key-repeat).
 
 **Ownership probe (CI):** ``tests/macos/test_input_ci.py`` checks
 ``focus()`` / ``focus_parent()`` handoff and chrome Entry vs WebView
 hit-testing. Routing correctness only — not a latency SLA. Local timing
-samples stay maintainer-only under ``.bench/``.
+samples stay maintainer-only under ``.bench/`` (handoff scripts; separate
+interactive IME composition probe).
 
 **Import order / double titlebar:** import `tkwry` **before** anything that
 starts `AppKit` / `NSApplication`. On import, tkwry disables process-level

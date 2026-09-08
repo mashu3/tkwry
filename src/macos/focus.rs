@@ -25,6 +25,13 @@
 //! | Cache query (no Tcl SE) | Python `_mac_web_input_active` | Refresh cache ≡ OR(natives) only |
 //! | Cache sync + rising edge | Python `_sync_mac_web_input_cache` | After activate/wakeup: Idle→Web releases Tcl focus |
 //!
+//! **Sticky key focus:** while `web_wants`, KeyDown/KeyUp/FlagsChanged re-call
+//! `makeFirstResponder(WKWebView)` **only when** the window first responder is
+//! not already the WKWebView (or a descendant / clip). Unconditional re-assert
+//! on every key slowed Japanese IME Backspace / key-repeat. Full skip:
+//! `TKWRY_MAC_SKIP_STICKY_KEY_FOCUS=1` (click/`focus()` activation unchanged).
+//! Not a public API.
+//!
 //! Flag identity: `web_wants_keyboard` ≡ `native.mac_web_input_active()` ≡
 //! toplevel `_tkwry_mac_web_input_active` (OR of natives after sync).
 
@@ -32,13 +39,15 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSEvent, NSEventMask, NSView, NSWindow, NSWindowDidBecomeKeyNotification};
+use objc2_app_kit::{
+    NSEvent, NSEventMask, NSResponder, NSView, NSWindow, NSWindowDidBecomeKeyNotification,
+};
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSOperationQueue, NSPoint};
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::WebViewExtMacOS;
@@ -47,6 +56,18 @@ use crate::wakeup;
 
 const TAB_KEY_CODE: u16 = 48;
 const ESCAPE_KEY_CODE: u16 = 53;
+
+/// When true (default), re-`focus()` WKWebView if FR left the web surface.
+fn sticky_key_focus_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| match std::env::var("TKWRY_MAC_SKIP_STICKY_KEY_FOCUS") {
+        Ok(v) => {
+            let v = v.trim();
+            !(v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+        }
+        Err(_) => true,
+    })
+}
 
 struct FocusEntry {
     id: u64,
@@ -386,9 +407,13 @@ fn handle_keydown(window: &NSWindow, entries: &[FocusEntry], event: &NSEvent, wa
         return;
     }
 
-    if let Ok(guard) = entry.inner.lock() {
-        if let Some(ref wv) = *guard {
-            focus_webview(wv, "focus on keydown");
+    // Re-assert FR when Tk (or another view) stole it — but not on every key
+    // while WKWebView already owns first responder (IME Backspace / key-repeat).
+    if sticky_key_focus_enabled() {
+        if let Ok(guard) = entry.inner.lock() {
+            if let Some(ref wv) = *guard {
+                focus_webview_if_stolen(wv, "focus on keydown");
+            }
         }
     }
 
@@ -417,9 +442,11 @@ fn handle_keyup_or_flags(
         return;
     }
 
-    if let Ok(guard) = entry.inner.lock() {
-        if let Some(ref wv) = *guard {
-            focus_webview(wv, label);
+    if sticky_key_focus_enabled() {
+        if let Ok(guard) = entry.inner.lock() {
+            if let Some(ref wv) = *guard {
+                focus_webview_if_stolen(wv, label);
+            }
         }
     }
 
@@ -611,6 +638,31 @@ fn focus_webview(wv: &wry::WebView, label: &str) {
     if let Err(err) = wv.focus() {
         eprintln!("tkwry: macOS {label} failed: {err}");
     }
+}
+
+/// True when the window first responder is already this WKWebView surface
+/// (the view itself, a descendant such as WKContentView, or its clip).
+fn web_owns_first_responder(wv: &wry::WebView) -> bool {
+    let window = wv.ns_window();
+    let Some(fr) = window.firstResponder() else {
+        return false;
+    };
+    let Ok(fr_view) = Retained::<NSResponder>::downcast::<NSView>(fr) else {
+        return false;
+    };
+    let wk = wv.webview();
+    let wk_ptr = Retained::as_ptr(&wk).cast::<NSView>();
+    let wk_view = unsafe { &*wk_ptr };
+    let clip = unsafe { wk.superview() };
+    web_surface_owns_hit(fr_view.as_ref(), wk_view, clip.as_deref())
+}
+
+/// Sticky path: call ``focus()`` only if FR left the web surface.
+fn focus_webview_if_stolen(wv: &wry::WebView, label: &str) {
+    if web_owns_first_responder(wv) {
+        return;
+    }
+    focus_webview(wv, label);
 }
 
 fn focus_webview_parent(wv: &wry::WebView, label: &str) {

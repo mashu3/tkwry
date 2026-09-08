@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- macOS: while the WebView owns the keyboard, sticky first-responder re-assert
+  runs only if focus left the WKWebView (not on every KeyDown/KeyUp). Avoids
+  extra ``makeFirstResponder`` cost during Japanese IME Backspace / key-repeat
+
 ### Changed
 
 - ``on_navigation`` / ``set_on_navigation`` handlers take
