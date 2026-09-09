@@ -126,9 +126,11 @@ macOS/Windows, `focused=True` waits for `<<WebViewReady>>`, then calls
 **IME:** keep composition on one surface — finish converting before switching
 Tk ↔ WebView (mid-composition focus changes can cancel or mis-route input).
 Not a Known-limitations checklist item; ordinary first-responder behavior.
-While the web surface already owns first responder, tkwry does not re-call
-``makeFirstResponder`` on every key (that path was costly under Japanese IME
-delete / key-repeat).
+While Web owns the keyboard, tkwry does not re-call ``makeFirstResponder`` on
+each key (KeyDown only releases on Tab/Esc). Keyboard monitors also do not
+mouse hit-test on KeyDown/KeyUp (pointer-down and window-key only). While Web
+owns the keyboard, the macOS focus pump does not poll every 16ms — wakeup uses
+a pipe ``createfilehandler`` plus a slow peel heartbeat.
 
 **Ownership probe (CI):** ``tests/macos/test_input_ci.py`` checks
 ``focus()`` / ``focus_parent()`` handoff and chrome Entry vs WebView

@@ -25,12 +25,10 @@
 //! | Cache query (no Tcl SE) | Python `_mac_web_input_active` | Refresh cache ≡ OR(natives) only |
 //! | Cache sync + rising edge | Python `_sync_mac_web_input_cache` | After activate/wakeup: Idle→Web releases Tcl focus |
 //!
-//! **Sticky key focus:** while `web_wants`, KeyDown/KeyUp/FlagsChanged re-call
-//! `makeFirstResponder(WKWebView)` **only when** the window first responder is
-//! not already the WKWebView (or a descendant / clip). Unconditional re-assert
-//! on every key slowed Japanese IME Backspace / key-repeat. Full skip:
-//! `TKWRY_MAC_SKIP_STICKY_KEY_FOCUS=1` (click/`focus()` activation unchanged).
-//! Not a public API.
+//! **Keyboard path:** KeyDown only handles Tab/Esc release while Web owns the
+//! keyboard — no per-key `makeFirstResponder`, no KeyUp/FlagsChanged focus
+//! work, and no mouse hit-test on keys (pointer-down / window-key only).
+//! Click / ``focus()`` / Tk key-guard cover first-responder steals.
 //!
 //! Flag identity: `web_wants_keyboard` ≡ `native.mac_web_input_active()` ≡
 //! toplevel `_tkwry_mac_web_input_active` (OR of natives after sync).
@@ -39,15 +37,13 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{
-    NSEvent, NSEventMask, NSResponder, NSView, NSWindow, NSWindowDidBecomeKeyNotification,
-};
+use objc2_app_kit::{NSEvent, NSEventMask, NSView, NSWindow, NSWindowDidBecomeKeyNotification};
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSOperationQueue, NSPoint};
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::WebViewExtMacOS;
@@ -56,18 +52,6 @@ use crate::wakeup;
 
 const TAB_KEY_CODE: u16 = 48;
 const ESCAPE_KEY_CODE: u16 = 53;
-
-/// When true (default), re-`focus()` WKWebView if FR left the web surface.
-fn sticky_key_focus_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| match std::env::var("TKWRY_MAC_SKIP_STICKY_KEY_FOCUS") {
-        Ok(v) => {
-            let v = v.trim();
-            !(v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
-        }
-        Err(_) => true,
-    })
-}
 
 struct FocusEntry {
     id: u64,
@@ -84,8 +68,6 @@ struct FocusEntry {
 struct FocusMonitors {
     click_monitor: Retained<AnyObject>,
     keydown_monitor: Retained<AnyObject>,
-    keyup_monitor: Retained<AnyObject>,
-    flags_monitor: Retained<AnyObject>,
     key_observer: Retained<AnyObject>,
 }
 
@@ -261,65 +243,11 @@ impl WindowFocusCoordinator {
                 event.as_ptr()
             })
         };
-
         let keydown_mask = NSEventMask::KeyDown;
         let keydown_monitor = unsafe {
             NSEvent::addLocalMonitorForEventsMatchingMask_handler(keydown_mask, &keydown_block)
         }
         .ok_or("failed to install NSEvent keydown monitor")?;
-
-        let keyup_block = {
-            let window = window.clone();
-            RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
-                let event_ref = unsafe { event.as_ref() };
-                if !event_belongs_to_window(event_ref, &window) {
-                    return event.as_ptr();
-                }
-                with_coordinator(&window, |coord| {
-                    handle_keyup_or_flags(
-                        &window,
-                        &coord.entries,
-                        &coord.wakeup_write_fd,
-                        "focus on keyup",
-                    );
-                });
-                event.as_ptr()
-            })
-        };
-
-        let keyup_mask = NSEventMask::KeyUp;
-        let keyup_monitor = unsafe {
-            NSEvent::addLocalMonitorForEventsMatchingMask_handler(keyup_mask, &keyup_block)
-        }
-        .ok_or("failed to install NSEvent keyup monitor")?;
-
-        let flags_block = {
-            let window = window.clone();
-            RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
-                let event_ref = unsafe { event.as_ref() };
-                if !event_belongs_to_window(event_ref, &window) {
-                    return event.as_ptr();
-                }
-                if event_ref.keyCode() == TAB_KEY_CODE {
-                    return event.as_ptr();
-                }
-                with_coordinator(&window, |coord| {
-                    handle_keyup_or_flags(
-                        &window,
-                        &coord.entries,
-                        &coord.wakeup_write_fd,
-                        "focus on flags changed",
-                    );
-                });
-                event.as_ptr()
-            })
-        };
-
-        let flags_mask = NSEventMask::FlagsChanged;
-        let flags_monitor = unsafe {
-            NSEvent::addLocalMonitorForEventsMatchingMask_handler(flags_mask, &flags_block)
-        }
-        .ok_or("failed to install NSEvent flags monitor")?;
 
         let key_block = {
             let window = window.clone();
@@ -343,8 +271,6 @@ impl WindowFocusCoordinator {
         self.monitors = Some(FocusMonitors {
             click_monitor,
             keydown_monitor,
-            keyup_monitor,
-            flags_monitor,
             key_observer,
         });
         Ok(())
@@ -355,8 +281,6 @@ impl WindowFocusCoordinator {
             unsafe {
                 NSEvent::removeMonitor(&monitors.click_monitor);
                 NSEvent::removeMonitor(&monitors.keydown_monitor);
-                NSEvent::removeMonitor(&monitors.keyup_monitor);
-                NSEvent::removeMonitor(&monitors.flags_monitor);
                 NSNotificationCenter::defaultCenter().removeObserver(&monitors.key_observer);
             }
         }
@@ -387,6 +311,7 @@ fn handle_click(
 }
 
 fn handle_keydown(window: &NSWindow, entries: &[FocusEntry], event: &NSEvent, wakeup: &AtomicI32) {
+    let _ = window;
     let Some(active_idx) = active_entry_index(entries) else {
         return;
     };
@@ -402,60 +327,6 @@ fn handle_keydown(window: &NSWindow, entries: &[FocusEntry], event: &NSEvent, wa
                 release_web_focus_locked(wv, &entry.web_wants_keyboard);
             }
         }
-        entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
-        wakeup::notify_wakeup(wakeup);
-        return;
-    }
-
-    // Re-assert FR when Tk (or another view) stole it — but not on every key
-    // while WKWebView already owns first responder (IME Backspace / key-repeat).
-    if sticky_key_focus_enabled() {
-        if let Ok(guard) = entry.inner.lock() {
-            if let Some(ref wv) = *guard {
-                focus_webview_if_stolen(wv, "focus on keydown");
-            }
-        }
-    }
-
-    let Some(window_point) = current_window_point(window) else {
-        entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
-        wakeup::notify_wakeup(wakeup);
-        return;
-    };
-    if topmost_entry_index(window, entries, window_point) != Some(active_idx) {
-        entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
-        wakeup::notify_wakeup(wakeup);
-    }
-}
-
-fn handle_keyup_or_flags(
-    window: &NSWindow,
-    entries: &[FocusEntry],
-    wakeup: &AtomicI32,
-    label: &str,
-) {
-    let Some(active_idx) = active_entry_index(entries) else {
-        return;
-    };
-    let entry = &entries[active_idx];
-    if !entry.web_wants_keyboard.load(Ordering::SeqCst) {
-        return;
-    }
-
-    if sticky_key_focus_enabled() {
-        if let Ok(guard) = entry.inner.lock() {
-            if let Some(ref wv) = *guard {
-                focus_webview_if_stolen(wv, label);
-            }
-        }
-    }
-
-    let Some(window_point) = current_window_point(window) else {
-        entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
-        wakeup::notify_wakeup(wakeup);
-        return;
-    };
-    if topmost_entry_index(window, entries, window_point) != Some(active_idx) {
         entry.mac_tk_unfocus.store(true, Ordering::SeqCst);
         wakeup::notify_wakeup(wakeup);
     }
@@ -638,31 +509,6 @@ fn focus_webview(wv: &wry::WebView, label: &str) {
     if let Err(err) = wv.focus() {
         eprintln!("tkwry: macOS {label} failed: {err}");
     }
-}
-
-/// True when the window first responder is already this WKWebView surface
-/// (the view itself, a descendant such as WKContentView, or its clip).
-fn web_owns_first_responder(wv: &wry::WebView) -> bool {
-    let window = wv.ns_window();
-    let Some(fr) = window.firstResponder() else {
-        return false;
-    };
-    let Ok(fr_view) = Retained::<NSResponder>::downcast::<NSView>(fr) else {
-        return false;
-    };
-    let wk = wv.webview();
-    let wk_ptr = Retained::as_ptr(&wk).cast::<NSView>();
-    let wk_view = unsafe { &*wk_ptr };
-    let clip = unsafe { wk.superview() };
-    web_surface_owns_hit(fr_view.as_ref(), wk_view, clip.as_deref())
-}
-
-/// Sticky path: call ``focus()`` only if FR left the web surface.
-fn focus_webview_if_stolen(wv: &wry::WebView, label: &str) {
-    if web_owns_first_responder(wv) {
-        return;
-    }
-    focus_webview(wv, label);
 }
 
 fn focus_webview_parent(wv: &wry::WebView, label: &str) {

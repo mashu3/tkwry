@@ -297,8 +297,9 @@ def test_mac_pump_tick_idle_and_active_delays(
     assert delays[-1] == _macos._MAC_PUMP_IDLE_DELAY_MS
 
     monkeypatch.setattr(_macos, "_mac_web_input_active", lambda _t: True)
+    monkeypatch.setattr(_macos, "_mac_quiet_peel_if_needed", lambda _t: None)
     _macos._mac_pump_tick(tk_root)
-    assert delays[-1] == _macos._MAC_PUMP_ACTIVE_DELAY_MS
+    assert delays[-1] == _macos._MAC_PUMP_WEB_HEARTBEAT_MS
 
     monkeypatch.setattr(_macos, "_mac_webviews", lambda _t: [])
     setattr(tk_root, "_tkwry_mac_pump_active", True)

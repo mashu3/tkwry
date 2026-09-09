@@ -104,6 +104,10 @@ _MAC_KEY_GUARD_TAG = "TkwryMacWebKeyGuard"
 _TAB_TRAVERSAL_KEYS = frozenset({"Tab", "ISO_Left_Tab"})
 _TABBING_DISABLE_MAX_ATTEMPTS = 8
 _MAC_PUMP_ACTIVE_DELAY_MS = 16
+# While Web owns the keyboard, avoid a 16ms Tcl timer — it contended with
+# KeyDown delivery on flagship (dual WK). Wakeup uses createfilehandler;
+# this heartbeat only peels a stale Tcl editable if one somehow refocused.
+_MAC_PUMP_WEB_HEARTBEAT_MS = 250
 _MAC_PUMP_IDLE_DELAY_MS = 32
 
 
@@ -481,21 +485,88 @@ def _peel_stale_tcl_editable_focus(toplevel: tk.Misc) -> None:
     _release_tk_keyboard_focus(toplevel)
 
 
+def _mac_quiet_peel_if_needed(toplevel: tk.Misc) -> None:
+    """Cheap peel for quiet pump ticks: only touch Tcl if an editable is focused."""
+    try:
+        focused = toplevel.focus_get()
+    except tk.TclError:
+        return
+    if focused is None or not _widget_accepts_tk_keys(focused):
+        return
+    if not getattr(toplevel, "_tkwry_mac_web_input_active", False):
+        if not _mac_web_input_active(toplevel):
+            return
+    _release_tk_keyboard_focus(toplevel)
+
+
+def _mac_wake_filehandler(_fd: int, _mask: int, toplevel: tk.Misc) -> None:
+    """Tk filehandler: Rust wrote the wakeup pipe — drain on the Tcl thread."""
+    if not _toplevel_alive(toplevel):
+        return
+    _mac_service_wakeup(toplevel)
+    if _toplevel_alive(toplevel):
+        _peel_stale_tcl_editable_focus(toplevel)
+
+
+def _mac_install_wake_filehandler(toplevel: tk.Misc) -> None:
+    read_fd = getattr(toplevel, "_tkwry_mac_wake_read_fd", None)
+    if read_fd is None or getattr(toplevel, "_tkwry_mac_wake_fh", False):
+        return
+    try:
+        # Positional toplevel capture — Tk calls ``(fd, mask)``.
+        toplevel.tk.createfilehandler(
+            read_fd,
+            tk.READABLE,
+            lambda fd, mask, tl=toplevel: _mac_wake_filehandler(fd, mask, tl),
+        )
+    except (tk.TclError, AttributeError, ValueError):
+        return
+    toplevel._tkwry_mac_wake_fh = True
+
+
+def _mac_delete_wake_filehandler(toplevel: tk.Misc) -> None:
+    read_fd = getattr(toplevel, "_tkwry_mac_wake_read_fd", None)
+    if read_fd is None or not getattr(toplevel, "_tkwry_mac_wake_fh", False):
+        toplevel._tkwry_mac_wake_fh = False
+        return
+    try:
+        toplevel.tk.deletefilehandler(read_fd)
+    except (tk.TclError, AttributeError, ValueError):
+        pass
+    toplevel._tkwry_mac_wake_fh = False
+
+
 def _mac_pump_tick(toplevel: tk.Misc) -> None:
     if not _toplevel_alive(toplevel):
         return
     if not _mac_webviews(toplevel):
         toplevel._tkwry_mac_pump_active = False
         return
-    _mac_service_wakeup(toplevel)
-    if not _toplevel_alive(toplevel):
-        return
-    _peel_stale_tcl_editable_focus(toplevel)
-    if _mac_unfocus_pending(toplevel) or _mac_pipe_readable(toplevel):
+
+    # Quiet path while Web owns the keyboard: do **not** drain sync hooks or
+    # poll natives on a 16ms timer (contended with KeyDown on dual-WK flagship).
+    # Wakeup bytes are handled by createfilehandler; this tick is a rare peel
+    # heartbeat plus a cheap pipe check if the filehandler is unavailable.
+    web_active = getattr(toplevel, "_tkwry_mac_web_input_active", False)
+    if not web_active:
+        web_active = _mac_web_input_active(toplevel)
+
+    busy = _mac_pipe_readable(toplevel)
+    if not busy and not getattr(toplevel, "_tkwry_mac_wake_fh", False):
+        # No filehandler (or install failed): fall back to flag poll.
+        busy = _mac_unfocus_pending(toplevel)
+
+    if busy:
+        _mac_service_wakeup(toplevel)
+        if not _toplevel_alive(toplevel):
+            return
+        _peel_stale_tcl_editable_focus(toplevel)
         delay = 1
-    elif _mac_web_input_active(toplevel):
-        delay = _MAC_PUMP_ACTIVE_DELAY_MS
+    elif web_active:
+        _mac_quiet_peel_if_needed(toplevel)
+        delay = _MAC_PUMP_WEB_HEARTBEAT_MS
     else:
+        _mac_service_wakeup(toplevel)
         delay = _MAC_PUMP_IDLE_DELAY_MS
     _mac_after(toplevel, delay, _mac_pump_tick, toplevel)
 
@@ -554,8 +625,21 @@ def _mac_focus_in_handler(event: tk.Event) -> None:
 
 def _mac_web_key_guard(event: tk.Event) -> str | None:
     toplevel = _mac_event_toplevel(event)
-    if toplevel is None or not _mac_web_input_active(toplevel):
+    if toplevel is None:
         return None
+    # Prefer cache on the hot path (native OR walk is for activate/wakeup).
+    if not getattr(toplevel, "_tkwry_mac_web_input_active", False):
+        if not _mac_web_input_active(toplevel):
+            return None
+    # ``<KeyPress>`` + ``<BackSpace>`` both fire on some Tk builds — once/serial.
+    serial = getattr(event, "serial", None)
+    if (
+        serial is not None
+        and getattr(toplevel, "_tkwry_mac_guard_serial", None) == serial
+    ):
+        return "break"
+    if serial is not None:
+        toplevel._tkwry_mac_guard_serial = serial
     keysym = getattr(event, "keysym", "")
     if keysym in _TAB_TRAVERSAL_KEYS:
         _release_web_input_for_tk_traversal(toplevel)
@@ -563,10 +647,9 @@ def _mac_web_key_guard(event: tk.Event) -> str | None:
     if keysym == "Escape":
         _release_web_input_for_tk_traversal(toplevel)
         return None
-    if _mac_unfocus_pending(toplevel):
-        _mac_after(toplevel, 1, _mac_service_wakeup, toplevel)
     # Steal block: drop the key for Tk *and* peel focus so later Backspaces
-    # cannot land on the URL bar while WK is first responder.
+    # cannot land on the URL bar while WK is first responder. ``_release_*``
+    # no-ops when Tcl focus is already off editables (focus_get only).
     _release_tk_keyboard_focus(toplevel)
     return "break"
 
@@ -600,16 +683,19 @@ def _ensure_mac_wakeup_pipe(toplevel: tk.Misc, native: NativeWebViewType) -> Non
 
     if getattr(toplevel, "_tkwry_mac_wake_read_fd", None) is not None:
         native.set_mac_wakeup_write_fd(toplevel._tkwry_mac_wake_write_fd)
+        _mac_install_wake_filehandler(toplevel)
         return
 
     read_fd, write_fd = _open_wakeup_pipe()
     toplevel._tkwry_mac_wake_read_fd = read_fd
     toplevel._tkwry_mac_wake_write_fd = write_fd
     native.set_mac_wakeup_write_fd(write_fd)
+    _mac_install_wake_filehandler(toplevel)
 
 
 def _teardown_mac_wakeup_pipe(toplevel: tk.Misc) -> None:
     toplevel._tkwry_mac_pump_active = False
+    _mac_delete_wake_filehandler(toplevel)
     read_fd = getattr(toplevel, "_tkwry_mac_wake_read_fd", None)
     if read_fd is None:
         return
@@ -622,6 +708,7 @@ def _teardown_mac_wakeup_pipe(toplevel: tk.Misc) -> None:
     for attr in (
         "_tkwry_mac_wake_read_fd",
         "_tkwry_mac_wake_write_fd",
+        "_tkwry_mac_wake_fh",
     ):
         if hasattr(toplevel, attr):
             delattr(toplevel, attr)

@@ -8,9 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- macOS: while the WebView owns the keyboard, sticky first-responder re-assert
-  runs only if focus left the WKWebView (not on every KeyDown/KeyUp). Avoids
-  extra ``makeFirstResponder`` cost during Japanese IME Backspace / key-repeat
+- macOS: keyboard focus monitors no longer re-assert first responder, mouse
+  hit-test, or touch focus on KeyUp/FlagsChanged during typing — KeyDown only
+  handles Tab/Esc release (click / ``focus()`` / Tk key-guard cover steals).
+  Removed unused ``TKWRY_MAC_STICKY_KEY_FOCUS`` / ``TKWRY_MAC_SKIP_STICKY_KEY_FOCUS``
+- macOS: Web-owned keyboard uses a wakeup ``createfilehandler`` plus a ~250ms
+  peel heartbeat (not a 16ms poll); key-guard prefers the web-input cache and
+  de-dupes ``KeyPress``+``BackSpace`` on the same event serial
 
 ### Changed
 
