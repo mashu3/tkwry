@@ -281,53 +281,6 @@ See [CHANGELOG.md](https://github.com/mashu3/tkwry/blob/main/CHANGELOG.md) for r
 
 ---
 
-## 📤 Packaging (best-effort)
-
-Freeze a tkwry app with PyInstaller or Nuitka. Paste samples: Windows
-**one-file**, macOS **windowed onedir** ``.app`` (PyInstaller deprecates
-``--windowed --onefile`` on macOS). A **manual** **Freeze** workflow smokes
-**onedir then onefile** on both OS (not on push/tags; no GUI); macOS
-onefile omits ``--windowed``. Nuitka stays best-effort.
-Full notes:
-[docs/packaging.md](https://github.com/mashu3/tkwry/blob/main/docs/packaging.md).
-
-```bash
-pip install pyinstaller tkwry   # or: pip install nuitka tkwry
-```
-
-**PyInstaller — Windows one-file ``.exe``**
-
-```bat
-pyinstaller --noconsole --onefile --collect-submodules tkwry --name MyApp main.py
-```
-
-**PyInstaller — macOS ``.app``**
-
-```bash
-pyinstaller --windowed --onedir --collect-submodules tkwry --name MyApp main.py
-```
-
-**Nuitka — Windows one-file ``.exe``**
-
-```bat
-python -m nuitka --standalone --onefile --windows-console-mode=disable --enable-plugin=tk-inter --include-package=tkwry --include-distribution-metadata=tkwry --output-filename=MyApp.exe main.py
-```
-
-**Nuitka — macOS ``.app``** (Homebrew: include ``--static-libpython=no``)
-
-```bash
-python -m nuitka --standalone --macos-create-app-bundle --static-libpython=no --enable-plugin=tk-inter --include-package=tkwry --include-distribution-metadata=tkwry --macos-app-name=MyApp main.py
-```
-
-Always collect / include the ``tkwry`` package (native ``_core``). Windows
-users still need [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/).
-Samples for ``examples/tkwry_browser.py``:
-[docs/examples-browser.md — Packaging](https://github.com/mashu3/tkwry/blob/main/docs/examples-browser.md#packaging-best-effort).
-``app=`` data dirs:
-[docs/packaging.md](https://github.com/mashu3/tkwry/blob/main/docs/packaging.md).
-
----
-
 ## 🗂 Documentation
 
 | Topic | Doc |

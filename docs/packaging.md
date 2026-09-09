@@ -1,9 +1,7 @@
 # Packaging notes
 
 How to ship a **tkwry** app as a standalone desktop bundle (Windows `.exe` /
-macOS `.app`). These are **maintainer notes** for v0.1.x — not a full
-confirmed matrix. Treat every recipe as **best-effort** until your target
-OS / freezer / mode is verified.
+macOS `.app`).
 
 **CI smoke (manual):** GitHub Actions workflow **Freeze**
 (``.github/workflows/freeze.yml``) builds the flagship
@@ -15,7 +13,7 @@ because PyInstaller deprecates windowed+onefile on macOS (error in v7).
 Pinned ``pyinstaller==6.22.2`` and ``tkface==0.2.3`` (flagship Windows DPI;
 ``--collect-submodules tkface``). Runs **only** via **workflow_dispatch**
 (Actions → Freeze → Run workflow) — not on push/tags. No GUI launch.
-Nuitka / non-flagship recipes stay unverified by that workflow.
+Nuitka is not covered by that workflow.
 
 Recipes here cover **Windows and macOS** (PyPI wheels). Linux is source-only
 and out of scope for these freeze samples — see [Platform notes](platforms.md).
@@ -141,7 +139,7 @@ Output: `dist/MyApp`.
 ### Flagship demo (`tkwry_browser.py`)
 
 Concrete freeze commands live in
-[Mini-browser example — Packaging](examples-browser.md#packaging-best-effort).
+[Mini-browser example — Packaging](examples-browser.md#packaging).
 
 ### Static `app=` assets
 
@@ -209,7 +207,7 @@ Sign / notarize the resulting bundle like any other macOS app.
 ### Flagship demo (`tkwry_browser.py`)
 
 Concrete freeze commands live in
-[Mini-browser example — Packaging](examples-browser.md#packaging-best-effort).
+[Mini-browser example — Packaging](examples-browser.md#packaging).
 
 ### Troubleshooting (macOS freeze)
 

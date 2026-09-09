@@ -79,19 +79,18 @@ URL bar, Settings.
 Clipboard copy/cut/paste goes through Tk (`clipboard_get` / `clipboard_set`)
 because WKWebView pasteboard access is unreliable for this demo.
 
-## Packaging (best-effort)
+## Packaging
 
 UI assets are embedded in the script (no separate `web/` folder). From a
 clone with tkwry installed (`pip install -e .`).
 
-Recipes below are the usual paste commands: Windows **one-file**, macOS
-**windowed onedir** ``.app`` (PyInstaller does not support windowed+onefile
-on macOS). Install **tkface** as well so Windows DPI awareness is bundled
-(``--collect-submodules tkface``). The manual **Freeze** workflow smokes
-**onedir then onefile** serially on both OS (no GUI; not on push/tags):
-onedir asserts ``tkwry._core``; onefile checks the build (macOS onefile
-without ``--windowed``). Nuitka stays best-effort — see
-[Packaging notes](packaging.md).
+Recipes below: Windows **one-file**, macOS **windowed onedir** ``.app``
+(PyInstaller does not support windowed+onefile on macOS). Install **tkface**
+as well so Windows DPI awareness is bundled (``--collect-submodules tkface``).
+The manual **Freeze** workflow smokes **onedir then onefile** serially on
+both OS (no GUI; not on push/tags): onedir asserts ``tkwry._core``; onefile
+checks the build (macOS onefile without ``--windowed``). Nuitka recipes are
+not covered by Freeze — see [Packaging notes](packaging.md).
 
 ### PyInstaller
 

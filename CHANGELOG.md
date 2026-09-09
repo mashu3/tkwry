@@ -16,6 +16,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   peel heartbeat (not a 16ms poll); key-guard prefers the web-input cache and
   de-dupes ``KeyPress``+``BackSpace`` on the same event serial
 
+### Docs
+
+- README: drop the Packaging paste section (link only via Documentation table);
+  drop packaging ``best-effort`` framing now that Freeze smokes PyInstaller
+
 ### Changed
 
 - ``on_navigation`` / ``set_on_navigation`` handlers take
