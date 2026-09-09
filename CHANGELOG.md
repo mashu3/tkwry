@@ -6,22 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Fixed
+## [0.1.9] - 2026-09-10
 
-- macOS: keyboard focus monitors no longer re-assert first responder, mouse
-  hit-test, or touch focus on KeyUp/FlagsChanged during typing — KeyDown only
-  handles Tab/Esc release (click / ``focus()`` / Tk key-guard cover steals).
-  Removed unused ``TKWRY_MAC_STICKY_KEY_FOCUS`` / ``TKWRY_MAC_SKIP_STICKY_KEY_FOCUS``
-- macOS: Web-owned keyboard uses a wakeup ``createfilehandler`` plus a ~250ms
-  peel heartbeat (not a 16ms poll); key-guard prefers the web-input cache and
-  de-dupes ``KeyPress``+``BackSpace`` on the same event serial
-- Flagship ``tkwry_browser``: pause the 350ms chrome ``emit("state")`` refresh
-  while the URL bar is focused (same-WK tab-strip paint contended with typing)
-
-### Docs
-
-- README: drop the Packaging paste section (link only via Documentation table);
-  drop packaging ``best-effort`` framing now that Freeze smokes PyInstaller
+Post-0.1.8 defect sweep, public API unify (handler shapes and naming),
+flagship polish, and manual PyInstaller Freeze smoke on Windows and macOS.
 
 ### Changed
 
@@ -53,57 +41,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``set_drag_drop_handler``, and ``set_context_menu_handler`` (use the
   ``on_*`` / ``set_on_*`` names above)
 
-### CI
-
-- Codecov uploads folded into the existing **macOS** / **Windows** CI test jobs
-  (flags ``macos`` / ``windows``; one Codecov badge) — no second full test
-  workflow. Those jobs use ``maturin develop`` in a ``.venv`` so coverage paths
-  map to the checkout (wheel installs under site-packages report ~0%). Linux and
-  ``windows-11-arm`` stay wheel-only. ``TKWRY_COVERAGE=1`` still enables append
-  coverage in the split CI test scripts
-- Manual **Freeze** workflow (``.github/workflows/freeze.yml``):
-  ``workflow_dispatch`` only; Win + macOS PyInstaller **onedir then
-  onefile** (serial; distinct onefile output name). macOS onefile omits
-  ``--windowed`` (PyInstaller deprecation). Pin ``pyinstaller==6.22.2`` and
-  ``tkface==0.2.3`` (``--collect-submodules tkface`` for flagship DPI).
-  Onedir asserts ``tkwry._core``; no GUI
-  (``scripts/check_freeze_artifact.py``)
-
-### Docs
-
-- Clarify Internal ``tkwry._core`` / ``WebView.native`` / ``WebSession.native``
-  (no SemVer) and the production IPC drain contract
-  (``drain_window_ipc_messages`` only) in ``docs/usage.md`` and the README
-- Document canonical call shapes, error observation, and intentional API
-  asymmetries in ``docs/usage.md`` (link from ``docs/rpc.md``)
-- macOS keyboard / IME: README Known limitations no longer lists IME;
-  ``docs/platforms.md`` keeps a short first-responder tip. CI routing
-  probe in ``tests/macos/test_input_ci.py``. Local measure scripts and
-  samples stay under gitignored ``.bench/``
-- Cookie / cache / Storage honesty: Cookie CRUD + ``clear_all_browsing_data``
-  stay the only engine wraps; no dedicated Storage / selective-clear APIs
-  (documented in README Known limitations, ``docs/platforms.md``,
-  ``docs/usage.md``)
-- Packaging: Freeze smokes onedir→onefile (Win/mac); paste samples are
-  Windows one-file / macOS ``.app`` (not windowed+onefile); Nuitka
-  best-effort (``docs/packaging.md``, ``docs/examples-browser.md``, README)
-
-### Tests
-
-- Dual ctor/setter equivalence covers ``on_ipc``, ``on_download_started``,
-  and ``on_download_failed`` (including clear-to-default)
-- Unit / integration fixtures use pytest ``tmp_path`` (or non-``/tmp``
-  ``file://`` URLs) instead of hardcoded ``/tmp/...`` paths
-- macOS CI keyboard probe without CGEvent
-  (``tests/macos/test_input_ci.py``) — ownership handoff + hit-test
-- Coverage: macOS/Windows CI uploads combined coverage to Codecov
-  (informational; no ``fail_under``). OS-foreign platform modules omitted
-  via ``scripts/ci-coverage.sh``; extra unit cases in
-  ``tests/unit/test_coverage_boost.py`` and helpers
-- Flagship ``examples/tkwry_browser.py`` requires tkwry ``>= 0.1.9``;
-  ``tests/unit/test_tkwry_browser.py`` is a 0.1.9 gate (before freeze smoke)
-
 ### Fixed
+
+- macOS: keyboard focus monitors no longer re-assert first responder, mouse
+  hit-test, or touch focus on KeyUp/FlagsChanged during typing — KeyDown only
+  handles Tab/Esc release (click / ``focus()`` / Tk key-guard cover steals).
+  Removed unused ``TKWRY_MAC_STICKY_KEY_FOCUS`` / ``TKWRY_MAC_SKIP_STICKY_KEY_FOCUS``
+- macOS: Web-owned keyboard uses a wakeup ``createfilehandler`` plus a ~250ms
+  peel heartbeat (not a 16ms poll); key-guard prefers the web-input cache and
+  de-dupes ``KeyPress``+``BackSpace`` on the same event serial
+- Flagship ``tkwry_browser``: pause the 350ms chrome ``emit("state")`` refresh
+  while the URL bar is focused (same-WK tab-strip paint contended with typing)
+
+
 
 - ``emit`` / ``_emit_eligible`` treat missing engine URLs on ``app=`` views
   as the platform app origin (WebView2 often reports blank→``None`` while
@@ -176,6 +126,61 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   when teardown fails (same latch honesty as ``force_destroy``)
 - macOS reentrant destroy (e.g. during DevTools) tears down the per-WebView
   clip container so empty ``NSView`` hosts do not remain on the shared parent
+
+### Docs
+
+- README: drop the Packaging paste section (link only via Documentation table);
+  drop packaging ``best-effort`` framing now that Freeze smokes PyInstaller
+
+
+
+- Clarify Internal ``tkwry._core`` / ``WebView.native`` / ``WebSession.native``
+  (no SemVer) and the production IPC drain contract
+  (``drain_window_ipc_messages`` only) in ``docs/usage.md`` and the README
+- Document canonical call shapes, error observation, and intentional API
+  asymmetries in ``docs/usage.md`` (link from ``docs/rpc.md``)
+- macOS keyboard / IME: README Known limitations no longer lists IME;
+  ``docs/platforms.md`` keeps a short first-responder tip. CI routing
+  probe in ``tests/macos/test_input_ci.py``. Local measure scripts and
+  samples stay under gitignored ``.bench/``
+- Cookie / cache / Storage honesty: Cookie CRUD + ``clear_all_browsing_data``
+  stay the only engine wraps; no dedicated Storage / selective-clear APIs
+  (documented in README Known limitations, ``docs/platforms.md``,
+  ``docs/usage.md``)
+- Packaging: Freeze smokes onedir→onefile (Win/mac); paste samples are
+  Windows one-file / macOS ``.app`` (not windowed+onefile); Nuitka
+  best-effort (``docs/packaging.md``, ``docs/examples-browser.md``, README)
+
+### Tests
+
+- Dual ctor/setter equivalence covers ``on_ipc``, ``on_download_started``,
+  and ``on_download_failed`` (including clear-to-default)
+- Unit / integration fixtures use pytest ``tmp_path`` (or non-``/tmp``
+  ``file://`` URLs) instead of hardcoded ``/tmp/...`` paths
+- macOS CI keyboard probe without CGEvent
+  (``tests/macos/test_input_ci.py``) — ownership handoff + hit-test
+- Coverage: macOS/Windows CI uploads combined coverage to Codecov
+  (informational; no ``fail_under``). OS-foreign platform modules omitted
+  via ``scripts/ci-coverage.sh``; extra unit cases in
+  ``tests/unit/test_coverage_boost.py`` and helpers
+- Flagship ``examples/tkwry_browser.py`` requires tkwry ``>= 0.1.9``;
+  ``tests/unit/test_tkwry_browser.py`` is a 0.1.9 gate (before freeze smoke)
+
+### CI
+
+- Codecov uploads folded into the existing **macOS** / **Windows** CI test jobs
+  (flags ``macos`` / ``windows``; one Codecov badge) — no second full test
+  workflow. Those jobs use ``maturin develop`` in a ``.venv`` so coverage paths
+  map to the checkout (wheel installs under site-packages report ~0%). Linux and
+  ``windows-11-arm`` stay wheel-only. ``TKWRY_COVERAGE=1`` still enables append
+  coverage in the split CI test scripts
+- Manual **Freeze** workflow (``.github/workflows/freeze.yml``):
+  ``workflow_dispatch`` only; Win + macOS PyInstaller **onedir then
+  onefile** (serial; distinct onefile output name). macOS onefile omits
+  ``--windowed`` (PyInstaller deprecation). Pin ``pyinstaller==6.22.2`` and
+  ``tkface==0.2.3`` (``--collect-submodules tkface`` for flagship DPI).
+  Onedir asserts ``tkwry._core``; no GUI
+  (``scripts/check_freeze_artifact.py``)
 
 ## [0.1.8] - 2026-09-06
 
@@ -1122,6 +1127,7 @@ eval, macOS IME / import-order / DevTools private APIs, Notebook `ready`≠map.
 - **DevTools** — uses private APIs on macOS; avoid in App Store release builds
 - Drag-and-drop targets the WebView region only (not arbitrary Tk widgets)
 
+[0.1.9]: https://github.com/mashu3/tkwry/releases/tag/v0.1.9
 [0.1.8]: https://github.com/mashu3/tkwry/releases/tag/v0.1.8
 [0.1.7]: https://github.com/mashu3/tkwry/releases/tag/v0.1.7
 [0.1.6]: https://github.com/mashu3/tkwry/releases/tag/v0.1.6
