@@ -4117,7 +4117,11 @@ class BrowserApp:
 
         @chrome.expose
         def url_editing(active: bool = False) -> None:
+            was = self._url_editing
             self._url_editing = bool(active)
+            # Catch up toolbar state after a refresh pause while typing in #url.
+            if was and not self._url_editing:
+                self.push_chrome_state()
 
         @chrome.expose
         def run_shortcut(name: str = "") -> None:
@@ -4358,7 +4362,11 @@ class BrowserApp:
     def _schedule_chrome_refresh(self) -> None:
         if not self._alive():
             return
-        self.push_chrome_state()
+        # While the URL field owns focus, skip emit("state") — tab-strip DOM
+        # updates in the same chrome WKWebView contended with caret paint.
+        # Event-driven push_chrome_state() (nav / tabs) still runs.
+        if not self._url_editing:
+            self.push_chrome_state()
         epoch = self._ui_epoch
 
         def _tick() -> None:

@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - macOS: Web-owned keyboard uses a wakeup ``createfilehandler`` plus a ~250ms
   peel heartbeat (not a 16ms poll); key-guard prefers the web-input cache and
   de-dupes ``KeyPress``+``BackSpace`` on the same event serial
+- Flagship ``tkwry_browser``: pause the 350ms chrome ``emit("state")`` refresh
+  while the URL bar is focused (same-WK tab-strip paint contended with typing)
 
 ### Docs
 
