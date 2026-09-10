@@ -189,7 +189,7 @@ a true positive. Integration smoke:
 Start / complete wrap wry's download handlers. Cancel **before** the
 transfer starts with `on_download` returning `False` / `None` (or deny via
 `download_allow` / `untrusted`). There is **no** mid-flight abort,
-pause/resume, or progress % in wry **0.56.1** — tkwry does **not** invent
+pause/resume, or progress % in wry **0.57.0** — tkwry does **not** invent
 `cancel_download()` / progress callbacks. `in_flight_downloads` is
 observational (starts that passed the policy hook until complete). See
 [Usage](usage.md#navigation--lifecycle-callbacks) and
@@ -310,7 +310,7 @@ does not turn JS off). Create-only; `eval_js` / init scripts need JS on.
 ## Autoplay (create-time)
 
 `WebView(..., autoplay=True)` maps to wry `with_autoplay` (default
-**`True`**, same as wry 0.56). Media may start without a user gesture.
+**`True`**, same as wry 0.57). Media may start without a user gesture.
 `autoplay=False` keeps the engine's gesture requirement.
 
 This is **not** `permission_handler` / `PermissionKind.Autoplay` (a
@@ -353,7 +353,7 @@ before `tk.Tk()` (above).
 
 ## Cookies / browsing data
 
-wry 0.56 exposes five WebView surfaces; tkwry wraps all of them (Tk thread,
+wry 0.57 exposes five WebView surfaces; tkwry wraps all of them (Tk thread,
 after ready). **Never log cookie values** (`Cookie.__repr__` omits `value`).
 
 | API | Role |
@@ -380,7 +380,7 @@ See [Usage — Shared session](usage.md#shared-session-websession) and
 
 ## Screenshot
 
-wry **0.56.1** has no `WebView` screenshot / capture method
+wry **0.57.0** has no `WebView` screenshot / capture method
 ([PR #1674](https://github.com/tauri-apps/wry/pull/1674) is still open).
 tkwry does **not** add `screenshot()` / `capture()`, and does not ship a
 JS visible-region helper. When wry exposes capture, wrap it the same way as
@@ -388,7 +388,7 @@ JS visible-region helper. When wry exposes capture, wrap it the same way as
 
 ## Find in page
 
-wry **0.56.1** has no find-in-page API
+wry **0.57.0** has no find-in-page API
 ([wry#585](https://github.com/tauri-apps/wry/issues/585);
 [PR #593](https://github.com/tauri-apps/wry/pull/593) did not ship).
 tkwry does **not** add `find` / `find_next` / `find_previous` /

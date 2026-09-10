@@ -3,7 +3,7 @@
 How tkwry uses [wry](https://github.com/tauri-apps/wry) for native WebView
 embedding, and which concerns stay in the Tk bridge.
 
-Pinned crate: **wry 0.56.1** (`Cargo.toml`). User-facing OS notes stay short in
+Pinned crate: **wry 0.57.0** (`Cargo.toml`). User-facing OS notes stay short in
 [platforms.md](platforms.md); this page is the ownership / wrap map for
 contributors.
 

@@ -1971,7 +1971,7 @@ class WebView(WebViewRpcMixin):
 
         Fire-and-forget: wry shows the system dialog and does not report
         success, cancel, or a PDF. There is no return value and no
-        ``print_to_pdf`` (wry 0.56.1 has none — see platform notes).
+        ``print_to_pdf`` (wry 0.57.0 has none — see platform notes).
         Window title / icon / geometry belong on the host
         :class:`tkinter.Toplevel`, not this method.
 

@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Bump wry ``0.56.1`` → ``0.57.0`` (MSRV 1.85; Windows crate stack drops
+  Windows 7; ``window.ipc`` is injected only when an IPC handler is set —
+  tkwry already passes ``with_ipc=False`` for ``untrusted``). Screenshot,
+  find-in-page, ``print_to_pdf``, and download progress % remain upstream
+  gaps ([wry#1674](https://github.com/tauri-apps/wry/pull/1674),
+  [wry#585](https://github.com/tauri-apps/wry/issues/585),
+  [wry#707](https://github.com/tauri-apps/wry/issues/707))
+
 ## [0.1.9] - 2026-09-10
 
 Post-0.1.8 defect sweep, public API unify (handler shapes and naming),
